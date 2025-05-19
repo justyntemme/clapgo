@@ -3,7 +3,7 @@ package main
 /*
 #include <stdint.h>
 #include <stdbool.h>
-#include "../../../include/clap/include/clap/clap.h"
+#include "../../include/clap/include/clap/clap.h"
 
 // Forward declarations of the functions we'll implement in Go
 uint32_t GetPluginCount();

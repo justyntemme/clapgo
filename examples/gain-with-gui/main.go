@@ -8,7 +8,7 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/yourusername/clapgo/src/goclap"
+	"github.com/justyntemme/clapgo/src/goclap"
 )
 
 // Export Go plugin functionality
@@ -22,9 +22,9 @@ func init() {
 		ID:          "com.clapgo.gain.gui",
 		Name:        "Gain with GUI",
 		Vendor:      "ClapGo",
-		URL:         "https://github.com/yourusername/clapgo",
-		ManualURL:   "https://github.com/yourusername/clapgo",
-		SupportURL:  "https://github.com/yourusername/clapgo/issues",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
 		Version:     "1.0.0",
 		Description: "A gain plugin with GUI support using ClapGo",
 		Features:    []string{"audio-effect", "stereo", "mono", "gui"},

@@ -5,7 +5,7 @@ package main
 // #include <stdlib.h>
 import "C"
 import (
-	"github.com/yourusername/clapgo/src/goclap"
+	"github.com/justyntemme/clapgo/src/goclap"
 	"math"
 	"unsafe"
 )
@@ -21,9 +21,9 @@ func init() {
 		ID:          "com.clapgo.gain",
 		Name:        "Simple Gain",
 		Vendor:      "ClapGo",
-		URL:         "https://github.com/yourusername/clapgo",
-		ManualURL:   "https://github.com/yourusername/clapgo",
-		SupportURL:  "https://github.com/yourusername/clapgo/issues",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
 		Version:     "1.0.0",
 		Description: "A simple gain plugin using ClapGo",
 		Features:    []string{"audio-effect", "stereo", "mono"},
