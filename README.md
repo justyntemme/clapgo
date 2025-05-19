@@ -27,38 +27,60 @@ This allows audio plugin developers to write CLAP plugins in Go while maintainin
 
 ## Building a Plugin
 
-The easiest way to create a new plugin is to use the Makefile's `new` target:
+We use the CLAP build system based on CMake to build our plugins.
+
+### Building Plugins
 
 ```bash
-make new NAME=myplugin
+# Configure and build using our build script
+./build.sh
+
+# Additional build options
+./build.sh --debug   # Build in debug mode
+./build.sh --clean   # Clean build before building
+./build.sh --test    # Run tests after building
+
+# Or use CMake directly
+cmake --preset linux  # or macos, windows
+cmake --build --preset linux
+```
+
+### Creating a New Plugin
+
+To create a new plugin, use our helper script:
+
+```bash
+./create_plugin.sh myplugin
 ```
 
 This will:
+1. Create a new directory under `examples/` with your plugin name
+2. Copy the structure from the gain example
+3. Update classes and identifiers appropriately
 
-1. Create a new plugin directory in `examples/myplugin`
-2. Set up a template plugin based on the gain example
-3. Configure the Makefile to build your plugin
-
-Then you can build your plugin with:
-
-```bash
-make myplugin
-```
-
-Alternatively, you can manually:
-
-1. Create a new Go plugin in the `examples` directory
-2. Implement the `goclap.AudioProcessor` interface
-3. Register your plugin using `goclap.RegisterPlugin()`
-4. Build with `make yourplugin`
+New plugins in the examples directory are automatically detected and built by CMake.
 
 ## Example Plugin
 
 See the `examples/gain` directory for a simple gain plugin example.
 
-## Installation
+## Testing and Installation
 
-After building, copy the `.clap` files from the `dist` directory to your DAW's plugin directory:
+After building, you can test if the plugin is valid:
+
+```bash
+./test_plugin.sh
+```
+
+This will check the dynamic dependencies and verify the CLAP entry point.
+
+To install the plugins to your system's plugin directories:
+
+```bash
+./build.sh --install
+```
+
+This will copy the `.clap` files to the appropriate location for your platform:
 
 - Linux: `~/.clap` or `/usr/lib/clap`
 - Windows: `%COMMONPROGRAMFILES%\CLAP` or `%LOCALAPPDATA%\Programs\Common\CLAP`

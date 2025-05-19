@@ -10,10 +10,12 @@ Welcome to the ClapGo documentation. This guide will help you understand how to 
 
 ### Architecture
 - [Architecture Overview](architecture/overview.md) - High-level architecture explanation
+- [CMake Integration](cmake-integration.md) - Details on CMake build system integration
 
 ### Reference
 - [API Reference](api-reference.md) - ClapGo API details
 - [Implementation Guide](implementation-guide.md) - Guide for implementing remaining features
+- [Roadmap](roadmap.md) - Future development plans
 
 ## What is CLAP?
 
