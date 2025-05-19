@@ -2,6 +2,13 @@
 
 A framework for building [CLAP](https://github.com/free-audio/clap) audio plugins using Go.
 
+## Features
+
+- Build CLAP-compatible audio plugins using Go
+- Seamless C-Go interoperability via CGo
+- Optional GUI support using Qt/QML
+- Easy build and installation process
+
 ## Architecture
 
 ClapGo uses CGo to create a bridge between:
@@ -15,9 +22,11 @@ This allows audio plugin developers to write CLAP plugins in Go while maintainin
 
 ```
 .
-├── dist            # Build artifacts
-├── docs             # Documentation
+├── build            # Build artifacts
+├── cmake            # CMake helper scripts
 ├── examples         # Example plugins
+│   ├── gain         # Simple gain plugin
+│   └── gain-with-gui # Gain plugin with GUI support
 ├── include
 │   └── clap         # CLAP API headers (submodule)
 ├── src
@@ -27,64 +36,56 @@ This allows audio plugin developers to write CLAP plugins in Go while maintainin
 
 ## Building a Plugin
 
-We use the CLAP build system based on CMake to build our plugins.
+We use CMake to build our plugins.
 
 ### Building Plugins
 
 ```bash
-# Configure and build using our build script
-./build.sh
-
-# Additional build options
-./build.sh --debug   # Build in debug mode
-./build.sh --clean   # Clean build before building
-./build.sh --test    # Run tests after building
+# Configure and build using our install script
+./install.sh         # Install for current user
+./install.sh --system # Install system-wide (requires sudo)
+./install.sh --gui   # Build with GUI support (requires Qt6)
 
 # Or use CMake directly
-cmake --preset linux  # or macos, windows
-cmake --build --preset linux
+cmake -B build
+cmake --build build
 ```
 
 ### Creating a New Plugin
 
-To create a new plugin, use our helper script:
+To create a new plugin:
 
-```bash
-./create_plugin.sh myplugin
-```
-
-This will:
 1. Create a new directory under `examples/` with your plugin name
-2. Copy the structure from the gain example
-3. Update classes and identifiers appropriately
+2. Copy the structure from one of the existing examples
+3. Update Go package name, plugin ID, and metadata in your implementation
 
-New plugins in the examples directory are automatically detected and built by CMake.
+New plugins in the examples directory are automatically detected and built by our build system.
 
-## Example Plugin
+## Example Plugins
 
-See the `examples/gain` directory for a simple gain plugin example.
+- **Gain**: A simple gain plugin example in `examples/gain`
+- **Gain with GUI**: A gain plugin with GUI support in `examples/gain-with-gui`
 
-## Testing and Installation
+## Installation
 
-After building, you can test if the plugin is valid:
-
-```bash
-./test_plugin.sh
-```
-
-This will check the dynamic dependencies and verify the CLAP entry point.
-
-To install the plugins to your system's plugin directories:
+The installation script provides a convenient way to build and install plugins:
 
 ```bash
-./build.sh --install
+# Install to user directory (~/.clap)
+./install.sh
+
+# Install system-wide (/usr/lib/clap)
+./install.sh --system
+
+# Build with GUI support
+./install.sh --gui
 ```
 
 This will copy the `.clap` files to the appropriate location for your platform:
 
-- Linux: `~/.clap` or `/usr/lib/clap`
-- Windows: `%COMMONPROGRAMFILES%\CLAP` or `%LOCALAPPDATA%\Programs\Common\CLAP`
-- macOS: `/Library/Audio/Plug-Ins/CLAP` or `~/Library/Audio/Plug-Ins/CLAP`
+- Linux: `~/.clap` (user) or `/usr/lib/clap` (system-wide)
+- Windows: `%APPDATA%\CLAP` (user) or `C:\Program Files\Common Files\CLAP` (system-wide)
+- macOS: `~/Library/Audio/Plug-Ins/CLAP` (user) or `/Library/Audio/Plug-Ins/CLAP` (system-wide)
 
 ## Documentation
 

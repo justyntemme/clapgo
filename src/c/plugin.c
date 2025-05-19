@@ -270,6 +270,15 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     // In a real implementation, this would call a Go function via CGO
     printf("Getting extension for plugin %s: %s\n", plugin->desc->name, id);
     
+    // Check if we have GUI extension support via the overridden function
+    #ifdef CLAPGO_GUI_SUPPORT
+    // Check if the symbol is available at runtime
+    extern const void* clapgo_plugin_get_extension_with_gui(const clap_plugin_t* plugin, const char* id);
+    if (clapgo_plugin_get_extension_with_gui) {
+        return clapgo_plugin_get_extension_with_gui(plugin, id);
+    }
+    #endif
+    
     return NULL;  // Placeholder
 }
 

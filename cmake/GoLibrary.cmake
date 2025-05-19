@@ -136,10 +136,5 @@ function(add_clap_plugin TARGET_NAME)
         )
     endif()
     
-    # Installation rules
-    install(TARGETS ${TARGET_NAME}
-        RUNTIME DESTINATION plugins COMPONENT Plugins
-        LIBRARY DESTINATION plugins COMPONENT Plugins
-        BUNDLE DESTINATION plugins COMPONENT Plugins
-    )
+    # No installation rules here - handled by main CMakeLists.txt
 endfunction()
