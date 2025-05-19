@@ -15,8 +15,7 @@ This allows audio plugin developers to write CLAP plugins in Go while maintainin
 
 ```
 .
-├── cmd
-│   └── build        # Build scripts
+├── dist            # Build artifacts
 ├── docs             # Documentation
 ├── examples         # Example plugins
 ├── include
@@ -28,14 +27,30 @@ This allows audio plugin developers to write CLAP plugins in Go while maintainin
 
 ## Building a Plugin
 
+The easiest way to create a new plugin is to use the Makefile's `new` target:
+
+```bash
+make new NAME=myplugin
+```
+
+This will:
+
+1. Create a new plugin directory in `examples/myplugin`
+2. Set up a template plugin based on the gain example
+3. Configure the Makefile to build your plugin
+
+Then you can build your plugin with:
+
+```bash
+make myplugin
+```
+
+Alternatively, you can manually:
+
 1. Create a new Go plugin in the `examples` directory
 2. Implement the `goclap.AudioProcessor` interface
 3. Register your plugin using `goclap.RegisterPlugin()`
-4. Use the build tool to compile and package your plugin:
-
-```bash
-make examples
-```
+4. Build with `make yourplugin`
 
 ## Example Plugin
 
@@ -49,10 +64,11 @@ After building, copy the `.clap` files from the `dist` directory to your DAW's p
 - Windows: `%COMMONPROGRAMFILES%\CLAP` or `%LOCALAPPDATA%\Programs\Common\CLAP`
 - macOS: `/Library/Audio/Plug-Ins/CLAP` or `~/Library/Audio/Plug-Ins/CLAP`
 
-## Usage
+## Documentation
 
-See the [documentation](docs/usage.md) for detailed usage instructions.
+See the [documentation](docs/README.md) for detailed usage instructions, architecture overview, API reference, and implementation details.
 
 ## License
 
 MIT License
+
