@@ -37,6 +37,137 @@ const CLAP_EXPORT clap_plugin_entry_t clap_entry = {
 static const clap_plugin_descriptor_t **plugin_descriptors = NULL;
 static uint32_t plugin_count = 0;
 
+// Track which descriptor fields are dynamically allocated
+typedef struct {
+    bool id;
+    bool name;
+    bool vendor;
+    bool url;
+    bool manual_url;
+    bool support_url;
+    bool version;
+    bool description;
+    bool features_array;
+    bool features_strings;
+} descriptor_allocated_fields_t;
+
+// Array to track allocated fields for each descriptor
+static descriptor_allocated_fields_t *descriptor_allocations = NULL;
+
+// Create a deep copy of a string, returning NULL if input is NULL
+static char* deep_copy_string(const char* str) {
+    if (!str) return NULL;
+    return strdup(str);
+}
+
+// Helper function to free a descriptor's dynamically allocated fields
+static void free_descriptor_fields(const clap_plugin_descriptor_t* descriptor, descriptor_allocated_fields_t* alloc_info) {
+    if (!descriptor || !alloc_info) return;
+    
+    // Free all string fields that were allocated
+    if (alloc_info->id && descriptor->id) free((void*)descriptor->id);
+    if (alloc_info->name && descriptor->name) free((void*)descriptor->name);
+    if (alloc_info->vendor && descriptor->vendor) free((void*)descriptor->vendor);
+    if (alloc_info->url && descriptor->url) free((void*)descriptor->url);
+    if (alloc_info->manual_url && descriptor->manual_url) free((void*)descriptor->manual_url);
+    if (alloc_info->support_url && descriptor->support_url) free((void*)descriptor->support_url);
+    if (alloc_info->version && descriptor->version) free((void*)descriptor->version);
+    if (alloc_info->description && descriptor->description) free((void*)descriptor->description);
+    
+    // Free features array and its contents if allocated
+    if (alloc_info->features_array && descriptor->features) {
+        if (alloc_info->features_strings) {
+            // Free each feature string
+            for (int i = 0; descriptor->features[i] != NULL; i++) {
+                free((void*)descriptor->features[i]);
+            }
+        }
+        free((void*)descriptor->features);
+    }
+}
+
+// Helper function to create a deep copy of a descriptor
+static clap_plugin_descriptor_t* create_descriptor_copy(const clap_plugin_descriptor_t* src, 
+                                                       descriptor_allocated_fields_t* alloc_info) {
+    if (!src) return NULL;
+    
+    // Initialize the allocation tracking
+    memset(alloc_info, 0, sizeof(descriptor_allocated_fields_t));
+    
+    // Allocate the descriptor
+    clap_plugin_descriptor_t* desc = calloc(1, sizeof(clap_plugin_descriptor_t));
+    if (!desc) return NULL;
+    
+    // Copy the version info
+    desc->clap_version = src->clap_version;
+    
+    // Create deep copies of all string fields
+    desc->id = deep_copy_string(src->id);
+    alloc_info->id = (desc->id != NULL);
+    
+    desc->name = deep_copy_string(src->name);
+    alloc_info->name = (desc->name != NULL);
+    
+    desc->vendor = deep_copy_string(src->vendor);
+    alloc_info->vendor = (desc->vendor != NULL);
+    
+    desc->url = deep_copy_string(src->url);
+    alloc_info->url = (desc->url != NULL);
+    
+    desc->manual_url = deep_copy_string(src->manual_url);
+    alloc_info->manual_url = (desc->manual_url != NULL);
+    
+    desc->support_url = deep_copy_string(src->support_url);
+    alloc_info->support_url = (desc->support_url != NULL);
+    
+    desc->version = deep_copy_string(src->version);
+    alloc_info->version = (desc->version != NULL);
+    
+    desc->description = deep_copy_string(src->description);
+    alloc_info->description = (desc->description != NULL);
+    
+    // Copy features array if present
+    if (src->features) {
+        // Count the number of features
+        int feature_count = 0;
+        while (src->features[feature_count] != NULL) {
+            feature_count++;
+        }
+        
+        // Allocate the array (+1 for NULL terminator)
+        const char** features = calloc(feature_count + 1, sizeof(char*));
+        if (!features) {
+            // Failed to allocate, clean up and return NULL
+            free_descriptor_fields(desc, alloc_info);
+            free(desc);
+            return NULL;
+        }
+        
+        alloc_info->features_array = true;
+        alloc_info->features_strings = true;
+        
+        // Copy each feature string
+        for (int i = 0; i < feature_count; i++) {
+            features[i] = deep_copy_string(src->features[i]);
+            if (!features[i] && src->features[i]) {
+                // Failed to copy a feature, clean up and return NULL
+                for (int j = 0; j < i; j++) {
+                    free((void*)features[j]);
+                }
+                free(features);
+                free_descriptor_fields(desc, alloc_info);
+                free(desc);
+                return NULL;
+            }
+        }
+        
+        // Set the features array
+        desc->features = features;
+    }
+    
+    return desc;
+}
+
 // Initialize the Go runtime and plugin environment
 bool clapgo_init(const char* plugin_path) {
     // This function would need to initialize the Go runtime
@@ -45,11 +176,42 @@ bool clapgo_init(const char* plugin_path) {
     
     // Get the number of plugins and allocate the descriptor array
     plugin_count = clapgo_get_plugin_count();
-    plugin_descriptors = calloc(plugin_count, sizeof(clap_plugin_descriptor_t*));
+    if (plugin_count == 0) {
+        printf("No plugins found\n");
+        return false;
+    }
     
-    // Load descriptors for all plugins
+    // Allocate the descriptor array
+    plugin_descriptors = calloc(plugin_count, sizeof(clap_plugin_descriptor_t*));
+    if (!plugin_descriptors) {
+        printf("Failed to allocate plugin descriptor array\n");
+        return false;
+    }
+    
+    // Allocate the descriptor allocations array
+    descriptor_allocations = calloc(plugin_count, sizeof(descriptor_allocated_fields_t));
+    if (!descriptor_allocations) {
+        printf("Failed to allocate descriptor allocations array\n");
+        free(plugin_descriptors);
+        plugin_descriptors = NULL;
+        plugin_count = 0;
+        return false;
+    }
+    
+    // Create deep copies of all plugin descriptors
     for (uint32_t i = 0; i < plugin_count; i++) {
-        plugin_descriptors[i] = clapgo_get_plugin_descriptor(i);
+        const clap_plugin_descriptor_t* src_desc = clapgo_get_plugin_descriptor(i);
+        if (!src_desc) {
+            printf("Failed to get plugin descriptor for index %u\n", i);
+            continue;
+        }
+        
+        plugin_descriptors[i] = (const clap_plugin_descriptor_t*)create_descriptor_copy(
+            src_desc, &descriptor_allocations[i]);
+        
+        if (!plugin_descriptors[i]) {
+            printf("Failed to create descriptor copy for plugin %u\n", i);
+        }
     }
     
     return true;
@@ -59,12 +221,26 @@ bool clapgo_init(const char* plugin_path) {
 void clapgo_deinit(void) {
     printf("Deinitializing ClapGo plugin\n");
     
-    // Free plugin descriptors
-    if (plugin_descriptors) {
-        // Note: In a real implementation we would need to free each descriptor too
-        // if they were dynamically allocated
+    // Free plugin descriptors and their fields
+    if (plugin_descriptors && descriptor_allocations) {
+        for (uint32_t i = 0; i < plugin_count; i++) {
+            if (plugin_descriptors[i]) {
+                // Free all dynamically allocated fields
+                free_descriptor_fields(plugin_descriptors[i], &descriptor_allocations[i]);
+                
+                // Free the descriptor itself
+                free((void*)plugin_descriptors[i]);
+                plugin_descriptors[i] = NULL;
+            }
+        }
+        
+        // Free the descriptor array
         free(plugin_descriptors);
         plugin_descriptors = NULL;
+        
+        // Free the allocations array
+        free(descriptor_allocations);
+        descriptor_allocations = NULL;
     }
     
     plugin_count = 0;
