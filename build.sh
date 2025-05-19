@@ -99,6 +99,11 @@ cmake --preset "$cmake_preset" $cmake_options
 echo "Building plugins..."
 cmake --build --preset "$cmake_preset" --config $build_config -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
+# Build the shared Go library
+echo "Building libgoclap.so shared library..."
+mkdir -p $build_dir/src
+CGO_ENABLED=1 go build -buildmode=c-shared -o $build_dir/src/libgoclap.so ./cmd/wrapper
+
 # Test if requested
 if $test; then
     echo "Testing plugins..."

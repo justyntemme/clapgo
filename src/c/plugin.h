@@ -5,6 +5,29 @@
 #include <stdint.h>
 #include "../../include/clap/include/clap/clap.h"
 
+// Platform detection
+#if defined(_WIN32) || defined(_WIN64)
+    #define CLAPGO_OS_WINDOWS 1
+    #include <windows.h>
+    typedef HMODULE clapgo_library_t;
+    typedef FARPROC clapgo_symbol_t;
+#elif defined(__APPLE__)
+    #define CLAPGO_OS_MACOS 1
+    #include <dlfcn.h>
+    typedef void* clapgo_library_t;
+    typedef void* clapgo_symbol_t;
+#else // Linux and others
+    #define CLAPGO_OS_LINUX 1
+    #include <dlfcn.h>
+    typedef void* clapgo_library_t;
+    typedef void* clapgo_symbol_t;
+#endif
+
+// Version constants for compatibility checks
+#define CLAPGO_API_VERSION_MAJOR 0
+#define CLAPGO_API_VERSION_MINOR 1
+#define CLAPGO_API_VERSION_PATCH 0
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +37,9 @@ typedef struct go_plugin_data {
     void* go_instance;
     const clap_plugin_descriptor_t* descriptor;
 } go_plugin_data_t;
+
+// Library handle for the Go shared library
+extern clapgo_library_t clapgo_lib;
 
 // Initialize the Go runtime and plugin environment
 bool clapgo_init(const char* plugin_path);
@@ -64,6 +90,47 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
 
 // Execute on main thread
 void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin);
+
+// Shared library loading functions
+bool clapgo_load_library(const char* path);
+void clapgo_unload_library(void);
+clapgo_symbol_t clapgo_get_symbol(const char* name);
+
+// Function pointer types for Go exports
+typedef uint32_t (*clapgo_get_plugin_count_func)(void);
+typedef const clap_plugin_descriptor_t* (*clapgo_get_plugin_descriptor_func)(uint32_t index);
+typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
+
+typedef bool (*clapgo_plugin_init_func)(void* plugin);
+typedef void (*clapgo_plugin_destroy_func)(void* plugin);
+typedef bool (*clapgo_plugin_activate_func)(void* plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames);
+typedef void (*clapgo_plugin_deactivate_func)(void* plugin);
+typedef bool (*clapgo_plugin_start_processing_func)(void* plugin);
+typedef void (*clapgo_plugin_stop_processing_func)(void* plugin);
+typedef void (*clapgo_plugin_reset_func)(void* plugin);
+typedef clap_process_status (*clapgo_plugin_process_func)(void* plugin, const clap_process_t* process);
+typedef const void* (*clapgo_plugin_get_extension_func)(void* plugin, const char* id);
+typedef void (*clapgo_plugin_on_main_thread_func)(void* plugin);
+
+// Version function type
+typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
+
+// External function pointers
+extern clapgo_get_plugin_count_func go_get_plugin_count;
+extern clapgo_get_plugin_descriptor_func go_get_plugin_descriptor;
+extern clapgo_create_plugin_func go_create_plugin;
+extern clapgo_get_version_func go_get_version;
+
+extern clapgo_plugin_init_func go_plugin_init;
+extern clapgo_plugin_destroy_func go_plugin_destroy;
+extern clapgo_plugin_activate_func go_plugin_activate;
+extern clapgo_plugin_deactivate_func go_plugin_deactivate;
+extern clapgo_plugin_start_processing_func go_plugin_start_processing;
+extern clapgo_plugin_stop_processing_func go_plugin_stop_processing;
+extern clapgo_plugin_reset_func go_plugin_reset;
+extern clapgo_plugin_process_func go_plugin_process;
+extern clapgo_plugin_get_extension_func go_plugin_get_extension;
+extern clapgo_plugin_on_main_thread_func go_plugin_on_main_thread;
 
 #ifdef __cplusplus
 }

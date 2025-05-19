@@ -2,9 +2,162 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <libgen.h>  // For dirname()
 
-// Import the Go shared library functions
-// These are defined in the Go code and exported through CGO
+// Global library handle
+clapgo_library_t clapgo_lib = NULL;
+
+// Function pointers to Go exported functions
+clapgo_get_plugin_count_func go_get_plugin_count = NULL;
+clapgo_get_plugin_descriptor_func go_get_plugin_descriptor = NULL;
+clapgo_create_plugin_func go_create_plugin = NULL;
+clapgo_get_version_func go_get_version = NULL;
+
+clapgo_plugin_init_func go_plugin_init = NULL;
+clapgo_plugin_destroy_func go_plugin_destroy = NULL;
+clapgo_plugin_activate_func go_plugin_activate = NULL;
+clapgo_plugin_deactivate_func go_plugin_deactivate = NULL;
+clapgo_plugin_start_processing_func go_plugin_start_processing = NULL;
+clapgo_plugin_stop_processing_func go_plugin_stop_processing = NULL;
+clapgo_plugin_reset_func go_plugin_reset = NULL;
+clapgo_plugin_process_func go_plugin_process = NULL;
+clapgo_plugin_get_extension_func go_plugin_get_extension = NULL;
+clapgo_plugin_on_main_thread_func go_plugin_on_main_thread = NULL;
+
+// Platform-specific shared library loading implementation
+bool clapgo_load_library(const char* path) {
+    if (clapgo_lib != NULL) {
+        // Library already loaded
+        return true;
+    }
+    
+    if (path == NULL) {
+        fprintf(stderr, "Error: Cannot load library, path is NULL\n");
+        return false;
+    }
+    
+#if defined(CLAPGO_OS_WINDOWS)
+    // Windows implementation
+    clapgo_lib = LoadLibraryA(path);
+    if (clapgo_lib == NULL) {
+        DWORD error = GetLastError();
+        fprintf(stderr, "Error: Failed to load library: %s (error code: %lu)\n", path, error);
+        return false;
+    }
+#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
+    // macOS and Linux implementation (both use dlopen)
+    clapgo_lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+    if (clapgo_lib == NULL) {
+        fprintf(stderr, "Error: Failed to load library: %s (%s)\n", path, dlerror());
+        return false;
+    }
+#else
+    #error "Unsupported platform"
+#endif
+
+    return true;
+}
+
+void clapgo_unload_library(void) {
+    if (clapgo_lib == NULL) {
+        return;
+    }
+    
+#if defined(CLAPGO_OS_WINDOWS)
+    FreeLibrary(clapgo_lib);
+#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
+    dlclose(clapgo_lib);
+#endif
+
+    clapgo_lib = NULL;
+    
+    // Reset all function pointers
+    go_get_plugin_count = NULL;
+    go_get_plugin_descriptor = NULL;
+    go_create_plugin = NULL;
+    go_get_version = NULL;
+    
+    go_plugin_init = NULL;
+    go_plugin_destroy = NULL;
+    go_plugin_activate = NULL;
+    go_plugin_deactivate = NULL;
+    go_plugin_start_processing = NULL;
+    go_plugin_stop_processing = NULL;
+    go_plugin_reset = NULL;
+    go_plugin_process = NULL;
+    go_plugin_get_extension = NULL;
+    go_plugin_on_main_thread = NULL;
+}
+
+clapgo_symbol_t clapgo_get_symbol(const char* name) {
+    if (clapgo_lib == NULL || name == NULL) {
+        return NULL;
+    }
+    
+    clapgo_symbol_t symbol = NULL;
+    
+#if defined(CLAPGO_OS_WINDOWS)
+    symbol = GetProcAddress(clapgo_lib, name);
+    if (symbol == NULL) {
+        DWORD error = GetLastError();
+        fprintf(stderr, "Error: Failed to get symbol: %s (error code: %lu)\n", name, error);
+    }
+#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
+    // Clear any existing errors
+    dlerror();
+    
+    symbol = dlsym(clapgo_lib, name);
+    const char* error = dlerror();
+    if (error != NULL) {
+        fprintf(stderr, "Error: Failed to get symbol: %s (%s)\n", name, error);
+        symbol = NULL;
+    }
+#endif
+
+    return symbol;
+}
+
+// Helper function to load all required symbols from the Go shared library
+static bool clapgo_load_symbols(void) {
+    if (clapgo_lib == NULL) {
+        fprintf(stderr, "Error: Cannot load symbols, library not loaded\n");
+        return false;
+    }
+    
+    // Load core plugin functions
+    go_get_plugin_count = (clapgo_get_plugin_count_func)clapgo_get_symbol("GetPluginCount");
+    go_get_plugin_descriptor = (clapgo_get_plugin_descriptor_func)clapgo_get_symbol("GetPluginInfo");
+    go_create_plugin = (clapgo_create_plugin_func)clapgo_get_symbol("CreatePlugin");
+    go_get_version = (clapgo_get_version_func)clapgo_get_symbol("GetVersion");
+    
+    // Load plugin callback functions
+    go_plugin_init = (clapgo_plugin_init_func)clapgo_get_symbol("GoInit");
+    go_plugin_destroy = (clapgo_plugin_destroy_func)clapgo_get_symbol("GoDestroy");
+    go_plugin_activate = (clapgo_plugin_activate_func)clapgo_get_symbol("GoActivate");
+    go_plugin_deactivate = (clapgo_plugin_deactivate_func)clapgo_get_symbol("GoDeactivate");
+    go_plugin_start_processing = (clapgo_plugin_start_processing_func)clapgo_get_symbol("GoStartProcessing");
+    go_plugin_stop_processing = (clapgo_plugin_stop_processing_func)clapgo_get_symbol("GoStopProcessing");
+    go_plugin_reset = (clapgo_plugin_reset_func)clapgo_get_symbol("GoReset");
+    go_plugin_process = (clapgo_plugin_process_func)clapgo_get_symbol("GoProcess");
+    go_plugin_get_extension = (clapgo_plugin_get_extension_func)clapgo_get_symbol("GoGetExtension");
+    go_plugin_on_main_thread = (clapgo_plugin_on_main_thread_func)clapgo_get_symbol("GoOnMainThread");
+    
+    // Check if we have all required functions
+    if (!go_get_plugin_count || !go_get_plugin_descriptor || !go_create_plugin) {
+        fprintf(stderr, "Error: Required symbols not found in library\n");
+        return false;
+    }
+    
+    // These functions are essential for plugin operation
+    if (!go_plugin_init || !go_plugin_destroy || !go_plugin_activate || 
+        !go_plugin_deactivate || !go_plugin_start_processing || 
+        !go_plugin_stop_processing || !go_plugin_reset || !go_plugin_process) {
+        fprintf(stderr, "Error: Required plugin callback symbols not found in library\n");
+        return false;
+    }
+    
+    return true;
+}
 
 // Plugin factory implementation
 static uint32_t clapgo_factory_get_plugin_count(const clap_plugin_factory_t *factory);
@@ -168,41 +321,229 @@ static clap_plugin_descriptor_t* create_descriptor_copy(const clap_plugin_descri
     return desc;
 }
 
+// Helper function to check if a file exists
+static bool file_exists(const char* path) {
+    if (!path) return false;
+    
+    FILE* file = fopen(path, "r");
+    if (file) {
+        fclose(file);
+        return true;
+    }
+    return false;
+}
+
+// Helper function to find the Go shared library
+static char* find_go_shared_library(const char* plugin_path) {
+    if (!plugin_path) {
+        fprintf(stderr, "Error: Plugin path is NULL\n");
+        return NULL;
+    }
+    
+    // Make a copy of the plugin path so we can modify it
+    char* path_copy = strdup(plugin_path);
+    if (!path_copy) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        return NULL;
+    }
+    
+    // Get the directory of the plugin
+    char* dir = dirname(path_copy);
+    if (!dir) {
+        fprintf(stderr, "Error: Failed to get directory from plugin path\n");
+        free(path_copy);
+        return NULL;
+    }
+    
+    // Allocate buffer for the Go shared library path
+    char* lib_path = NULL;
+    size_t path_len = strlen(dir) + 64; // Extra space for filename and extension
+    
+    lib_path = malloc(path_len);
+    if (!lib_path) {
+        fprintf(stderr, "Error: Memory allocation failed\n");
+        free(path_copy);
+        return NULL;
+    }
+    
+    // Define library names for each platform
+#if defined(CLAPGO_OS_WINDOWS)
+    const char* lib_name = "goclap.dll";
+    const char* lib_prefix = "";
+    const char* path_sep = "\\";
+#elif defined(CLAPGO_OS_MACOS)
+    const char* lib_name = "libgoclap.dylib";  // Standard name with lib prefix
+    const char* lib_prefix = "";
+    const char* path_sep = "/";
+#else // Linux
+    const char* lib_name = "libgoclap.so";  // Standard name with lib prefix
+    const char* lib_prefix = "";
+    const char* path_sep = "/";
+#endif
+
+    // Try different locations in priority order:
+    
+    // 1. Same directory as the plugin
+    snprintf(lib_path, path_len, "%s%s%s", dir, path_sep, lib_name);
+    if (file_exists(lib_path)) {
+        free(path_copy);
+        return lib_path;
+    }
+    
+    // 2. Subdirectory named 'go' under the plugin directory
+    snprintf(lib_path, path_len, "%s%sgo%s%s", dir, path_sep, path_sep, lib_name);
+    if (file_exists(lib_path)) {
+        free(path_copy);
+        return lib_path;
+    }
+    
+    // 3. Parent directory of the plugin (look for shared library in the base directory)
+    char* parent_copy = strdup(dir);
+    if (parent_copy) {
+        char* parent_dir = dirname(parent_copy);
+        if (parent_dir) {
+            snprintf(lib_path, path_len, "%s%s%s", parent_dir, path_sep, lib_name);
+            if (file_exists(lib_path)) {
+                free(path_copy);
+                free(parent_copy);
+                return lib_path;
+            }
+        }
+        free(parent_copy);
+    }
+    
+    // 4. Check ~/.clap directory (common location for CLAP plugins)
+    char* home = getenv("HOME");
+    if (home) {
+        snprintf(lib_path, path_len, "%s/.clap/%s", home, lib_name);
+        if (file_exists(lib_path)) {
+            free(path_copy);
+            return lib_path;
+        }
+    }
+    
+    // 5. Predefined system locations
+#if defined(CLAPGO_OS_LINUX)
+    // Try system lib directories on Linux
+    const char* system_lib_dirs[] = {
+        "/usr/lib",
+        "/usr/lib/clap",
+        "/usr/local/lib",
+        "/usr/local/lib/clap",
+        NULL
+    };
+    
+    for (int i = 0; system_lib_dirs[i] != NULL; i++) {
+        snprintf(lib_path, path_len, "%s/%s", system_lib_dirs[i], lib_name);
+        if (file_exists(lib_path)) {
+            free(path_copy);
+            return lib_path;
+        }
+    }
+#endif
+
+    // Failed to find the library
+    fprintf(stderr, "Warning: Could not find Go shared library in any standard location\n");
+    fprintf(stderr, "Falling back to default location\n");
+    
+    // Return the default location as a fallback
+#if defined(CLAPGO_OS_WINDOWS)
+    snprintf(lib_path, path_len, "%s\\%s", dir, lib_name);
+#elif defined(CLAPGO_OS_MACOS)
+    snprintf(lib_path, path_len, "%s/%s", dir, lib_name);
+#else // Linux
+    snprintf(lib_path, path_len, "%s/%s", dir, lib_name);
+#endif
+
+    free(path_copy);
+    return lib_path;
+}
+
 // Initialize the Go runtime and plugin environment
 bool clapgo_init(const char* plugin_path) {
-    // This function would need to initialize the Go runtime
-    // In a real implementation, we might load the Go shared library here
     printf("Initializing ClapGo plugin at path: %s\n", plugin_path);
     
-    // Get the number of plugins and allocate the descriptor array
-    plugin_count = clapgo_get_plugin_count();
-    if (plugin_count == 0) {
-        printf("No plugins found\n");
+    // Find and load the Go shared library
+    char* lib_path = find_go_shared_library(plugin_path);
+    if (!lib_path) {
+        fprintf(stderr, "Error: Failed to determine Go shared library path\n");
         return false;
     }
+    
+    printf("Loading Go shared library: %s\n", lib_path);
+    
+    // Load the shared library
+    if (!clapgo_load_library(lib_path)) {
+        fprintf(stderr, "Error: Failed to load Go shared library\n");
+        free(lib_path);
+        return false;
+    }
+    
+    free(lib_path);
+    
+    // Load symbols from the shared library
+    if (!clapgo_load_symbols()) {
+        fprintf(stderr, "Error: Failed to load symbols from Go shared library\n");
+        clapgo_unload_library();
+        return false;
+    }
+    
+    // Check version compatibility if the version function is available
+    if (go_get_version != NULL) {
+        uint32_t major = 0, minor = 0, patch = 0;
+        if (go_get_version(&major, &minor, &patch)) {
+            printf("Go library version: %u.%u.%u\n", major, minor, patch);
+            
+            // Check compatibility: require same major version and at least same minor version
+            if (major != CLAPGO_API_VERSION_MAJOR || minor < CLAPGO_API_VERSION_MINOR) {
+                fprintf(stderr, "Error: Incompatible Go library version. "
+                        "Expected: %u.%u.x, Found: %u.%u.%u\n",
+                        CLAPGO_API_VERSION_MAJOR, CLAPGO_API_VERSION_MINOR,
+                        major, minor, patch);
+                clapgo_unload_library();
+                return false;
+            }
+        } else {
+            fprintf(stderr, "Warning: Failed to get Go library version\n");
+        }
+    } else {
+        fprintf(stderr, "Warning: Go library does not export version information\n");
+    }
+    
+    // Get the number of plugins and allocate the descriptor array
+    plugin_count = go_get_plugin_count();
+    if (plugin_count == 0) {
+        fprintf(stderr, "No plugins found in Go library\n");
+        clapgo_unload_library();
+        return false;
+    }
+    
+    printf("Found %u plugins in Go library\n", plugin_count);
     
     // Allocate the descriptor array
     plugin_descriptors = calloc(plugin_count, sizeof(clap_plugin_descriptor_t*));
     if (!plugin_descriptors) {
-        printf("Failed to allocate plugin descriptor array\n");
+        fprintf(stderr, "Error: Failed to allocate plugin descriptor array\n");
+        clapgo_unload_library();
         return false;
     }
     
     // Allocate the descriptor allocations array
     descriptor_allocations = calloc(plugin_count, sizeof(descriptor_allocated_fields_t));
     if (!descriptor_allocations) {
-        printf("Failed to allocate descriptor allocations array\n");
+        fprintf(stderr, "Error: Failed to allocate descriptor allocations array\n");
         free(plugin_descriptors);
         plugin_descriptors = NULL;
         plugin_count = 0;
+        clapgo_unload_library();
         return false;
     }
     
     // Create deep copies of all plugin descriptors
     for (uint32_t i = 0; i < plugin_count; i++) {
-        const clap_plugin_descriptor_t* src_desc = clapgo_get_plugin_descriptor(i);
+        const clap_plugin_descriptor_t* src_desc = go_get_plugin_descriptor(i);
         if (!src_desc) {
-            printf("Failed to get plugin descriptor for index %u\n", i);
+            fprintf(stderr, "Error: Failed to get plugin descriptor for index %u\n", i);
             continue;
         }
         
@@ -210,7 +551,10 @@ bool clapgo_init(const char* plugin_path) {
             src_desc, &descriptor_allocations[i]);
         
         if (!plugin_descriptors[i]) {
-            printf("Failed to create descriptor copy for plugin %u\n", i);
+            fprintf(stderr, "Error: Failed to create descriptor copy for plugin %u\n", i);
+        } else {
+            printf("Loaded plugin: %s (%s)\n", 
+                plugin_descriptors[i]->name, plugin_descriptors[i]->id);
         }
     }
     
@@ -244,10 +588,21 @@ void clapgo_deinit(void) {
     }
     
     plugin_count = 0;
+    
+    // Unload the shared library
+    clapgo_unload_library();
+    
+    printf("ClapGo plugin deinitialized successfully\n");
 }
 
 // Create a plugin instance for the given ID
 const clap_plugin_t* clapgo_create_plugin(const clap_host_t* host, const char* plugin_id) {
+    // Make sure the library is loaded
+    if (clapgo_lib == NULL) {
+        fprintf(stderr, "Error: Go shared library not loaded\n");
+        return NULL;
+    }
+    
     // Find the plugin descriptor
     const clap_plugin_descriptor_t* descriptor = NULL;
     for (uint32_t i = 0; i < plugin_count; i++) {
@@ -258,29 +613,39 @@ const clap_plugin_t* clapgo_create_plugin(const clap_host_t* host, const char* p
     }
     
     if (!descriptor) {
-        printf("Plugin ID not found: %s\n", plugin_id);
+        fprintf(stderr, "Error: Plugin ID not found: %s\n", plugin_id);
         return NULL;
     }
     
     // Allocate plugin instance data
     go_plugin_data_t* data = calloc(1, sizeof(go_plugin_data_t));
     if (!data) {
-        printf("Failed to allocate plugin data\n");
+        fprintf(stderr, "Error: Failed to allocate plugin data\n");
         return NULL;
     }
     
     data->descriptor = descriptor;
     
     // Create the Go plugin instance
-    // This would call into Go code through CGO
-    // For now, we'll just set a placeholder that would be
-    // populated with a real Go instance reference
-    data->go_instance = NULL;  // This would be set by Go code
+    // Call into Go code through the loaded function pointer
+    if (go_create_plugin) {
+        data->go_instance = go_create_plugin(host, plugin_id);
+        if (!data->go_instance) {
+            fprintf(stderr, "Error: Failed to create Go plugin instance\n");
+            free(data);
+            return NULL;
+        }
+    } else {
+        fprintf(stderr, "Error: Go create_plugin function not available\n");
+        free(data);
+        return NULL;
+    }
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
     if (!plugin) {
-        printf("Failed to allocate plugin structure\n");
+        fprintf(stderr, "Error: Failed to allocate plugin structure\n");
+        // TODO: Call Go code to destroy the plugin instance if needed
         free(data);
         return NULL;
     }
@@ -306,16 +671,18 @@ const clap_plugin_t* clapgo_create_plugin(const clap_host_t* host, const char* p
 
 // Get the number of available plugins
 uint32_t clapgo_get_plugin_count(void) {
-    // This would call into Go code via CGO
-    // In a real implementation, this would be provided by the Go code
-    return 0;  // Placeholder
+    if (clapgo_lib != NULL && go_get_plugin_count != NULL) {
+        return go_get_plugin_count();
+    }
+    return 0;
 }
 
 // Get the plugin descriptor at the given index
 const clap_plugin_descriptor_t* clapgo_get_plugin_descriptor(uint32_t index) {
-    // This would call into Go code via CGO
-    // In a real implementation, this would be provided by the Go code
-    return NULL;  // Placeholder
+    if (clapgo_lib != NULL && go_get_plugin_descriptor != NULL) {
+        return go_get_plugin_descriptor(index);
+    }
+    return NULL;
 }
 
 // Get the plugin factory
@@ -328,13 +695,15 @@ bool clapgo_plugin_init(const clap_plugin_t* plugin) {
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
-    // Call into Go code to initialize the plugin instance
-    // In a real implementation, this would call a Go function via CGO
-    printf("Initializing plugin instance: %s\n", plugin->desc->name);
+    // Call into Go code to initialize the plugin instance using the function pointer
+    if (go_plugin_init != NULL) {
+        return go_plugin_init(data->go_instance);
+    }
     
-    return true;  // Placeholder
+    fprintf(stderr, "Error: Go plugin init function not available\n");
+    return false;
 }
 
 // Destroy a plugin instance
@@ -345,8 +714,9 @@ void clapgo_plugin_destroy(const clap_plugin_t* plugin) {
     if (!data) return;
     
     // Call into Go code to clean up the plugin instance
-    // In a real implementation, this would call a Go function via CGO
-    printf("Destroying plugin instance: %s\n", plugin->desc->name);
+    if (data->go_instance && go_plugin_destroy != NULL) {
+        go_plugin_destroy(data->go_instance);
+    }
     
     // Free the plugin data
     free(data);
@@ -361,14 +731,15 @@ bool clapgo_plugin_activate(const clap_plugin_t* plugin, double sample_rate,
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
     // Call into Go code to activate the plugin instance
-    // In a real implementation, this would call a Go function via CGO
-    printf("Activating plugin: %s (sample rate: %f, min frames: %u, max frames: %u)\n",
-           plugin->desc->name, sample_rate, min_frames, max_frames);
+    if (go_plugin_activate != NULL) {
+        return go_plugin_activate(data->go_instance, sample_rate, min_frames, max_frames);
+    }
     
-    return true;  // Placeholder
+    fprintf(stderr, "Error: Go plugin activate function not available\n");
+    return false;
 }
 
 // Deactivate a plugin instance
@@ -376,11 +747,12 @@ void clapgo_plugin_deactivate(const clap_plugin_t* plugin) {
     if (!plugin) return;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return;
+    if (!data || !data->go_instance) return;
     
     // Call into Go code to deactivate the plugin instance
-    // In a real implementation, this would call a Go function via CGO
-    printf("Deactivating plugin: %s\n", plugin->desc->name);
+    if (go_plugin_deactivate != NULL) {
+        go_plugin_deactivate(data->go_instance);
+    }
 }
 
 // Start processing
@@ -388,13 +760,15 @@ bool clapgo_plugin_start_processing(const clap_plugin_t* plugin) {
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
     // Call into Go code to start processing
-    // In a real implementation, this would call a Go function via CGO
-    printf("Starting processing for plugin: %s\n", plugin->desc->name);
+    if (go_plugin_start_processing != NULL) {
+        return go_plugin_start_processing(data->go_instance);
+    }
     
-    return true;  // Placeholder
+    fprintf(stderr, "Error: Go plugin start_processing function not available\n");
+    return false;
 }
 
 // Stop processing
@@ -402,11 +776,12 @@ void clapgo_plugin_stop_processing(const clap_plugin_t* plugin) {
     if (!plugin) return;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return;
+    if (!data || !data->go_instance) return;
     
     // Call into Go code to stop processing
-    // In a real implementation, this would call a Go function via CGO
-    printf("Stopping processing for plugin: %s\n", plugin->desc->name);
+    if (go_plugin_stop_processing != NULL) {
+        go_plugin_stop_processing(data->go_instance);
+    }
 }
 
 // Reset a plugin instance
@@ -414,11 +789,12 @@ void clapgo_plugin_reset(const clap_plugin_t* plugin) {
     if (!plugin) return;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return;
+    if (!data || !data->go_instance) return;
     
     // Call into Go code to reset the plugin instance
-    // In a real implementation, this would call a Go function via CGO
-    printf("Resetting plugin: %s\n", plugin->desc->name);
+    if (go_plugin_reset != NULL) {
+        go_plugin_reset(data->go_instance);
+    }
 }
 
 // Process audio
@@ -427,12 +803,14 @@ clap_process_status clapgo_plugin_process(const clap_plugin_t* plugin,
     if (!plugin || !process) return CLAP_PROCESS_ERROR;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return CLAP_PROCESS_ERROR;
+    if (!data || !data->go_instance) return CLAP_PROCESS_ERROR;
     
     // Call into Go code to process audio
-    // In a real implementation, this would call a Go function via CGO
+    if (go_plugin_process != NULL) {
+        return go_plugin_process(data->go_instance, process);
+    }
     
-    return CLAP_PROCESS_CONTINUE;  // Placeholder
+    return CLAP_PROCESS_ERROR;
 }
 
 // Get an extension
@@ -440,11 +818,12 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     if (!plugin || !id) return NULL;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return NULL;
+    if (!data || !data->go_instance) return NULL;
     
     // Call into Go code to get the extension interface
-    // In a real implementation, this would call a Go function via CGO
-    printf("Getting extension for plugin %s: %s\n", plugin->desc->name, id);
+    if (go_plugin_get_extension != NULL) {
+        return go_plugin_get_extension(data->go_instance, id);
+    }
     
     // Check if we have GUI extension support via the overridden function
     #ifdef CLAPGO_GUI_SUPPORT
@@ -455,7 +834,7 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     }
     #endif
     
-    return NULL;  // Placeholder
+    return NULL;
 }
 
 // Execute on main thread
@@ -463,11 +842,12 @@ void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin) {
     if (!plugin) return;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return;
+    if (!data || !data->go_instance) return;
     
     // Call into Go code to execute on the main thread
-    // In a real implementation, this would call a Go function via CGO
-    printf("On main thread for plugin: %s\n", plugin->desc->name);
+    if (go_plugin_on_main_thread != NULL) {
+        go_plugin_on_main_thread(data->go_instance);
+    }
 }
 
 // Plugin factory implementation
