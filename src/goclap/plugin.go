@@ -89,65 +89,63 @@ func RegisterPlugin(info PluginInfo, processor AudioProcessor) {
 	pluginInfoRegistry.infos[info.ID] = info
 }
 
-// GetPluginCount returns the number of registered plugins
-//export GetPluginCount
-func GetPluginCount() C.uint32_t {
+// GetPluginCountImpl returns the number of registered plugins
+func GetPluginCountImpl() uint32 {
 	pluginInfoRegistry.RLock()
 	defer pluginInfoRegistry.RUnlock()
 	
-	return C.uint32_t(len(pluginInfoRegistry.infos))
+	return uint32(len(pluginInfoRegistry.infos))
 }
 
-// GetPluginInfo returns plugin info at the given index
-//export GetPluginInfo
-func GetPluginInfo(index C.uint32_t) *C.clap_plugin_descriptor_t {
+// GetPluginInfoImpl returns plugin info at the given index
+func GetPluginInfoImpl(index uint32) PluginInfo {
 	pluginInfoRegistry.RLock()
 	defer pluginInfoRegistry.RUnlock()
 	
 	idx := int(index)
 	if idx < 0 || idx >= len(pluginInfoRegistry.infos) {
-		return nil
+		return PluginInfo{}
 	}
 	
-	// This would be implemented by the C wrapper
-	// that would convert our Go structures to C structures
-	// Here we return nil as this is a stub
-	return nil
+	// Convert infos map to a slice and get the item at the index
+	var plugins []PluginInfo
+	for _, info := range pluginInfoRegistry.infos {
+		plugins = append(plugins, info)
+	}
+	
+	if idx < len(plugins) {
+		return plugins[idx]
+	}
+	
+	return PluginInfo{}
 }
 
-// CreatePlugin creates a new plugin instance
-//export CreatePlugin
-func CreatePlugin(pluginID *C.char) unsafe.Pointer {
-	id := C.GoString(pluginID)
-	
+// CreatePluginImpl creates a new plugin instance
+func CreatePluginImpl(pluginID string) AudioProcessor {
 	pluginRegistry.RLock()
-	_, exists := pluginRegistry.plugins[id]
+	processor, exists := pluginRegistry.plugins[pluginID]
 	pluginRegistry.RUnlock()
 	
 	if !exists {
 		return nil
 	}
 	
-	// This would be implemented by the C wrapper
-	// that would associate the Go processor with a C plugin instance
-	return nil
+	return processor
 }
 
 // Basic plugin instance callbacks
 
-//export GoInit
-func GoInit(pluginPtr unsafe.Pointer) C.bool {
-	processor := getProcessorFromPtr(pluginPtr)
+// InitImpl initializes the plugin
+func InitImpl(processor AudioProcessor) bool {
 	if processor == nil {
-		return C.bool(false)
+		return false
 	}
 	
-	return C.bool(processor.Init())
+	return processor.Init()
 }
 
-//export GoDestroy
-func GoDestroy(pluginPtr unsafe.Pointer) {
-	processor := getProcessorFromPtr(pluginPtr)
+// DestroyImpl destroys the plugin
+func DestroyImpl(processor AudioProcessor) {
 	if processor == nil {
 		return
 	}
@@ -155,19 +153,17 @@ func GoDestroy(pluginPtr unsafe.Pointer) {
 	processor.Destroy()
 }
 
-//export GoActivate
-func GoActivate(pluginPtr unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	processor := getProcessorFromPtr(pluginPtr)
+// ActivateImpl activates the plugin
+func ActivateImpl(processor AudioProcessor, sampleRate float64, minFrames, maxFrames uint32) bool {
 	if processor == nil {
-		return C.bool(false)
+		return false
 	}
 	
-	return C.bool(processor.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+	return processor.Activate(sampleRate, minFrames, maxFrames)
 }
 
-//export GoDeactivate
-func GoDeactivate(pluginPtr unsafe.Pointer) {
-	processor := getProcessorFromPtr(pluginPtr)
+// DeactivateImpl deactivates the plugin
+func DeactivateImpl(processor AudioProcessor) {
 	if processor == nil {
 		return
 	}
@@ -175,19 +171,17 @@ func GoDeactivate(pluginPtr unsafe.Pointer) {
 	processor.Deactivate()
 }
 
-//export GoStartProcessing
-func GoStartProcessing(pluginPtr unsafe.Pointer) C.bool {
-	processor := getProcessorFromPtr(pluginPtr)
+// StartProcessingImpl starts processing
+func StartProcessingImpl(processor AudioProcessor) bool {
 	if processor == nil {
-		return C.bool(false)
+		return false
 	}
 	
-	return C.bool(processor.StartProcessing())
+	return processor.StartProcessing()
 }
 
-//export GoStopProcessing
-func GoStopProcessing(pluginPtr unsafe.Pointer) {
-	processor := getProcessorFromPtr(pluginPtr)
+// StopProcessingImpl stops processing
+func StopProcessingImpl(processor AudioProcessor) {
 	if processor == nil {
 		return
 	}
@@ -195,9 +189,8 @@ func GoStopProcessing(pluginPtr unsafe.Pointer) {
 	processor.StopProcessing()
 }
 
-//export GoReset
-func GoReset(pluginPtr unsafe.Pointer) {
-	processor := getProcessorFromPtr(pluginPtr)
+// ResetImpl resets the plugin
+func ResetImpl(processor AudioProcessor) {
 	if processor == nil {
 		return
 	}
@@ -205,46 +198,31 @@ func GoReset(pluginPtr unsafe.Pointer) {
 	processor.Reset()
 }
 
-//export GoProcess
-func GoProcess(pluginPtr unsafe.Pointer, process *C.clap_process_t) C.clap_process_status {
-	processor := getProcessorFromPtr(pluginPtr)
+// ProcessImpl processes audio
+func ProcessImpl(processor AudioProcessor, steadyTime int64, framesCount uint32, events *ProcessEvents) int {
 	if processor == nil {
-		return C.CLAP_PROCESS_ERROR
+		return 0 // CLAP_PROCESS_ERROR
 	}
 	
-	steadyTime := int64(process.steady_time)
-	framesCount := uint32(process.frames_count)
-	
-	// Create audio buffer slices
-	// This is a simplified version - the real implementation would need to handle
-	// both data32 and data64, and properly convert C arrays to Go slices
+	// In a real implementation, we would convert C audio buffers to Go slices
 	var audioIn [][]float32
 	var audioOut [][]float32
 	
-	// Convert events
-	events := &ProcessEvents{
-		InEvents:  unsafe.Pointer(process.in_events),
-		OutEvents: unsafe.Pointer(process.out_events),
-	}
-	
 	status := processor.Process(steadyTime, framesCount, audioIn, audioOut, events)
-	return C.clap_process_status(status)
+	return status
 }
 
-//export GoGetExtension
-func GoGetExtension(pluginPtr unsafe.Pointer, id *C.char) unsafe.Pointer {
-	processor := getProcessorFromPtr(pluginPtr)
+// GetExtensionImpl gets an extension
+func GetExtensionImpl(processor AudioProcessor, id string) unsafe.Pointer {
 	if processor == nil {
 		return nil
 	}
 	
-	extID := C.GoString(id)
-	return processor.GetExtension(extID)
+	return processor.GetExtension(id)
 }
 
-//export GoOnMainThread
-func GoOnMainThread(pluginPtr unsafe.Pointer) {
-	processor := getProcessorFromPtr(pluginPtr)
+// OnMainThreadImpl runs on main thread
+func OnMainThreadImpl(processor AudioProcessor) {
 	if processor == nil {
 		return
 	}
