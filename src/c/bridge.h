@@ -87,16 +87,17 @@ bool clapgo_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
 
 // Function pointer types for Go exports
 typedef uint32_t (*clapgo_get_plugin_count_func)(void);
-typedef const clap_plugin_descriptor_t* (*clapgo_get_plugin_descriptor_func)(uint32_t index);
 typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
 typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
 // Function pointer types for standardized plugin metadata exports
-typedef char* (*clapgo_export_plugin_id_func)(void);
-typedef char* (*clapgo_export_plugin_name_func)(void);
-typedef char* (*clapgo_export_plugin_vendor_func)(void);
-typedef char* (*clapgo_export_plugin_version_func)(void);
-typedef char* (*clapgo_export_plugin_description_func)(void);
+typedef char* (*clapgo_export_plugin_id_func)(const char* plugin_id);
+typedef char* (*clapgo_export_plugin_name_func)(const char* plugin_id);
+typedef char* (*clapgo_export_plugin_vendor_func)(const char* plugin_id);
+typedef char* (*clapgo_export_plugin_version_func)(const char* plugin_id);
+typedef char* (*clapgo_export_plugin_description_func)(const char* plugin_id);
+typedef uint32_t (*clapgo_get_registered_plugin_count_func)(void);
+typedef char* (*clapgo_get_registered_plugin_id_by_index_func)(uint32_t index);
 
 typedef bool (*clapgo_plugin_init_func)(void* plugin);
 typedef void (*clapgo_plugin_destroy_func)(void* plugin);
@@ -111,7 +112,6 @@ typedef void (*clapgo_plugin_on_main_thread_func)(void* plugin);
 
 // External function pointers
 extern clapgo_get_plugin_count_func go_get_plugin_count;
-extern clapgo_get_plugin_descriptor_func go_get_plugin_descriptor;
 extern clapgo_create_plugin_func go_create_plugin;
 extern clapgo_get_version_func go_get_version;
 
@@ -121,6 +121,8 @@ extern clapgo_export_plugin_name_func go_export_plugin_name;
 extern clapgo_export_plugin_vendor_func go_export_plugin_vendor;
 extern clapgo_export_plugin_version_func go_export_plugin_version;
 extern clapgo_export_plugin_description_func go_export_plugin_description;
+extern clapgo_get_registered_plugin_count_func go_get_registered_plugin_count;
+extern clapgo_get_registered_plugin_id_by_index_func go_get_registered_plugin_id_by_index;
 
 extern clapgo_plugin_init_func go_plugin_init;
 extern clapgo_plugin_destroy_func go_plugin_destroy;

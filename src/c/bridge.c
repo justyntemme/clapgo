@@ -9,7 +9,6 @@ clapgo_library_t clapgo_lib = NULL;
 
 // Function pointers to Go exported functions
 clapgo_get_plugin_count_func go_get_plugin_count = NULL;
-clapgo_get_plugin_descriptor_func go_get_plugin_descriptor = NULL;
 clapgo_create_plugin_func go_create_plugin = NULL;
 clapgo_get_version_func go_get_version = NULL;
 
@@ -19,6 +18,8 @@ clapgo_export_plugin_name_func go_export_plugin_name = NULL;
 clapgo_export_plugin_vendor_func go_export_plugin_vendor = NULL;
 clapgo_export_plugin_version_func go_export_plugin_version = NULL;
 clapgo_export_plugin_description_func go_export_plugin_description = NULL;
+clapgo_get_registered_plugin_count_func go_get_registered_plugin_count = NULL;
+clapgo_get_registered_plugin_id_by_index_func go_get_registered_plugin_id_by_index = NULL;
 
 clapgo_plugin_init_func go_plugin_init = NULL;
 clapgo_plugin_destroy_func go_plugin_destroy = NULL;
@@ -101,7 +102,6 @@ void clapgo_unload_library(void) {
     
     // Reset all function pointers
     go_get_plugin_count = NULL;
-    go_get_plugin_descriptor = NULL;
     go_create_plugin = NULL;
     go_get_version = NULL;
     go_export_plugin_id = NULL;
@@ -109,6 +109,8 @@ void clapgo_unload_library(void) {
     go_export_plugin_vendor = NULL;
     go_export_plugin_version = NULL;
     go_export_plugin_description = NULL;
+    go_get_registered_plugin_count = NULL;
+    go_get_registered_plugin_id_by_index = NULL;
     
     go_plugin_init = NULL;
     go_plugin_destroy = NULL;
@@ -159,7 +161,6 @@ static bool clapgo_load_symbols(void) {
     
     // Load core plugin functions
     go_get_plugin_count = (clapgo_get_plugin_count_func)clapgo_get_symbol("GetPluginCount");
-    go_get_plugin_descriptor = (clapgo_get_plugin_descriptor_func)clapgo_get_symbol("GetPluginInfo");
     go_create_plugin = (clapgo_create_plugin_func)clapgo_get_symbol("CreatePlugin");
     go_get_version = (clapgo_get_version_func)clapgo_get_symbol("GetVersion");
     
@@ -169,6 +170,8 @@ static bool clapgo_load_symbols(void) {
     go_export_plugin_vendor = (clapgo_export_plugin_vendor_func)clapgo_get_symbol("ExportPluginVendor");
     go_export_plugin_version = (clapgo_export_plugin_version_func)clapgo_get_symbol("ExportPluginVersion");
     go_export_plugin_description = (clapgo_export_plugin_description_func)clapgo_get_symbol("ExportPluginDescription");
+    go_get_registered_plugin_count = (clapgo_get_registered_plugin_count_func)clapgo_get_symbol("GetRegisteredPluginCount");
+    go_get_registered_plugin_id_by_index = (clapgo_get_registered_plugin_id_by_index_func)clapgo_get_symbol("GetRegisteredPluginIDByIndex");
     
     // Load plugin callback functions
     go_plugin_init = (clapgo_plugin_init_func)clapgo_get_symbol("GoInit");
@@ -183,14 +186,17 @@ static bool clapgo_load_symbols(void) {
     go_plugin_on_main_thread = (clapgo_plugin_on_main_thread_func)clapgo_get_symbol("GoOnMainThread");
     
     // Check if we have all required functions
-    if (!go_get_plugin_count || !go_get_plugin_descriptor || !go_create_plugin) {
-        fprintf(stderr, "Error: Required symbols not found in library\n");
+    if (!go_get_plugin_count || !go_create_plugin) {
+        fprintf(stderr, "Error: Required core functions not found in library\n");
         return false;
     }
     
     // Check for required plugin metadata functions
-    if (!go_export_plugin_id) {
-        fprintf(stderr, "Warning: ExportPluginID function not found, using fallback methods\n");
+    if (!go_export_plugin_id || !go_export_plugin_name || !go_export_plugin_vendor || 
+        !go_export_plugin_version || !go_export_plugin_description || 
+        !go_get_registered_plugin_count || !go_get_registered_plugin_id_by_index) {
+        fprintf(stderr, "Error: Required plugin metadata functions not found\n");
+        return false;
     }
     
     // These functions are essential for plugin operation
@@ -529,90 +535,101 @@ bool clapgo_init(const char* plugin_path) {
         return false;
     }
     
-    // Create deep copies of all plugin descriptors
+    // Get the number of registered plugins directly from Go
+    plugin_count = go_get_registered_plugin_count();
+    printf("Found %u registered plugins in Go metadata registry\n", plugin_count);
+    
+    if (plugin_count == 0) {
+        fprintf(stderr, "Error: No plugins found in Go metadata registry\n");
+        clapgo_unload_library();
+        return false;
+    }
+    
+    // Allocate the descriptor array
+    plugin_descriptors = calloc(plugin_count, sizeof(clap_plugin_descriptor_t*));
+    if (!plugin_descriptors) {
+        fprintf(stderr, "Error: Failed to allocate plugin descriptor array\n");
+        clapgo_unload_library();
+        return false;
+    }
+    
+    // Allocate the descriptor allocations array
+    descriptor_allocations = calloc(plugin_count, sizeof(descriptor_allocated_fields_t));
+    if (!descriptor_allocations) {
+        fprintf(stderr, "Error: Failed to allocate descriptor allocations array\n");
+        free(plugin_descriptors);
+        plugin_descriptors = NULL;
+        plugin_count = 0;
+        clapgo_unload_library();
+        return false;
+    }
+    
+    // Create descriptors for each registered plugin
     for (uint32_t i = 0; i < plugin_count; i++) {
-        // Try to get plugin info from exported functions first
-        if (i == 0 && go_export_plugin_id != NULL) {
-            // Use exported functions to create a descriptor
-            clap_plugin_descriptor_t* desc = calloc(1, sizeof(clap_plugin_descriptor_t));
-            if (!desc) {
-                fprintf(stderr, "Error: Failed to allocate plugin descriptor\n");
-                continue;
-            }
-            
-            // Initialize clap_version
-            desc->clap_version.major = 1;
-            desc->clap_version.minor = 1;
-            desc->clap_version.revision = 0;
-            
-            // Get strings from exported functions
-            if (go_export_plugin_id != NULL) {
-                desc->id = go_export_plugin_id();
-                descriptor_allocations[i].id = true;
-            }
-            
-            if (go_export_plugin_name != NULL) {
-                desc->name = go_export_plugin_name();
-                descriptor_allocations[i].name = true;
-            }
-            
-            if (go_export_plugin_vendor != NULL) {
-                desc->vendor = go_export_plugin_vendor();
-                descriptor_allocations[i].vendor = true;
-            }
-            
-            if (go_export_plugin_version != NULL) {
-                desc->version = go_export_plugin_version();
-                descriptor_allocations[i].version = true;
-            }
-            
-            if (go_export_plugin_description != NULL) {
-                desc->description = go_export_plugin_description();
-                descriptor_allocations[i].description = true;
-            }
-            
-            // Set default URLs
-            desc->url = strdup("https://github.com/justyntemme/clapgo");
-            descriptor_allocations[i].url = true;
-            
-            desc->manual_url = strdup("https://github.com/justyntemme/clapgo");
-            descriptor_allocations[i].manual_url = true;
-            
-            desc->support_url = strdup("https://github.com/justyntemme/clapgo/issues");
-            descriptor_allocations[i].support_url = true;
-            
-            // Set default features
-            const char** features = calloc(4, sizeof(char*));
-            features[0] = strdup("audio-effect");
-            features[1] = strdup("stereo");
-            features[2] = strdup("mono");
-            features[3] = NULL;
-            
-            desc->features = features;
-            descriptor_allocations[i].features_array = true;
-            descriptor_allocations[i].features_strings = true;
-            
-            plugin_descriptors[i] = desc;
-            
-            printf("Loaded plugin from exports: %s (%s)\n", desc->name, desc->id);
-        } else {
-            // Fall back to the old method
-            const clap_plugin_descriptor_t* src_desc = go_get_plugin_descriptor(i);
-            if (!src_desc) {
-                fprintf(stderr, "Error: Failed to get plugin descriptor for index %u\n", i);
-                continue;
-            }
-            
-            plugin_descriptors[i] = (const clap_plugin_descriptor_t*)create_descriptor_copy(
-                src_desc, &descriptor_allocations[i]);
-            
-            if (!plugin_descriptors[i]) {
-                fprintf(stderr, "Error: Failed to create descriptor copy for plugin %u\n", i);
-            } else {
-                printf("Loaded plugin: %s (%s)\n", 
-                    plugin_descriptors[i]->name, plugin_descriptors[i]->id);
-            }
+        // Get plugin ID for this index
+        char* plugin_id = go_get_registered_plugin_id_by_index(i);
+        if (!plugin_id || strlen(plugin_id) == 0) {
+            fprintf(stderr, "Error: Failed to get plugin ID for index %u\n", i);
+            free(plugin_id);
+            continue;
         }
+        
+        // Create a new descriptor
+        clap_plugin_descriptor_t* desc = calloc(1, sizeof(clap_plugin_descriptor_t));
+        if (!desc) {
+            fprintf(stderr, "Error: Failed to allocate plugin descriptor\n");
+            free(plugin_id);
+            continue;
+        }
+        
+        // Initialize clap_version
+        desc->clap_version.major = 1;
+        desc->clap_version.minor = 1;
+        desc->clap_version.revision = 0;
+        
+        // Get metadata using the plugin ID
+        desc->id = go_export_plugin_id(plugin_id);
+        descriptor_allocations[i].id = true;
+        
+        desc->name = go_export_plugin_name(plugin_id);
+        descriptor_allocations[i].name = true;
+        
+        desc->vendor = go_export_plugin_vendor(plugin_id);
+        descriptor_allocations[i].vendor = true;
+        
+        desc->version = go_export_plugin_version(plugin_id);
+        descriptor_allocations[i].version = true;
+        
+        desc->description = go_export_plugin_description(plugin_id);
+        descriptor_allocations[i].description = true;
+        
+        // Set default URLs
+        desc->url = strdup("https://github.com/justyntemme/clapgo");
+        descriptor_allocations[i].url = true;
+        
+        desc->manual_url = strdup("https://github.com/justyntemme/clapgo");
+        descriptor_allocations[i].manual_url = true;
+        
+        desc->support_url = strdup("https://github.com/justyntemme/clapgo/issues");
+        descriptor_allocations[i].support_url = true;
+        
+        // Set default features
+        const char** features = calloc(4, sizeof(char*));
+        features[0] = strdup("audio-effect");
+        features[1] = strdup("stereo");
+        features[2] = strdup("mono");
+        features[3] = NULL;
+        
+        desc->features = features;
+        descriptor_allocations[i].features_array = true;
+        descriptor_allocations[i].features_strings = true;
+        
+        plugin_descriptors[i] = desc;
+        
+        printf("Loaded plugin from registry: %s (%s)\n", desc->name, desc->id);
+        
+        // Free the plugin ID string
+        free(plugin_id);
     }
     
     return true;

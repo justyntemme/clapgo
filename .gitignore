@@ -6,6 +6,7 @@
 *.clap
 *.exe~
 *.dll
+*.o
 *.so
 *.dylib
 *.clap

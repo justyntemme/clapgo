@@ -13,6 +13,15 @@ package main
 // void* CreatePlugin(struct clap_host *host, char *plugin_id);
 // bool GetVersion(uint32_t *major, uint32_t *minor, uint32_t *patch);
 //
+// // Plugin metadata export functions
+// uint32_t GetRegisteredPluginCount();
+// char* GetRegisteredPluginIDByIndex(uint32_t index);
+// char* ExportPluginID(char* plugin_id);
+// char* ExportPluginName(char* plugin_id);
+// char* ExportPluginVendor(char* plugin_id);
+// char* ExportPluginVersion(char* plugin_id);
+// char* ExportPluginDescription(char* plugin_id);
+//
 // // Plugin lifecycle functions
 // bool GoInit(void *plugin);
 // void GoDestroy(void *plugin);
@@ -432,4 +441,90 @@ func GoOnMainThread(plugin unsafe.Pointer) {
 // init initializes the bridge
 func init() {
 	fmt.Println("Initializing ClapGo bridge")
+}
+
+// Export plugin metadata functions that the C code expects
+
+//export GetRegisteredPluginCount
+func GetRegisteredPluginCount() uint32 {
+	return registry.GetPluginCount()
+}
+
+//export GetRegisteredPluginIDByIndex
+func GetRegisteredPluginIDByIndex(index uint32) *C.char {
+	info := registry.GetPluginInfo(index)
+	if info.ID == "" {
+		return C.CString("")
+	}
+	return C.CString(info.ID)
+}
+
+//export ExportPluginID
+func ExportPluginID(pluginID *C.char) *C.char {
+	id := C.GoString(pluginID)
+	// Find the plugin info by ID
+	count := registry.GetPluginCount()
+	for i := uint32(0); i < count; i++ {
+		info := registry.GetPluginInfo(i)
+		if info.ID == id {
+			return C.CString(info.ID)
+		}
+	}
+	return C.CString("unknown")
+}
+
+//export ExportPluginName
+func ExportPluginName(pluginID *C.char) *C.char {
+	id := C.GoString(pluginID)
+	// Find the plugin info by ID
+	count := registry.GetPluginCount()
+	for i := uint32(0); i < count; i++ {
+		info := registry.GetPluginInfo(i)
+		if info.ID == id {
+			return C.CString(info.Name)
+		}
+	}
+	return C.CString("Unknown Plugin")
+}
+
+//export ExportPluginVendor
+func ExportPluginVendor(pluginID *C.char) *C.char {
+	id := C.GoString(pluginID)
+	// Find the plugin info by ID
+	count := registry.GetPluginCount()
+	for i := uint32(0); i < count; i++ {
+		info := registry.GetPluginInfo(i)
+		if info.ID == id {
+			return C.CString(info.Vendor)
+		}
+	}
+	return C.CString("Unknown Vendor")
+}
+
+//export ExportPluginVersion
+func ExportPluginVersion(pluginID *C.char) *C.char {
+	id := C.GoString(pluginID)
+	// Find the plugin info by ID
+	count := registry.GetPluginCount()
+	for i := uint32(0); i < count; i++ {
+		info := registry.GetPluginInfo(i)
+		if info.ID == id {
+			return C.CString(info.Version)
+		}
+	}
+	return C.CString("0.0.0")
+}
+
+//export ExportPluginDescription
+func ExportPluginDescription(pluginID *C.char) *C.char {
+	id := C.GoString(pluginID)
+	// Find the plugin info by ID
+	count := registry.GetPluginCount()
+	for i := uint32(0); i < count; i++ {
+		info := registry.GetPluginInfo(i)
+		if info.ID == id {
+			return C.CString(info.Description)
+		}
+	}
+	return C.CString("No description available")
 }

@@ -21,17 +21,7 @@ var (
 )
 
 func init() {
-	// Register our plugin metadata with the library
-	// This eliminates the need for C-compatible exports in each plugin
-	api.RegisterMetadataFromConstants(
-		PluginID,
-		PluginName,
-		PluginVendor,
-		PluginVersion,
-		PluginDescription,
-	)
-
-	// Register our synth plugin
+	// Register our synth plugin with the plugin registry for instantiation
 	info := api.PluginInfo{
 		ID:          PluginID,
 		Name:        PluginName,
@@ -545,14 +535,14 @@ func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 // GetPluginInfo returns information about the plugin
 func (p *SynthPlugin) GetPluginInfo() api.PluginInfo {
 	return api.PluginInfo{
-		ID:          "com.clapgo.synth",
-		Name:        "Simple Synth",
-		Vendor:      "ClapGo",
+		ID:          PluginID,
+		Name:        PluginName,
+		Vendor:      PluginVendor, 
 		URL:         "https://github.com/justyntemme/clapgo",
 		ManualURL:   "https://github.com/justyntemme/clapgo",
 		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple synthesizer using ClapGo",
+		Version:     PluginVersion,
+		Description: PluginDescription,
 		Features:    []string{"instrument", "synthesizer", "stereo"},
 	}
 }

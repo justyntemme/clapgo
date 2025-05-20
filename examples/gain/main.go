@@ -17,17 +17,7 @@ var (
 )
 
 func init() {
-	// Register our plugin metadata with the library
-	// This eliminates the need for C-compatible exports in each plugin
-	api.RegisterMetadataFromConstants(
-		PluginID,
-		PluginName,
-		PluginVendor,
-		PluginVersion,
-		PluginDescription,
-	)
-
-	// Register our gain plugin
+	// Register our gain plugin with the plugin registry for instantiation
 	info := api.PluginInfo{
 		ID:          PluginID,
 		Name:        PluginName,
@@ -212,14 +202,14 @@ func (p *GainPlugin) OnMainThread() {
 // GetPluginInfo returns information about the plugin
 func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
 	return api.PluginInfo{
-		ID:          "com.clapgo.gain",
-		Name:        "Simple Gain",
-		Vendor:      "ClapGo",
+		ID:          PluginID,
+		Name:        PluginName,
+		Vendor:      PluginVendor,
 		URL:         "https://github.com/justyntemme/clapgo",
 		ManualURL:   "https://github.com/justyntemme/clapgo",
 		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple gain plugin using ClapGo",
+		Version:     PluginVersion,
+		Description: PluginDescription,
 		Features:    []string{"audio-effect", "stereo", "mono"},
 	}
 }
