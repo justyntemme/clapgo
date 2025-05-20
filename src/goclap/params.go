@@ -102,6 +102,94 @@ func (pm *ParamManager) Flush() {
 	// This would trigger callbacks or update internal state based on parameter changes
 }
 
+// AddParamValueEvent adds a parameter value change event to an output event queue
+func (pm *ParamManager) AddParamValueEvent(outEvents *OutputEvents, paramID uint32, value float64, time uint32) bool {
+	if outEvents == nil {
+		return false
+	}
+	
+	// Create a parameter value event
+	event := &Event{
+		Time:  time,
+		Type:  EventTypeParamValue,
+		Space: 0, // Main event space
+		Data: ParamEvent{
+			ParamID: paramID,
+			Value:   value,
+		},
+	}
+	
+	// Push the event
+	return outEvents.PushEvent(event)
+}
+
+// BeginParamGesture begins a parameter gesture (e.g., user starts dragging a knob)
+func (pm *ParamManager) BeginParamGesture(outEvents *OutputEvents, paramID uint32, time uint32) bool {
+	if outEvents == nil {
+		return false
+	}
+	
+	// Create a gesture begin event
+	event := &Event{
+		Time:  time,
+		Type:  EventParamGestureBegin,
+		Space: 0, // Main event space
+		Data: ParamEvent{
+			ParamID: paramID,
+		},
+	}
+	
+	// Push the event
+	return outEvents.PushEvent(event)
+}
+
+// EndParamGesture ends a parameter gesture (e.g., user releases a knob)
+func (pm *ParamManager) EndParamGesture(outEvents *OutputEvents, paramID uint32, time uint32) bool {
+	if outEvents == nil {
+		return false
+	}
+	
+	// Create a gesture end event
+	event := &Event{
+		Time:  time,
+		Type:  EventParamGestureEnd,
+		Space: 0, // Main event space
+		Data: ParamEvent{
+			ParamID: paramID,
+		},
+	}
+	
+	// Push the event
+	return outEvents.PushEvent(event)
+}
+
+// NormalizeValue converts a parameter value to the normalized [0,1] range
+func (pm *ParamManager) NormalizeValue(paramID uint32, value float64) float64 {
+	param := pm.GetParamInfo(paramID)
+	if param == nil {
+		return 0
+	}
+	
+	// If min and max are the same, return 0
+	if param.MinValue == param.MaxValue {
+		return 0
+	}
+	
+	// Normalize to [0,1] range
+	return (value - param.MinValue) / (param.MaxValue - param.MinValue)
+}
+
+// DenormalizeValue converts a normalized [0,1] value to the parameter range
+func (pm *ParamManager) DenormalizeValue(paramID uint32, normalized float64) float64 {
+	param := pm.GetParamInfo(paramID)
+	if param == nil {
+		return 0
+	}
+	
+	// Denormalize to parameter range
+	return param.MinValue + normalized * (param.MaxValue - param.MinValue)
+}
+
 // GetParamInfoFromC converts C parameter info to Go
 func GetParamInfoFromC(cInfo *C.clap_param_info_t) ParamInfo {
 	if cInfo == nil {

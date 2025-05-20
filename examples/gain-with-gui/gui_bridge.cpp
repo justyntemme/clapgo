@@ -5,6 +5,74 @@
 #include "plugin-proxy.hh"
 #include "parameter-proxy.hh"
 
+// Go GUI function declarations
+extern "C" {
+    bool GoGUICreated(void* plugin);
+    void GoGUIDestroyed(void* plugin);
+    bool GoGUIShown(void* plugin);
+    bool GoGUIHidden(void* plugin);
+    bool GoGUIGetSize(void* plugin, uint32_t* width, uint32_t* height);
+    bool GoGUIHasGUI(void* plugin);
+    bool GoGUIGetPreferredAPI(void* plugin, const char** api, bool* is_floating);
+}
+
+namespace {
+    std::shared_ptr<clap::LocalGuiFactory> guiFactory;
+    std::unordered_map<const clap_plugin_t*, std::unique_ptr<clap::GuiHandle>> guiHandles;
+    std::unordered_map<const clap_plugin_t*, std::unique_ptr<clap::AbstractGuiListener>> guiListeners;
+}
+
+// Simple GUI listener implementation
+class ClapGoGuiListener : public clap::AbstractGuiListener {
+public:
+    ClapGoGuiListener(const clap_plugin_t* plugin) 
+        : _plugin(plugin), _data((go_plugin_data_t*)plugin->plugin_data) {}
+
+    void onGuiClosed() override {
+        printf("GUI closed\n");
+    }
+
+    void onParamAdjust(clap_id param_id, double value) override {
+        printf("Parameter %u adjusted to %f\n", param_id, value);
+        
+        // Create a parameter adjustment event
+        // In a real implementation, we would send this to the host
+    }
+
+    void onParamBeginAdjust(clap_id param_id) override {
+        printf("Begin adjusting parameter %u\n", param_id);
+        
+        // Create a parameter begin event
+    }
+
+    void onParamEndAdjust(clap_id param_id) override {
+        printf("End adjusting parameter %u\n", param_id);
+        
+        // Create a parameter end event
+    }
+
+    clap_id resolveParamIdForModuleId(clap_id module_id, clap_id param_id) override {
+        // We don't use module IDs in our simple implementation
+        return param_id;
+    }
+
+    void onDisplayStateChanged(bool is_visible) override {
+        printf("Display state changed to %s\n", is_visible ? "visible" : "hidden");
+    }
+
+    void onPluginMissingResources() override {
+        printf("Plugin missing resources\n");
+    }
+
+    void onPluginResumeFromSuspend() override {
+        printf("Plugin resuming from suspend\n");
+    }
+
+private:
+    const clap_plugin_t* _plugin;
+    go_plugin_data_t* _data;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,7 +90,11 @@ const void* clapgo_plugin_get_extension_with_gui(const clap_plugin_t* plugin, co
     
     // Check if this is a GUI extension request
     if (strcmp(id, CLAP_EXT_GUI) == 0) {
-        return &clapgo_gui_extension;
+        // Check if the plugin supports GUI
+        go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+        if (data && data->go_instance && GoGUIHasGUI(data->go_instance)) {
+            return &clapgo_gui_extension;
+        }
     }
     
     return NULL;
@@ -31,25 +103,44 @@ const void* clapgo_plugin_get_extension_with_gui(const clap_plugin_t* plugin, co
 // GUI implementation
 
 static bool clapgo_gui_is_api_supported(const clap_plugin_t* plugin, const char* api, bool is_floating) {
-    // We support only one GUI API for now
+    // We support these APIs
     return strcmp(api, CLAP_WINDOW_API_X11) == 0 || 
            strcmp(api, CLAP_WINDOW_API_WAYLAND) == 0 || 
            strcmp(api, CLAP_WINDOW_API_WIN32) == 0 || 
            strcmp(api, CLAP_WINDOW_API_COCOA) == 0;
 }
 
+static bool clapgo_gui_get_preferred_api(const clap_plugin_t* plugin, const char** api, bool* is_floating) {
+    if (!plugin || !api || !is_floating) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+
+    return GoGUIGetPreferredAPI(data->go_instance, api, is_floating);
+}
+
 static bool clapgo_gui_create(const clap_plugin_t* plugin, const char* api, bool is_floating) {
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
-    // Here we would create the GUI, but this is just a stub
     printf("Creating GUI with API: %s (floating: %d)\n", api, is_floating);
     
-    // In a real implementation, this would initialize a Qt/QML GUI
-    // using the clap-plugins GUI framework
-    return true;
+    // Initialize the GUI factory if needed
+    if (!guiFactory) {
+        guiFactory = clap::LocalGuiFactory::getInstance();
+    }
+    
+    // Create a GUI listener for this plugin
+    auto listener = std::make_unique<ClapGoGuiListener>(plugin);
+    guiListeners[plugin] = std::move(listener);
+    
+    // Create the GUI handle
+    guiHandles[plugin] = guiFactory->createGui(*guiListeners[plugin]);
+    
+    // Notify the Go side that GUI is created
+    return GoGUICreated(data->go_instance);
 }
 
 static void clapgo_gui_destroy(const clap_plugin_t* plugin) {
@@ -58,32 +149,50 @@ static void clapgo_gui_destroy(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data) return;
     
-    // Here we would destroy the GUI, but this is just a stub
-    printf("Destroying GUI\n");
+    // Destroy the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        guiFactory->releaseGui(*guiHandles[plugin]);
+        guiHandles.erase(plugin);
+    }
+    
+    // Remove the listener
+    if (guiListeners.count(plugin) > 0) {
+        guiListeners.erase(plugin);
+    }
+    
+    // Notify the Go side that GUI is destroyed
+    if (data->go_instance) {
+        GoGUIDestroyed(data->go_instance);
+    }
+    
+    printf("GUI destroyed\n");
 }
 
 static bool clapgo_gui_set_scale(const clap_plugin_t* plugin, double scale) {
     if (!plugin) return false;
     
-    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    // Set GUI scale factor to the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        guiHandles[plugin]->setScale(scale);
+        return true;
+    }
     
-    // Set GUI scale factor
-    printf("Setting GUI scale to: %f\n", scale);
-    return true;
+    return false;
 }
 
 static bool clapgo_gui_get_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
     if (!plugin || !width || !height) return false;
     
-    // Return default size
-    *width = 800;
-    *height = 600;
-    return true;
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Get size from the Go side
+    return GoGUIGetSize(data->go_instance, width, height);
 }
 
 static bool clapgo_gui_can_resize(const clap_plugin_t* plugin) {
-    return true; // Allow resizing
+    // Allow resizing
+    return true;
 }
 
 static bool clapgo_gui_get_resize_hints(const clap_plugin_t* plugin, 
@@ -115,36 +224,55 @@ static bool clapgo_gui_set_size(const clap_plugin_t* plugin,
                                uint32_t width, uint32_t height) {
     if (!plugin) return false;
     
-    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    // Set size to the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        guiHandles[plugin]->setSize(width, height);
+        return true;
+    }
     
-    // Set GUI size
-    printf("Setting GUI size to: %ux%u\n", width, height);
-    return true;
+    return false;
 }
 
 static bool clapgo_gui_set_parent(const clap_plugin_t* plugin, 
                                  const clap_window_t* window) {
     if (!plugin || !window) return false;
     
-    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    // Set parent window to the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
+            return guiHandles[plugin]->attachX11(window->x11);
+        } else if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
+            return guiHandles[plugin]->attachWin32(window->win32);
+        } else if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
+            return guiHandles[plugin]->attachCocoa(window->cocoa);
+        }
+    }
     
-    // Set the parent window
-    printf("Setting GUI parent window\n");
-    return true;
+    return false;
 }
 
 static bool clapgo_gui_set_transient(const clap_plugin_t* plugin, 
                                     const clap_window_t* window) {
     if (!plugin || !window) return false;
     
-    return true; // Not all platforms support this
+    // Set transient window to the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
+            return guiHandles[plugin]->setTransientX11(window->x11);
+        } else if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
+            return guiHandles[plugin]->setTransientWin32(window->win32);
+        } else if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
+            return guiHandles[plugin]->setTransientCocoa(window->cocoa);
+        }
+    }
+    
+    return false;
 }
 
 static void clapgo_gui_suggest_title(const clap_plugin_t* plugin, const char* title) {
     if (!plugin || !title) return;
     
+    // Nothing to do here
     printf("Suggested GUI title: %s\n", title);
 }
 
@@ -152,27 +280,42 @@ static bool clapgo_gui_show(const clap_plugin_t* plugin) {
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
-    // Show the GUI
-    printf("Showing GUI\n");
-    return true;
+    // Show the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        bool success = guiHandles[plugin]->show();
+        if (success) {
+            // Notify the Go side that GUI is shown
+            return GoGUIShown(data->go_instance);
+        }
+    }
+    
+    return false;
 }
 
 static bool clapgo_gui_hide(const clap_plugin_t* plugin) {
     if (!plugin) return false;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
-    if (!data) return false;
+    if (!data || !data->go_instance) return false;
     
-    // Hide the GUI
-    printf("Hiding GUI\n");
-    return true;
+    // Hide the GUI handle
+    if (guiHandles.count(plugin) > 0) {
+        bool success = guiHandles[plugin]->hide();
+        if (success) {
+            // Notify the Go side that GUI is hidden
+            return GoGUIHidden(data->go_instance);
+        }
+    }
+    
+    return false;
 }
 
 // Define the GUI extension structure
 static const clap_plugin_gui_t clapgo_gui_extension = {
     .is_api_supported = clapgo_gui_is_api_supported,
+    .get_preferred_api = clapgo_gui_get_preferred_api,
     .create = clapgo_gui_create,
     .destroy = clapgo_gui_destroy,
     .set_scale = clapgo_gui_set_scale,

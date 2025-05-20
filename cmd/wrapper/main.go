@@ -27,6 +27,7 @@ void GoOnMainThread(void *plugin);
 import "C"
 
 import (
+	"fmt"
 	"runtime/cgo"
 	"unsafe"
 
@@ -94,12 +95,26 @@ func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 		return nil
 	}
 	
+	// Create a wrapper to hold the processor
+	wrapper := &processorWrapper{
+		processor: processor,
+	}
+	
 	// Properly handle to Go object
-	handle := cgo.NewHandle(processor)
-	// This handle is safe to pass to and from C
+	handle := cgo.NewHandle(wrapper)
+	
+	// Print some debugging info
+	fmt.Printf("Creating plugin with ID: %s, handle: %v\n", id, handle)
+	
+	// Convert handle to pointer
 	pluginPtr := unsafe.Pointer(uintptr(handle))
 	
 	return pluginPtr
+}
+
+// processorWrapper is a wrapper around AudioProcessor to prevent garbage collection
+type processorWrapper struct {
+	processor goclap.AudioProcessor
 }
 
 //export GetVersion
@@ -131,13 +146,14 @@ func GoInit(plugin unsafe.Pointer) C.bool {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoInit could not convert handle to processorWrapper\n")
 		return C.bool(false)
 	}
 	
-	return C.bool(goclap.InitImpl(processor))
+	return C.bool(goclap.InitImpl(wrapper.processor))
 }
 
 //export GoDestroy
@@ -149,13 +165,14 @@ func GoDestroy(plugin unsafe.Pointer) {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoDestroy could not convert handle to processorWrapper\n")
 		return
 	}
 	
-	goclap.DestroyImpl(processor)
+	goclap.DestroyImpl(wrapper.processor)
 	
 	// Free the handle to prevent memory leaks
 	handle.Delete()
@@ -170,13 +187,14 @@ func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoActivate could not convert handle to processorWrapper\n")
 		return C.bool(false)
 	}
 	
-	return C.bool(goclap.ActivateImpl(processor, float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+	return C.bool(goclap.ActivateImpl(wrapper.processor, float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
 }
 
 //export GoDeactivate
@@ -188,13 +206,14 @@ func GoDeactivate(plugin unsafe.Pointer) {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoDeactivate could not convert handle to processorWrapper\n")
 		return
 	}
 	
-	goclap.DeactivateImpl(processor)
+	goclap.DeactivateImpl(wrapper.processor)
 }
 
 //export GoStartProcessing
@@ -206,13 +225,14 @@ func GoStartProcessing(plugin unsafe.Pointer) C.bool {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoStartProcessing could not convert handle to processorWrapper\n")
 		return C.bool(false)
 	}
 	
-	return C.bool(goclap.StartProcessingImpl(processor))
+	return C.bool(goclap.StartProcessingImpl(wrapper.processor))
 }
 
 //export GoStopProcessing
@@ -224,13 +244,14 @@ func GoStopProcessing(plugin unsafe.Pointer) {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoStopProcessing could not convert handle to processorWrapper\n")
 		return
 	}
 	
-	goclap.StopProcessingImpl(processor)
+	goclap.StopProcessingImpl(wrapper.processor)
 }
 
 //export GoReset
@@ -242,13 +263,14 @@ func GoReset(plugin unsafe.Pointer) {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoReset could not convert handle to processorWrapper\n")
 		return
 	}
 	
-	goclap.ResetImpl(processor)
+	goclap.ResetImpl(wrapper.processor)
 }
 
 //export GoProcess
@@ -260,11 +282,15 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoProcess could not convert handle to processorWrapper\n")
 		return C.int32_t(0) // CLAP_PROCESS_ERROR
 	}
+	
+	// Get the processor from the wrapper
+	processor := wrapper.processor
 
 	steadyTime := int64(process.steady_time)
 	framesCount := uint32(process.frames_count)
@@ -273,10 +299,67 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	var audioIn [][]float32
 	var audioOut [][]float32
 	
-	// Create a simpler approach that bypasses the need to access clap_audio_buffer directly
-	// We'll just pass empty slices for now as a proof of concept
-	audioIn = make([][]float32, 0) 
-	audioOut = make([][]float32, 0)
+	// Process input audio buffers if available
+	if process.audio_inputs != nil && process.audio_inputs_count > 0 {
+		// Get the number of input ports
+		inputsCount := int(process.audio_inputs_count)
+		audioIn = make([][]float32, 0, inputsCount)
+		
+		// Iterate through each input port
+		for i := 0; i < inputsCount; i++ {
+			// Get the current audio buffer using pointer arithmetic
+			inputPtr := unsafe.Pointer(uintptr(unsafe.Pointer(process.audio_inputs)) + 
+				uintptr(i)*unsafe.Sizeof(*process.audio_inputs))
+			input := (*C.clap_audio_buffer_t)(inputPtr)
+			
+			// Process each channel in this port
+			channelCount := int(input.channel_count)
+			if channelCount > 0 && input.data32 != nil {
+				// For each channel in this port
+				for ch := 0; ch < channelCount; ch++ {
+					// Get the channel data pointer
+					chPtr := unsafe.Pointer(uintptr(unsafe.Pointer(input.data32)) + 
+						uintptr(ch)*unsafe.Sizeof(uintptr(0)))
+					dataPtr := *(**C.float)(chPtr)
+					
+					// Convert to Go slice without copying data
+					audioChannel := unsafe.Slice((*float32)(unsafe.Pointer(dataPtr)), framesCount)
+					audioIn = append(audioIn, audioChannel)
+				}
+			}
+		}
+	}
+	
+	// Process output audio buffers if available
+	if process.audio_outputs != nil && process.audio_outputs_count > 0 {
+		// Get the number of output ports
+		outputsCount := int(process.audio_outputs_count)
+		audioOut = make([][]float32, 0, outputsCount)
+		
+		// Iterate through each output port
+		for i := 0; i < outputsCount; i++ {
+			// Get the current audio buffer using pointer arithmetic
+			outputPtr := unsafe.Pointer(uintptr(unsafe.Pointer(process.audio_outputs)) + 
+				uintptr(i)*unsafe.Sizeof(*process.audio_outputs))
+			output := (*C.clap_audio_buffer_t)(outputPtr)
+			
+			// Process each channel in this port
+			channelCount := int(output.channel_count)
+			if channelCount > 0 && output.data32 != nil {
+				// For each channel in this port
+				for ch := 0; ch < channelCount; ch++ {
+					// Get the channel data pointer
+					chPtr := unsafe.Pointer(uintptr(unsafe.Pointer(output.data32)) + 
+						uintptr(ch)*unsafe.Sizeof(uintptr(0)))
+					dataPtr := *(**C.float)(chPtr)
+					
+					// Convert to Go slice without copying data
+					audioChannel := unsafe.Slice((*float32)(unsafe.Pointer(dataPtr)), framesCount)
+					audioOut = append(audioOut, audioChannel)
+				}
+			}
+		}
+	}
 	
 	events := &goclap.ProcessEvents{
 		InEvents:  unsafe.Pointer(process.in_events),
@@ -296,14 +379,15 @@ func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoGetExtension could not convert handle to processorWrapper\n")
 		return nil
 	}
 	
 	extID := C.GoString(id)
-	return goclap.GetExtensionImpl(processor, extID)
+	return goclap.GetExtensionImpl(wrapper.processor, extID)
 }
 
 //export GoOnMainThread
@@ -315,13 +399,14 @@ func GoOnMainThread(plugin unsafe.Pointer) {
 	// Convert the plugin pointer back to a handle
 	handle := cgo.Handle(uintptr(plugin))
 	
-	// Get the processor from the handle
-	processor, ok := handle.Value().(goclap.AudioProcessor)
+	// Get the wrapper from the handle
+	wrapper, ok := handle.Value().(*processorWrapper)
 	if !ok {
+		fmt.Printf("Error: GoOnMainThread could not convert handle to processorWrapper\n")
 		return
 	}
 	
-	goclap.OnMainThreadImpl(processor)
+	goclap.OnMainThreadImpl(wrapper.processor)
 }
 
 // InitGainPlugin creates and registers the gain plugin
@@ -355,29 +440,67 @@ type GainPlugin struct {
 	sampleRate   float64
 	isActivated  bool
 	isProcessing bool
+	audioPorts   *goclap.AudioPortsExtension
+	paramManager *goclap.ParamManager
 }
 
-func (p *GainPlugin) Init() bool { return true }
+func (p *GainPlugin) Init() bool {
+	// Create audio ports extension on initialization
+	p.audioPorts = goclap.CreateAudioPortsExtension(p)
+	
+	// Initialize parameter manager
+	p.paramManager = goclap.NewParamManager()
+	
+	return true
+}
+
+// GetParamManager returns the parameter manager
+func (p *GainPlugin) GetParamManager() *goclap.ParamManager {
+	return p.paramManager
+}
+
 func (p *GainPlugin) Destroy() {}
+
 func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
 	p.sampleRate = sampleRate
 	p.isActivated = true
 	return true
 }
-func (p *GainPlugin) Deactivate() { p.isActivated = false }
+
+func (p *GainPlugin) Deactivate() { 
+	p.isActivated = false 
+}
+
 func (p *GainPlugin) StartProcessing() bool {
 	if !p.isActivated { return false }
 	p.isProcessing = true
 	return true
 }
-func (p *GainPlugin) StopProcessing() { p.isProcessing = false }
-func (p *GainPlugin) Reset() { p.gain = 1.0 }
-func (p *GainPlugin) GetExtension(id string) unsafe.Pointer { return nil }
+
+func (p *GainPlugin) StopProcessing() { 
+	p.isProcessing = false 
+}
+
+func (p *GainPlugin) Reset() { 
+	p.gain = 1.0 
+}
+
+func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
+	// Support the audio-ports extension
+	if id == "clap.audio-ports" {
+		return unsafe.Pointer(p.audioPorts)
+	}
+	return nil 
+}
+
 func (p *GainPlugin) OnMainThread() {}
 
 // Process applies gain to the audio
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *goclap.ProcessEvents) int {
-	// For our simple proof of concept, we'll just return CONTINUE
+	// Absolute minimum implementation to avoid crashes
+	// Ignores audio processing for now
+	
+	// Just return success
 	return 1 // CLAP_PROCESS_CONTINUE
 }
 

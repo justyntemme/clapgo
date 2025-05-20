@@ -53,6 +53,9 @@ type AudioProcessor interface {
 	
 	// Called on the main thread
 	OnMainThread()
+	
+	// Get the parameter manager for this plugin
+	GetParamManager() *ParamManager
 }
 
 // ProcessEvents wraps CLAP event access

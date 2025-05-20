@@ -49,6 +49,7 @@ if(CLAPGO_GUI_SUPPORT)
     target_include_directories(gain-with-gui PRIVATE
         ${CMAKE_SOURCE_DIR}/clap-plugins/plugins
         ${CMAKE_SOURCE_DIR}/clap-plugins/plugins/gui
+        ${CMAKE_SOURCE_DIR}/clap-plugins/clap-helpers
     )
 else()
     # Link without GUI support

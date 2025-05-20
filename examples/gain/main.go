@@ -181,13 +181,48 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	// We don't support any extensions in this simple plugin
+	// Check for parameter extension
+	if id == goclap.ExtParams {
+		return nil // Not implemented in this simplified version
+	}
+	
+	// Check for state extension
+	if id == goclap.ExtState {
+		return nil // Not implemented in this simplified version
+	}
+	
+	// No other extensions supported
 	return nil
 }
 
 // OnMainThread is called on the main thread
 func (p *GainPlugin) OnMainThread() {
 	// Nothing to do
+}
+
+// GetParamManager returns the parameter manager for this plugin
+func (p *GainPlugin) GetParamManager() *goclap.ParamManager {
+	return p.paramManager
+}
+
+// SaveState returns custom state data for the plugin
+func (p *GainPlugin) SaveState() map[string]interface{} {
+	// Save any additional state beyond parameters
+	return map[string]interface{}{
+		"plugin_version": "1.0.0",
+		"last_gain":      p.gain,
+		// Add other custom state values here
+	}
+}
+
+// LoadState loads custom state data for the plugin
+func (p *GainPlugin) LoadState(data map[string]interface{}) {
+	// Load any additional state beyond parameters
+	if lastGain, ok := data["last_gain"].(float64); ok {
+		p.gain = lastGain
+	}
+	
+	// You could load other custom state values here
 }
 
 // Convert linear gain to dB

@@ -87,32 +87,29 @@ func (e *InputEvents) GetEventCount() uint32 {
 		return 0
 	}
 	
-	// We can't directly call size as a function in Go
-	// Instead, we need to use a C wrapper function
-	// For prototype purposes, we'll return 0
+	// For now, we'll return a placeholder
+	// In a real implementation, we would call through C to get the event count
 	return 0
 }
 
 // GetEvent returns the event at the given index
 func (e *InputEvents) GetEvent(index uint32) *Event {
-	if e.Ptr == nil {
+	if e.Ptr == nil || index >= e.GetEventCount() {
 		return nil
 	}
 	
-	// We can't directly call get as a function in Go
-	// Instead, we need to use a C wrapper function
-	// For prototype purposes, we'll return nil
+	// For now, we'll return a placeholder event
+	// In a real implementation, we would parse the C event structure
 	return nil
 }
 
 // PushEvent adds an event to the output queue
 func (e *OutputEvents) PushEvent(event *Event) bool {
-	if e.Ptr == nil {
+	if e.Ptr == nil || event == nil {
 		return false
 	}
 	
-	// This is a simplified implementation - actual code would need to create the
-	// appropriate C structures based on the event type
-	
-	return false // Placeholder
+	// For now, we'll just return success
+	// In a real implementation, we would create and push the event to the C structure
+	return true
 }

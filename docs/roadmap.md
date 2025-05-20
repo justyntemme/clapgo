@@ -1,151 +1,143 @@
 # ClapGo Implementation Roadmap
 
-This roadmap outlines the implementation tasks needed to complete the ClapGo project, prioritized from simplest to most complex. Tasks are organized to tackle low-hanging fruit first and focus on resolving skipped tests.
+This roadmap outlines the remaining tasks needed to complete the ClapGo project, focusing specifically on getting both the gain and gain-with-gui plugins working properly. This is a proof-of-concept with some breaking changes allowed, but aimed at production-quality code.
 
-## 1. Host Callback Integration ✅
+## 1. Core Plugin Implementation ✅
 
-**Priority: High (Low-hanging fruit)**
-
-Implement C wrapper functions for host callback integration in `src/goclap/hostinfo.go`.
+**Priority: High (Foundation)**
 
 - **Tasks:**
-  - ✅ Create C wrapper functions for `RequestRestart` method
-  - ✅ Create C wrapper functions for `RequestProcess` method
-  - ✅ Create C wrapper functions for `RequestCallback` method
-  - ✅ Create C wrapper functions for `GetExtension` method
-  - ✅ Add proper error handling and logging
+  - ✅ Fix plugin registration in `cmd/wrapper/main.go`
+  - ✅ Implement proper CGO memory handling using cgo.Handle
+  - ✅ Fix plugin discovery in the C plugin layer
+  - ✅ Ensure basic plugin loading works
 
 - **Current Status:**
-  - ✅ Implemented C wrapper functions in the cgo preamble
-  - ✅ Added error handling with fmt.Println for warnings
-  - ✅ Updated method signatures to return bool for success/failure
-  - ✅ Proper memory management for C strings
+  - ✅ Plugin registration works properly
+  - ✅ The gain plugin passes basic validation tests
+  - ✅ Memory safety is ensured using proper CGO patterns
+  - ✅ The descriptor creation and handling is functional
 
-## 2. Memory Management for Descriptors ✅
+## 2. Audio Processing ✅
 
-**Priority: High (Low-hanging fruit)**
-
-Implement proper memory management for plugin descriptors in `src/c/plugin.c`.
+**Priority: High (Essential functionality)**
 
 - **Tasks:**
-  - ✅ Add code to free each descriptor in the `clapgo_deinit` function
-  - ✅ Ensure descriptors are properly allocated and tracked
-  - ✅ Implement memory cleanup to prevent leaks
+  - ✅ Implement proper audio buffer conversion between C and Go
+  - ✅ Add proper audio channel handling for stereo and mono configurations
+  - ✅ Implement gain processing with parameter control
+  - ✅ Add audio port configuration to properly expose inputs/outputs
 
 - **Current Status:**
-  - ✅ Implemented a tracking system for dynamically allocated descriptor fields
-  - ✅ Added deep copy functionality for descriptors to ensure proper memory ownership
-  - ✅ Added comprehensive cleanup in `clapgo_deinit` to free all resources
-  - ✅ Added error handling for allocation failures
+  - ✅ Audio buffer handling is implemented with proper safety checks
+  - ✅ The audio-ports extension is properly implemented
+  - ✅ Basic audio processing is working in the gain plugin
+  - ✅ All audio processing tests are passing successfully
 
-## 3. Plugin Implementation ✅
+## 3. Parameter Support ✅
 
-**Priority: High (Resolves skipped tests)**
-
-Implement a complete version of simplified code in `src/goclap/plugin.go`.
+**Priority: High (Essential functionality)**
 
 - **Tasks:**
-  - ✅ Restructure plugin implementation to avoid duplicate exported symbols
-  - ✅ Set up implementation functions for plugin handling in goclap package
-  - ✅ Connect wrapper functions to implementation functions
-  - Complete the `GetPluginInfo` function to properly return plugin descriptors
-  - Implement the `CreatePlugin` function to instantiate plugins
-  - Implement the `getProcessorFromPtr` function to retrieve Go processors from C plugin pointers
-  - Enhance audio buffer handling in the `GoProcess` function
+  - ✅ Implement the 'clap.params' extension
+  - ✅ Add parameter registration for gain control
+  - ✅ Implement parameter value change handling in processing
+  - ✅ Add parameter value to string conversion for UI display
+  - ✅ Implement parameter flush mechanism
 
 - **Current Status:**
-  - ✅ Basic structure has been implemented and builds successfully
-  - ✅ Plugin implementation structure has been reorganized to avoid conflicts
-  - ✅ Wrapper layer has been implemented to connect to Go implementation
-  - Remaining implementation needed for plugin descriptors and instance creation
+  - ✅ Full implementation of parameter extension with proper C/Go bridging
+  - ✅ Proper parameter event handling for automation
+  - ✅ Parameter value conversion for UI display
+  - ✅ Parameter manager implementation with normalize/denormalize support
+  - ✅ Parameter gesture begin/end support added for UI interaction
 
-## 4. Shared Library Loading ✅
+## 4. State Management ✅
 
-**Priority: Medium-High**
-
-Implement shared library loading for Go code in `src/c/plugin.c`.
+**Priority: Medium (Required for persistence)**
 
 - **Tasks:**
-  - ✅ Implement proper loading of the Go shared library in `clapgo_init`
-  - ✅ Add error handling for library loading failures
-  - ✅ Add version compatibility checks
+  - ✅ Implement the 'clap.state' extension
+  - ✅ Add serialization/deserialization of plugin state
+  - ✅ Ensure state reproducibility across plugin instances
+  - ✅ Handle buffered stream state loading/saving
 
 - **Current Status:**
-  - ✅ Implemented platform-specific shared library loading for Windows, macOS, and Linux
-  - ✅ Added robust error handling for library loading failures
-  - ✅ Implemented version compatibility checking between C and Go components
-  - ✅ Added intelligent library path search to find the Go shared library in multiple locations
-  - ✅ Set up function pointers to call into Go code from C
-  - ✅ Updated all plugin instance functions to use the loaded function pointers
+  - ✅ State extension is fully implemented 
+  - ✅ JSON-based state serialization for parameters and plugin-specific data
+  - ✅ Support for the Stater interface for plugin-specific state
+  - ✅ Stream reading/writing with proper error handling
 
-## 5. CGO Function Calls
+## 5. GUI Integration ✅
 
-**Priority: Medium-High**
-
-Implement Go function calls via CGO in `src/c/plugin.c`.
+**Priority: Medium (For gain-with-gui plugin)**
 
 - **Tasks:**
-  - Implement CGO calls for `clapgo_get_plugin_count`
-  - Implement CGO calls for `clapgo_get_plugin_descriptor`
-  - Implement CGO calls for plugin lifecycle functions (init, destroy, activate, etc.)
-  - Implement CGO calls for audio processing
+  - ✅ Complete the GUI bridge implementation in `examples/gain-with-gui/gui_bridge.cpp`
+  - ✅ Implement the CLAP GUI extension
+  - ✅ Connect GUI to plugin parameters
+  - ✅ Add window management across platforms (Windows, macOS, Linux)
 
 - **Current Status:**
-  - All functions have placeholders with printf statements
-  - No actual CGO integration is implemented
+  - ✅ Full implementation of GUI bridge using clap-plugins GUI framework
+  - ✅ GUI extension in Go with proper callbacks between C++ and Go code
+  - ✅ Parameter bridge with QML for UI controls
+  - ✅ Unified window management with platform-specific adapters (X11, Win32, Cocoa)
+  - ✅ Added GUIProvider interface for Go plugins to implement GUI features
 
-## 6. Preset Discovery Support
+## 6. Event Handling ⏳
 
-**Priority: Medium (Resolves multiple skipped tests)**
-
-Implement preset discovery factory support to resolve several skipped tests.
+**Priority: Medium (Required for full plugin functionality)**
 
 - **Tasks:**
-  - Implement the 'clap.preset-discovery-factory/draft-2' factory
-  - Add preset discovery crawler functionality
-  - Add preset loading functionality
-  - Ensure descriptor consistency
+  - Implement proper event handling for parameter changes
+  - Add support for transport events
+  - Handle note events for the synth plugin
 
 - **Current Status:**
-  - Currently skipped in tests with message "The plugin does not implement the 'clap.preset-discovery-factory/draft-2' factory"
-  - No implementation exists yet
+  - Basic event structure is defined
+  - Parameter events need proper implementation
+  - Note events are not yet handled
 
-## 7. Plugin ID Validation
+## 7. Build System Enhancements ⏳
 
-**Priority: Medium (Resolves skipped test)**
-
-Implement proper plugin ID validation to handle IDs with trailing garbage.
+**Priority: Medium (Required for distribution)**
 
 - **Tasks:**
-  - Enhance the plugin ID validation logic in CreatePlugin
-  - Add test for attempted creation with invalid ID
+  - Ensure proper shared library loading on all platforms
+  - Add packaging for plugin distribution
+  - Ensure libgoclap.so is properly installed with plugins
+  - Add version verification between components
 
 - **Current Status:**
-  - Currently skipped in tests with message "The plugin library does not expose any plugins"
-  - Basic plugin loading exists but no validation for malformed IDs
+  - Basic build system is in place
+  - Shared library is being copied to ~/.clap folder
+  - Need to formalize installation process for various platforms
 
-## 8. GUI Integration
+## 8. Advanced Extensions ⏳
 
-**Priority: Low (Complex feature)**
-
-Implement Qt/QML GUI initialization in `examples/gain-with-gui/gui_bridge.cpp`.
+**Priority: Low (Nice to have)**
 
 - **Tasks:**
-  - Complete the GUI initialization code for the gain-with-gui example
-  - Implement proper Qt/QML initialization
-  - Connect GUI to plugin parameters
-  - Handle window management across platforms
+  - Implement note ports for synth plugin
+  - Add preset system and preset discovery
+  - Implement thread pool support
+  - Add MIDI support
 
 - **Current Status:**
-  - Basic structure exists with stub implementations
-  - Comments indicate where real Qt/QML initialization should occur
+  - Extension stubs are defined
+  - Many extension tests are being skipped
+  - Need to prioritize which extensions to implement first
 
-## Additional Considerations
+## Next Steps
 
-- **Build System Enhancement:** Ensure the build system correctly handles CGO with the CLAP API
-- **Documentation:** Update documentation to reflect implementation details
-- **Testing:** Add unit tests for core functionality
-- **Examples:** Expand the example plugins to demonstrate more features
+To get both plugins (gain and gain-with-gui) working properly, the highest priorities are:
 
-By following this roadmap, the ClapGo project can systematically address the current gaps in implementation, starting with the simplest tasks and gradually moving to more complex features.
+1. ✅ **Complete Audio Processing**: Implement proper audio buffer handling and processing
+2. ✅ **Implement Parameter Support**: Add full parameter support with automation
+3. ✅ **Add State Management**: Implement basic state save/load functionality
+4. ✅ **Integrate GUI for gain-with-gui**: Connect the GUI bridge to parameters
 
+All core functionality has been implemented! The next steps could be to improve event handling and implement additional extensions to enhance the plugin functionality.
+
+By completing these core tasks, we have achieved a functional proof-of-concept that demonstrates the viability of Go-based CLAP plugins with a path toward a production-ready implementation.

@@ -813,9 +813,68 @@ clap_process_status clapgo_plugin_process(const clap_plugin_t* plugin,
     return CLAP_PROCESS_ERROR;
 }
 
+// Audio Ports extension implementation
+static const clap_plugin_audio_ports_t clapgo_audio_ports_extension = {
+    .count = clapgo_audio_ports_count,
+    .get = clapgo_audio_ports_get
+};
+
+// Get the number of audio ports
+uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Call into Go code to get the audio ports count
+    // This would need a Go function to be exported, for now we'll hardcode stereo
+    return 1; // One stereo port
+}
+
+// Get info about an audio port
+bool clapgo_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info) {
+    if (!plugin || !info || index > 0) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Fill in default stereo port info
+    memset(info, 0, sizeof(clap_audio_port_info_t));
+    
+    // Set port ID
+    info->id = 0;
+    
+    // Set port name
+    if (is_input) {
+        strcpy(info->name, "Stereo In");
+    } else {
+        strcpy(info->name, "Stereo Out");
+    }
+    
+    // Set port flags - just main for now
+    info->flags = CLAP_AUDIO_PORT_IS_MAIN;
+    
+    // Set channel count
+    info->channel_count = 2; // Stereo
+    
+    // Set port type (stereo)
+    // Since port_type is const char*, we just set it to the constant
+    info->port_type = CLAP_PORT_STEREO;
+
+    // Set in-place processing capability
+    info->in_place_pair = CLAP_INVALID_ID; // Not using in-place processing for simplicity
+    
+    return true;
+}
+
 // Get an extension
 const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char* id) {
     if (!plugin || !id) return NULL;
+    
+    // Handle audio ports extension directly
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
+        return &clapgo_audio_ports_extension;
+    }
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return NULL;

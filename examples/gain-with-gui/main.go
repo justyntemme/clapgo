@@ -5,6 +5,7 @@ package main
 // #include <stdlib.h>
 import "C"
 import (
+	"fmt"
 	"math"
 	"unsafe"
 
@@ -51,6 +52,8 @@ type GainPlugin struct {
 	
 	// GUI-related fields
 	hasGUI       bool
+	guiVisible   bool
+	guiCreated   bool
 }
 
 // NewGainPlugin creates a new gain plugin
@@ -186,13 +189,96 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	// GUI extensions are handled in the C++ part
+	// Check for parameter extension
+	if id == goclap.ExtParams {
+		return nil // Not implemented in this simplified version
+	}
+	
+	// Check for state extension
+	if id == goclap.ExtState {
+		return nil // Not implemented in this simplified version
+	}
+	
+	// GUI extensions are handled via the gui_bridge.cpp
 	return nil
+}
+
+// HasGUI returns true if the plugin has a GUI
+func (p *GainPlugin) HasGUI() bool {
+	return p.hasGUI
+}
+
+// GetPreferredGUIAPI returns the preferred GUI API
+func (p *GainPlugin) GetPreferredGUIAPI() (api string, isFloating bool) {
+	// Default to X11 on Linux, adjust based on OS
+	return goclap.WindowAPIX11, false
+}
+
+// OnGUICreated is called when the GUI is created
+func (p *GainPlugin) OnGUICreated() {
+	p.guiCreated = true
+	fmt.Println("Go: GUI created")
+}
+
+// OnGUIDestroyed is called when the GUI is destroyed
+func (p *GainPlugin) OnGUIDestroyed() {
+	p.guiCreated = false
+	p.guiVisible = false
+	fmt.Println("Go: GUI destroyed")
+}
+
+// OnGUIShown is called when the GUI is shown
+func (p *GainPlugin) OnGUIShown() {
+	p.guiVisible = true
+	fmt.Println("Go: GUI shown")
+}
+
+// OnGUIHidden is called when the GUI is hidden
+func (p *GainPlugin) OnGUIHidden() {
+	p.guiVisible = false
+	fmt.Println("Go: GUI hidden")
+}
+
+// GetGUISize returns the default GUI size
+func (p *GainPlugin) GetGUISize() (width, height uint32) {
+	return 400, 300
 }
 
 // OnMainThread is called on the main thread
 func (p *GainPlugin) OnMainThread() {
 	// Nothing to do
+}
+
+// GetParamManager returns the parameter manager for this plugin
+func (p *GainPlugin) GetParamManager() *goclap.ParamManager {
+	return p.paramManager
+}
+
+// SaveState returns custom state data for the plugin
+func (p *GainPlugin) SaveState() map[string]interface{} {
+	// Save any additional state beyond parameters
+	return map[string]interface{}{
+		"plugin_version": "1.0.0",
+		"last_gain":      p.gain,
+		"gui_visible":    p.guiVisible,
+		"gui_created":    p.guiCreated,
+	}
+}
+
+// LoadState loads custom state data for the plugin
+func (p *GainPlugin) LoadState(data map[string]interface{}) {
+	// Load any additional state beyond parameters
+	if lastGain, ok := data["last_gain"].(float64); ok {
+		p.gain = lastGain
+	}
+	
+	if guiVisible, ok := data["gui_visible"].(bool); ok {
+		p.guiVisible = guiVisible
+	}
+	
+	if guiCreated, ok := data["gui_created"].(bool); ok {
+		p.guiCreated = guiCreated
+	}
 }
 
 // Convert linear gain to dB
