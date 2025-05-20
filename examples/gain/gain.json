@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "plugin": {
+    "id": "com.clapgo.gain",
+    "name": "Simple Gain",
+    "vendor": "ClapGo",
+    "version": "1.0.0",
+    "description": "A simple gain plugin using ClapGo",
+    "url": "https://github.com/justyntemme/clapgo",
+    "manualUrl": "https://github.com/justyntemme/clapgo",
+    "supportUrl": "https://github.com/justyntemme/clapgo/issues",
+    "features": ["audio-effect", "stereo", "mono"]
+  },
+  "build": {
+    "goSharedLibrary": "libgain.so",
+    "entryPoint": "CreatePlugin",
+    "dependencies": []
+  },
+  "extensions": [
+    {
+      "id": "clap.audio-ports",
+      "supported": true
+    },
+    {
+      "id": "clap.state",
+      "supported": false
+    }
+  ],
+  "parameters": [
+    {
+      "id": 1,
+      "name": "Gain",
+      "minValue": 0.0,
+      "maxValue": 2.0,
+      "defaultValue": 1.0,
+      "flags": ["automatable", "bounded-below", "bounded-above"]
+    }
+  ]
+}

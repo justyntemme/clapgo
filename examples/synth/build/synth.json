@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0",
+  "plugin": {
+    "id": "com.clapgo.synth",
+    "name": "Simple Synth",
+    "vendor": "ClapGo",
+    "version": "1.0.0",
+    "description": "A simple synthesizer using ClapGo",
+    "url": "https://github.com/justyntemme/clapgo",
+    "manualUrl": "https://github.com/justyntemme/clapgo",
+    "supportUrl": "https://github.com/justyntemme/clapgo/issues",
+    "features": ["instrument", "synthesizer", "stereo", "mono"]
+  },
+  "build": {
+    "goSharedLibrary": "libsynth.so",
+    "entryPoint": "CreatePlugin",
+    "dependencies": []
+  },
+  "extensions": [
+    {
+      "id": "clap.audio-ports",
+      "supported": true
+    },
+    {
+      "id": "clap.note-ports",
+      "supported": true
+    },
+    {
+      "id": "clap.state",
+      "supported": false
+    },
+    {
+      "id": "clap.preset-load",
+      "supported": true
+    }
+  ],
+  "parameters": [
+    {
+      "id": 1,
+      "name": "Attack",
+      "minValue": 0.001,
+      "maxValue": 2.0,
+      "defaultValue": 0.1,
+      "flags": ["automatable", "bounded-below", "bounded-above"]
+    },
+    {
+      "id": 2,
+      "name": "Decay",
+      "minValue": 0.001,
+      "maxValue": 5.0,
+      "defaultValue": 0.3,
+      "flags": ["automatable", "bounded-below", "bounded-above"]
+    },
+    {
+      "id": 3,
+      "name": "Sustain",
+      "minValue": 0.0,
+      "maxValue": 1.0,
+      "defaultValue": 0.7,
+      "flags": ["automatable", "bounded-below", "bounded-above"]
+    },
+    {
+      "id": 4,
+      "name": "Release",
+      "minValue": 0.001,
+      "maxValue": 10.0,
+      "defaultValue": 0.5,
+      "flags": ["automatable", "bounded-below", "bounded-above"]
+    }
+  ]
+}

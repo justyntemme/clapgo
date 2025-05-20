@@ -1,8 +1,10 @@
 #include "bridge.h"
+#include "manifest.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <libgen.h>  // For dirname()
+#include <unistd.h>  // For access()
 
 // Global library handle
 clapgo_library_t clapgo_lib = NULL;
@@ -540,9 +542,59 @@ bool clapgo_init(const char* plugin_path) {
     printf("Found %u registered plugins in Go metadata registry\n", plugin_count);
     
     if (plugin_count == 0) {
-        fprintf(stderr, "Error: No plugins found in Go metadata registry\n");
-        clapgo_unload_library();
-        return false;
+        fprintf(stderr, "Warning: No plugins found in Go metadata registry, checking manifest files\n");
+        
+        // If no plugins registered, try to find a manifest file
+        const char* plugin_file = strrchr(plugin_path, '/');
+        if (!plugin_file) {
+            plugin_file = plugin_path;
+        } else {
+            plugin_file++; // Skip the '/'
+        }
+        
+        char plugin_name[256];
+        size_t plugin_name_len = strlen(plugin_file);
+        
+        // Remove .clap extension
+        if (plugin_name_len > 5 && strcmp(plugin_file + plugin_name_len - 5, ".clap") == 0) {
+            strncpy(plugin_name, plugin_file, plugin_name_len - 5);
+            plugin_name[plugin_name_len - 5] = '\0';
+        } else {
+            strncpy(plugin_name, plugin_file, sizeof(plugin_name) - 1);
+            plugin_name[sizeof(plugin_name) - 1] = '\0';
+        }
+        
+        // Try to find manifest in different locations
+        char manifest_path[512];
+        
+        // Try central manifest repository
+        snprintf(manifest_path, sizeof(manifest_path), "%s/.clap/manifests/%s.json", getenv("HOME"), plugin_name);
+        printf("Checking for manifest in central repository: %s\n", manifest_path);
+        
+        plugin_manifest_t manifest;
+        if (access(manifest_path, R_OK) == 0 && manifest_load_from_file(manifest_path, &manifest)) {
+            printf("Found manifest file: %s\n", manifest_path);
+            
+            // Override plugin count to 1
+            plugin_count = 1;
+            
+            // Create descriptor from manifest
+            plugin_descriptors[0] = manifest_to_descriptor(&manifest);
+            
+            if (plugin_descriptors[0]) {
+                printf("Loaded plugin from manifest: %s (%s)\n", 
+                       plugin_descriptors[0]->name, 
+                       plugin_descriptors[0]->id);
+                manifest_free(&manifest);
+                return true;
+            }
+            
+            manifest_free(&manifest);
+        } else {
+            fprintf(stderr, "Error: No plugins found in Go metadata registry and no valid manifest files\n");
+            clapgo_unload_library();
+            return false;
+        }
     }
     
     // Allocate the descriptor array

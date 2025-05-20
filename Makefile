@@ -46,6 +46,13 @@ else
     CFLAGS += -O2 -DNDEBUG
 endif
 
+# Add json-c library
+CFLAGS += $(shell pkg-config --cflags json-c)
+LDFLAGS += $(shell pkg-config --libs json-c)
+
+# Bridge source files
+C_BRIDGE_SRCS := src/c/bridge.c src/c/plugin.c src/c/manifest.c
+
 # Directories
 C_SRC_DIR := src/c
 GO_SRC_DIR := src/goclap
@@ -87,6 +94,12 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT): $(EXAMPLES_DIR)/$(1)/$(BUIL
 	@cd $(EXAMPLES_DIR)/$(1) && \
 	CGO_ENABLED=$(CGO_ENABLED) \
 	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/lib$(1).$(SO_EXT) *.go
+	@if [ -f "$(EXAMPLES_DIR)/$(1)/$(1).json" ]; then \
+		echo "Copying manifest file for $(1)..."; \
+		cp "$(EXAMPLES_DIR)/$(1)/$(1).json" "$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/"; \
+		mkdir -p $(HOME)/.clap/manifests/; \
+		cp "$(EXAMPLES_DIR)/$(1)/$(1).json" "$(HOME)/.clap/manifests/"; \
+	fi
 
 # C bridge objects
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o: $(C_SRC_DIR)/bridge.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
@@ -97,10 +110,14 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o: $(C_SRC_DIR)/plugin.c | $(EXAMPLES_D
 	@echo "Compiling C plugin for $(1)..."
 	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/plugin.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
 
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o: $(C_SRC_DIR)/manifest.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C manifest for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/manifest.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
+
 # Final CLAP plugin
-$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT) $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT) $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
 	@echo "Linking $(1).clap..."
-	$(LD) $(LDFLAGS) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -l$(1)
+	$(LD) $(LDFLAGS) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -l$(1) $(shell pkg-config --libs json-c)
 
 # Build target for each plugin
 build-$(1): build-go $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap

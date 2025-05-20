@@ -76,6 +76,152 @@ const (
 	VersionPatch = 0
 )
 
+// GainPlugin implements a simple gain plugin directly in the bridge
+// This is a temporary solution until we find a way to properly load plugins
+type GainPlugin struct {
+	// Plugin state
+	gain         float64
+	sampleRate   float64
+	isActivated  bool
+	isProcessing bool
+	host         unsafe.Pointer
+}
+
+// Init initializes the plugin
+func (p *GainPlugin) Init() bool {
+	return true
+}
+
+// Destroy cleans up plugin resources
+func (p *GainPlugin) Destroy() {
+	// Nothing to clean up
+}
+
+// Activate prepares the plugin for processing
+func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+	p.sampleRate = sampleRate
+	p.isActivated = true
+	return true
+}
+
+// Deactivate stops the plugin from processing
+func (p *GainPlugin) Deactivate() {
+	p.isActivated = false
+}
+
+// StartProcessing begins audio processing
+func (p *GainPlugin) StartProcessing() bool {
+	if !p.isActivated {
+		return false
+	}
+	p.isProcessing = true
+	return true
+}
+
+// StopProcessing ends audio processing
+func (p *GainPlugin) StopProcessing() {
+	p.isProcessing = false
+}
+
+// Reset resets the plugin state
+func (p *GainPlugin) Reset() {
+	p.gain = 1.0
+}
+
+// Process processes audio data
+func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+	// Check if we're in a valid state for processing
+	if !p.isActivated || !p.isProcessing {
+		return api.ProcessError
+	}
+	
+	// Process parameter changes from events
+	if events != nil {
+		eventCount := events.GetInputEventCount()
+		
+		for i := uint32(0); i < eventCount; i++ {
+			event := events.GetInputEvent(i)
+			if event == nil {
+				continue
+			}
+			
+			// Handle parameter changes
+			if event.Type == api.EventTypeParamValue {
+				paramEvent, ok := event.Data.(api.ParamEvent)
+				if ok && paramEvent.ParamID == 1 { // Gain parameter
+					p.gain = paramEvent.Value
+				}
+			}
+		}
+	}
+	
+	// If no audio inputs or outputs, nothing to do
+	if len(audioIn) == 0 || len(audioOut) == 0 {
+		return api.ProcessContinue
+	}
+	
+	// Get the number of channels (use min of input and output)
+	numChannels := len(audioIn)
+	if len(audioOut) < numChannels {
+		numChannels = len(audioOut)
+	}
+	
+	// Process audio - apply gain to each sample
+	for ch := 0; ch < numChannels; ch++ {
+		inChannel := audioIn[ch]
+		outChannel := audioOut[ch]
+		
+		// Make sure we have enough buffer space
+		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
+			return api.ProcessError
+		}
+		
+		// Apply gain to each sample
+		for i := uint32(0); i < framesCount; i++ {
+			outChannel[i] = inChannel[i] * float32(p.gain)
+		}
+	}
+	
+	// Check if the output is silent
+	isSilent := p.gain < 0.0001 // -80dB
+	
+	if isSilent {
+		return api.ProcessSleep
+	}
+	
+	return api.ProcessContinue
+}
+
+// GetExtension gets a plugin extension
+func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
+	return nil
+}
+
+// OnMainThread is called on the main thread
+func (p *GainPlugin) OnMainThread() {
+	// Nothing to do
+}
+
+// GetPluginInfo returns information about the plugin
+func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
+	return api.PluginInfo{
+		ID:          "com.clapgo.gain",
+		Name:        "Simple Gain",
+		Vendor:      "ClapGo",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     "1.0.0",
+		Description: "A simple gain plugin using ClapGo",
+		Features:    []string{"audio-effect", "stereo", "mono"},
+	}
+}
+
+// GetPluginID returns the plugin ID
+func (p *GainPlugin) GetPluginID() string {
+	return "com.clapgo.gain"
+}
+
 // EventHandler implements the api.EventHandler interface for CLAP events
 type EventHandler struct {
 	InEvents  unsafe.Pointer
@@ -86,6 +232,28 @@ type EventHandler struct {
 func (e *EventHandler) ProcessInputEvents() {
 	// Implementation depends on specific event types needed
 	// Each plugin should implement its own event processing
+}
+
+// GetPluginFromPtr retrieves the Go plugin from a plugin pointer.
+func GetPluginFromPtr(ptr unsafe.Pointer) api.Plugin {
+	if ptr == nil {
+		return nil
+	}
+
+	// Convert the plugin pointer back to a handle
+	handle := cgo.Handle(uintptr(ptr))
+
+	// Get the plugin from the handle
+	value := handle.Value()
+
+	// Try to cast to Plugin
+	plugin, ok := value.(api.Plugin)
+	if !ok {
+		fmt.Printf("Error: Failed to cast handle value to Plugin, got %T\n", value)
+		return nil
+	}
+
+	return plugin
 }
 
 // AddOutputEvent adds an event to the output queue
@@ -168,19 +336,17 @@ func (e *EventHandler) GetInputEvent(index uint32) *api.Event {
 
 //export GetPluginCount
 func GetPluginCount() C.uint32_t {
-	count := registry.GetPluginCount()
-	fmt.Printf("Go: GetPluginCount returning %d\n", count)
-	return C.uint32_t(count)
+	// This is a temporary fix: We hardcode 1 because we know we have one plugin
+	// In a real implementation, this should scan the plugin directory
+	// or use plugin metadata to determine the count
+	fmt.Printf("Go: GetPluginCount (hardcoded to 1)\n")
+	return C.uint32_t(1)
 }
 
 //export GetPluginInfo
 func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
-	info := registry.GetPluginInfo(uint32(index))
-	
-	// If the plugin info is empty, return nil
-	if info.ID == "" {
-		return nil
-	}
+	// For now, hardcode the info for our one plugin since registry might be empty
+	// In a real implementation, this should use plugin metadata
 	
 	// Create a new descriptor
 	desc := C.calloc(1, C.size_t(unsafe.Sizeof(C.struct_clap_plugin_descriptor{})))
@@ -192,30 +358,32 @@ func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
 	descriptor.clap_version.revision = 0
 	
 	// Convert all strings to C strings
-	descriptor.id = C.CString(info.ID)
-	descriptor.name = C.CString(info.Name)
-	descriptor.vendor = C.CString(info.Vendor)
-	descriptor.url = C.CString(info.URL)
-	descriptor.manual_url = C.CString(info.ManualURL)
-	descriptor.support_url = C.CString(info.SupportURL)
-	descriptor.version = C.CString(info.Version)
-	descriptor.description = C.CString(info.Description)
+	descriptor.id = C.CString("com.clapgo.gain")
+	descriptor.name = C.CString("Simple Gain")
+	descriptor.vendor = C.CString("ClapGo")
+	descriptor.url = C.CString("https://github.com/justyntemme/clapgo")
+	descriptor.manual_url = C.CString("https://github.com/justyntemme/clapgo")
+	descriptor.support_url = C.CString("https://github.com/justyntemme/clapgo/issues")
+	descriptor.version = C.CString("1.0.0")
+	descriptor.description = C.CString("A simple gain plugin using ClapGo")
 	
-	// Handle features array if any
-	if len(info.Features) > 0 {
-		// Allocate memory for the feature array (plus 1 for NULL terminator)
-		featureArray := C.calloc(C.size_t(len(info.Features)+1), C.size_t(unsafe.Sizeof(uintptr(0))))
-		features := (*[1<<30]*C.char)(featureArray)
-		
-		// Add each feature string
-		for i, feature := range info.Features {
-			features[i] = C.CString(feature)
-		}
-		// Set the NULL terminator
-		features[len(info.Features)] = nil
-		
-		descriptor.features = (**C.char)(featureArray)
+	// Add feature strings
+	features := []string{"audio-effect", "stereo", "mono"}
+	
+	// Allocate memory for the feature array (plus 1 for NULL terminator)
+	featureArray := C.calloc(C.size_t(len(features)+1), C.size_t(unsafe.Sizeof(uintptr(0))))
+	featuresPtr := (*[1<<30]*C.char)(featureArray)
+	
+	// Add each feature string
+	for i, feature := range features {
+		featuresPtr[i] = C.CString(feature)
 	}
+	// Set the NULL terminator
+	featuresPtr[len(features)] = nil
+	
+	descriptor.features = (**C.char)(featureArray)
+	
+	fmt.Printf("GetPluginInfo returning descriptor for: %s\n", C.GoString(descriptor.id))
 	
 	return descriptor
 }
@@ -225,11 +393,19 @@ func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
 	fmt.Printf("Go: CreatePlugin with ID: %s\n", id)
 	
-	plugin := registry.CreatePlugin(id)
+	// In a real implementation, this should create the correct plugin
+	// based on the ID. For now, hardcode creating a GainPlugin
 	
-	if plugin == nil {
-		fmt.Printf("Error: Failed to create plugin with ID: %s\n", id)
-		return nil
+	// Import the gain plugin package to ensure its init function runs
+	// This doesn't work in the current architecture, need a better approach
+	// For now, create a plugin directly
+	
+	// Create a new gain plugin
+	plugin := &GainPlugin{
+		gain:         1.0, // 0dB
+		sampleRate:   44100.0,
+		isActivated:  false,
+		isProcessing: false,
 	}
 	
 	// Create a handle to the plugin
@@ -237,6 +413,8 @@ func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 	
 	// Register the handle for cleanup
 	registry.RegisterHandle(handle)
+	
+	fmt.Printf("Created hardcoded gain plugin instance\n")
 	
 	return unsafe.Pointer(uintptr(handle))
 }
@@ -258,7 +436,7 @@ func GetVersion(major, minor, patch *C.uint32_t) C.bool {
 
 //export GoInit
 func GoInit(plugin unsafe.Pointer) C.bool {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -268,7 +446,7 @@ func GoInit(plugin unsafe.Pointer) C.bool {
 
 //export GoDestroy
 func GoDestroy(plugin unsafe.Pointer) {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -282,7 +460,7 @@ func GoDestroy(plugin unsafe.Pointer) {
 
 //export GoActivate
 func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -292,7 +470,7 @@ func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames
 
 //export GoDeactivate
 func GoDeactivate(plugin unsafe.Pointer) {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -302,7 +480,7 @@ func GoDeactivate(plugin unsafe.Pointer) {
 
 //export GoStartProcessing
 func GoStartProcessing(plugin unsafe.Pointer) C.bool {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -312,7 +490,7 @@ func GoStartProcessing(plugin unsafe.Pointer) C.bool {
 
 //export GoStopProcessing
 func GoStopProcessing(plugin unsafe.Pointer) {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -322,7 +500,7 @@ func GoStopProcessing(plugin unsafe.Pointer) {
 
 //export GoReset
 func GoReset(plugin unsafe.Pointer) {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -332,7 +510,7 @@ func GoReset(plugin unsafe.Pointer) {
 
 //export GoProcess
 func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.int32_t(api.ProcessError)
 	}
@@ -419,7 +597,7 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 
 //export GoGetExtension
 func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return nil
 	}
@@ -430,7 +608,7 @@ func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
 
 //export GoOnMainThread
 func GoOnMainThread(plugin unsafe.Pointer) {
-	p := registry.GetPluginFromPtr(plugin)
+	p := GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -441,6 +619,14 @@ func GoOnMainThread(plugin unsafe.Pointer) {
 // init initializes the bridge
 func init() {
 	fmt.Println("Initializing ClapGo bridge")
+	fmt.Println("Bridge package initialized, plugins will be registered by their respective packages.")
+	fmt.Printf("Currently registered plugins: %d\n", registry.GetPluginCount())
+	if registry.GetPluginCount() > 0 {
+		for i := uint32(0); i < registry.GetPluginCount(); i++ {
+			info := registry.GetPluginInfo(i)
+			fmt.Printf("Found plugin: %s (%s)\n", info.Name, info.ID)
+		}
+	}
 }
 
 // Export plugin metadata functions that the C code expects

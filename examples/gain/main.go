@@ -5,6 +5,7 @@ package main
 // #include <stdlib.h>
 import "C"
 import (
+	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/registry"
 	"math"
@@ -17,18 +18,24 @@ var (
 )
 
 func init() {
+	fmt.Println("Initializing gain plugin")
 	// Create our gain plugin and register it with the registry
 	gainPlugin = NewGainPlugin()
 	
 	// Register the plugin with the registry
 	// This could also use registry.RegisterPlugin() if the GainPlugin
 	// implemented the api.PluginProvider interface
-	registry.Register(gainPlugin.GetPluginInfo(), func() api.Plugin { return gainPlugin })
+	info := gainPlugin.GetPluginInfo()
+	fmt.Printf("Registering plugin: %s (%s)\n", info.Name, info.ID)
+	registry.Register(info, func() api.Plugin { return gainPlugin })
+	fmt.Printf("After registration, plugin count: %d\n", registry.GetPluginCount())
 }
 
 //export GetPluginCount
 func GetPluginCount() C.uint32_t {
-	return 1
+	count := registry.GetPluginCount()
+	fmt.Printf("Gain plugin - GetPluginCount returning: %d\n", count)
+	return C.uint32_t(count)
 }
 
 // GainPlugin implements a simple gain plugin
