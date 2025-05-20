@@ -12,12 +12,15 @@ UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
     PLATFORM := macos
     SO_EXT := dylib
+    CLAP_FORMAT := bundle
 else ifeq ($(UNAME), Linux)
     PLATFORM := linux
     SO_EXT := so
+    CLAP_FORMAT := so
 else
     PLATFORM := windows
     SO_EXT := dll
+    CLAP_FORMAT := dll
 endif
 
 # Go configuration
@@ -46,14 +49,28 @@ GO_SRC_DIR := src/goclap
 INTERNAL_DIR := internal
 PKG_DIR := pkg
 EXAMPLES_DIR := examples
+CLAP_INCLUDE_DIR := ./include/clap/include
 
-# Find all example plugins, initially we'll only use the simple ones
-SIMPLE_PLUGINS := $(EXAMPLES_DIR)/gain $(EXAMPLES_DIR)/synth
-EXAMPLE_PLUGINS := $(SIMPLE_PLUGINS)
-# Later we can add more complex plugins like $(EXAMPLES_DIR)/gain-with-gui
+# Define plugin directories
+EXAMPLE_PLUGINS := $(EXAMPLES_DIR)/gain $(EXAMPLES_DIR)/synth
+
+# Define plugin IDs and names
+PLUGIN_ID_gain := com.clapgo.gain
+PLUGIN_ID_synth := com.clapgo.synth
 
 # Main targets
-.PHONY: all clean install uninstall build-go build-plugins examples test
+.PHONY: all clean install uninstall build-go build-plugins examples test print-plugin-id
+
+# Helper target to print plugin ID
+print-plugin-id:
+	@for cfg in $(PLUGIN_CONFIGS); do \
+		name=$$(echo $$cfg | cut -d: -f1); \
+		id=$$(echo $$cfg | cut -d: -f2); \
+		if [ "$$name" = "$(NAME)" ]; then \
+			echo "$$id"; \
+			break; \
+		fi; \
+	done
 
 all: build-go build-plugins
 
@@ -65,22 +82,46 @@ build-go:
 		-o $(BUILD_DIR)/libgoclap.$(SO_EXT) \
 		./cmd/goclap
 
+# Plugin build rules
+# Common function to build a plugin
+define build_plugin
+# Create build directory
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR):
+	@mkdir -p $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+
+# Go library for the plugin
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT): $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Building Go plugin library for $(1)..."
+	@cd $(EXAMPLES_DIR)/$(1) && \
+	CGO_ENABLED=$(CGO_ENABLED) CLAPGO_PLUGIN_ID="$(PLUGIN_ID_$(1))" \
+	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/lib$(1).$(SO_EXT) *.go
+
+# C bridge objects
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o: $(C_SRC_DIR)/bridge.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C bridge for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID_$(1))\" -c $(C_SRC_DIR)/bridge.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o
+
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o: $(C_SRC_DIR)/plugin.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C plugin for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID_$(1))\" -c $(C_SRC_DIR)/plugin.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
+
+# Final CLAP plugin
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT) $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
+	@echo "Linking $(1).clap..."
+	$(LD) $(LDFLAGS) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -l$(1)
+
+# Build target for each plugin
+build-$(1): build-go $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap
+	@echo "Built $(1) plugin (ID: $(PLUGIN_ID_$(1)))"
+
+endef
+
+# Apply the build_plugin function for each plugin
+$(foreach plugin,gain synth,$(eval $(call build_plugin,$(plugin))))
+
 # Build all plugins
-build-plugins: build-go
-	@echo "Building CLAP plugins..."
-	@for plugin in $(EXAMPLE_PLUGINS); do \
-		if [ -d "$$plugin" ]; then \
-			plugin_name=$$(basename $$plugin); \
-			echo "  Building $$plugin_name..."; \
-			if [ -f "$$plugin/Makefile" ]; then \
-				$(MAKE) -C $$plugin || echo "  Build failed for $$plugin_name"; \
-			elif [ -f "$$plugin/CMakeLists.txt" ]; then \
-				echo "  $$plugin_name has CMakeLists.txt but no Makefile, skipping"; \
-			else \
-				echo "  No build system found for $$plugin_name, skipping"; \
-			fi; \
-		fi; \
-	done
+build-plugins: build-gain build-synth
+	@echo "All plugins built."
 
 # Install plugins to plugin directory
 install: all
@@ -130,7 +171,7 @@ clean:
 	@for plugin in $(EXAMPLE_PLUGINS); do \
 		if [ -d "$$plugin" ]; then \
 			echo "  Cleaning $$plugin..."; \
-			$(MAKE) -C $$plugin clean || echo "  No makefile in $$plugin"; \
+			rm -rf "$$plugin/$(BUILD_DIR)"; \
 		fi; \
 	done
 	@echo "Clean complete!"
@@ -143,7 +184,7 @@ test: all
 			plugin_name=$$(basename $$plugin); \
 			if [ -f "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" ]; then \
 				echo "  Testing $$plugin_name.clap..."; \
-				./test_plugin.sh "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" || echo "  Test failed for $$plugin_name"; \
+				./scripts/test_plugin.sh "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" || echo "  Test failed for $$plugin_name"; \
 			fi; \
 		fi; \
 	done
@@ -155,6 +196,8 @@ help:
 	@echo "  make              - Build all plugins"
 	@echo "  make build-go     - Build only the Go bridge library"
 	@echo "  make build-plugins - Build all CLAP plugins"
+	@echo "  make build-gain   - Build only the gain plugin"
+	@echo "  make build-synth  - Build only the synth plugin"
 	@echo "  make install      - Install plugins to $(INSTALL_DIR)"
 	@echo "  make uninstall    - Remove installed plugins"
 	@echo "  make clean        - Clean build artifacts"

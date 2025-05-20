@@ -13,31 +13,8 @@ import (
 	"github.com/justyntemme/clapgo/pkg/api"
 )
 
-func init() {
-	// Register the gain plugin directly
-	// This approach solves the issue of not being able to import the main packages
-	registerGainPlugin()
-}
-
-func registerGainPlugin() {
-	// Create plugin info for the gain plugin
-	info := api.PluginInfo{
-		ID:          "com.clapgo.gain",
-		Name:        "Simple Gain",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple gain plugin using ClapGo",
-		Features:    []string{"audio-effect", "stereo", "mono"},
-	}
-	
-	// Register a plugin factory
-	registry.Register(info, func() api.Plugin {
-		return &TestPlugin{info: info}
-	})
-}
+// No init registration - plugins register themselves in their respective init() functions
+// This allows for dynamic plugin ID handling
 
 // TestPlugin is a simple plugin implementation for testing
 type TestPlugin struct {

@@ -3,6 +3,8 @@
 
 # Plugin name (defaults to directory name)
 PLUGIN_NAME ?= $(shell basename $(CURDIR))
+# Plugin ID (defaults to com.clapgo.[plugin_name])
+PLUGIN_ID ?= com.clapgo.$(PLUGIN_NAME)
 
 # Directories
 ROOT_DIR ?= ../..
@@ -70,19 +72,19 @@ $(BUILD_DIR):
 # Build Go plugin library
 $(GO_LIB): $(GO_FILES) | $(BUILD_DIR)
 	@echo "Building Go plugin library for $(PLUGIN_NAME)..."
-	CGO_ENABLED=$(CGO_ENABLED) CLAPGO_PLUGIN_ID="com.clapgo.$(PLUGIN_NAME)" \
+	CGO_ENABLED=$(CGO_ENABLED) CLAPGO_PLUGIN_ID="$(PLUGIN_ID)" \
 	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $@ $(GO_FILES)
 
 # Compile C bridge files
 $(BUILD_DIR)/%.o: $(C_BRIDGE_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $<..."
-	$(CC) $(CFLAGS) -DCLAPGO_PLUGIN_ID=\"com.clapgo.$(PLUGIN_NAME)\" -c $< -o $@
+	$(CC) $(CFLAGS) -DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID)\" -c $< -o $@
 
 # Link final CLAP plugin
 $(PLUGIN_CLAP): $(C_BRIDGE_OBJECTS) $(GO_LIB)
 	@echo "Linking $(PLUGIN_NAME).clap..."
 	$(LD) $(LDFLAGS) -o $@ $(C_BRIDGE_OBJECTS) \
-		-DCLAPGO_PLUGIN_ID=\"com.clapgo.$(PLUGIN_NAME)\"
+		-DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID)\"
 
 # Clean build artifacts
 clean:
@@ -92,6 +94,7 @@ clean:
 # Debug info
 debug:
 	@echo "Plugin name: $(PLUGIN_NAME)"
+	@echo "Plugin ID: $(PLUGIN_ID)"
 	@echo "Platform: $(PLATFORM)"
 	@echo "Go files: $(GO_FILES)"
 	@echo "C bridge sources: $(C_BRIDGE_SOURCES)"
