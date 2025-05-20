@@ -133,61 +133,100 @@ func (p *StubPlugin) GetPluginID() string {
 	return p.id
 }
 
-// registerPlugins manually registers all available plugins
+// Sentinel value to indicate the plugin registration signal
+// This is used to ensure we don't try to register the plugin info twice
+var hasRegisteredPlugins = false
+
+// registerPlugins scans for plugin libraries and loads them dynamically
+// This is a more flexible approach compared to hardcoding plugin registrations
 func registerPlugins() {
-	// Register the gain plugin
-	registerGainPlugin()
-	
-	// Register the synth plugin
-	registerSynthPlugin()
+	if !hasRegisteredPlugins {
+		fmt.Println("Plugin registry initialized")
+		
+		// Get plugin ID from environment variable (if specified)
+		pluginID := os.Getenv("CLAPGO_PLUGIN_ID")
+		if pluginID != "" {
+			// When building the plugin-specific library, register a stub implementation
+			// that will later be replaced by the actual implementation
+			registerPluginStub(pluginID)
+		} else {
+			// When building the main bridge library, we need to detect plugins
+			// This could involve scanning directories or using a manifest
+			// For now, we'll just register known plugins as stubs
+			
+			// Since this is a PoC, we'll just register the known plugins
+			// In a real implementation, this would scan for plugins dynamically
+			searchForPlugins()
+		}
+		
+		hasRegisteredPlugins = true
+	}
 }
 
-// registerGainPlugin manually registers the gain plugin
-func registerGainPlugin() {
-	gainInfo := api.PluginInfo{
-		ID:          "com.clapgo.gain",
-		Name:        "Simple Gain",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple gain plugin using ClapGo",
-		Features:    []string{"audio-effect", "stereo", "mono"},
+// registerPluginStub registers a stub implementation for a specific plugin
+func registerPluginStub(pluginID string) {
+	var info api.PluginInfo
+	
+	// Set up default info based on the plugin ID
+	// In a real implementation, this would query the plugin for its info
+	switch pluginID {
+	case "com.clapgo.gain":
+		info = api.PluginInfo{
+			ID:          pluginID,
+			Name:        "Simple Gain",
+			Vendor:      "ClapGo",
+			URL:         "https://github.com/justyntemme/clapgo",
+			ManualURL:   "https://github.com/justyntemme/clapgo",
+			SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+			Version:     "1.0.0",
+			Description: "A simple gain plugin using ClapGo",
+			Features:    []string{"audio-effect", "stereo", "mono"},
+		}
+	case "com.clapgo.synth":
+		info = api.PluginInfo{
+			ID:          pluginID,
+			Name:        "Simple Synth",
+			Vendor:      "ClapGo",
+			URL:         "https://github.com/justyntemme/clapgo",
+			ManualURL:   "https://github.com/justyntemme/clapgo",
+			SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+			Version:     "1.0.0",
+			Description: "A simple synthesizer plugin using ClapGo",
+			Features:    []string{"instrument", "synthesizer", "stereo"},
+		}
+	default:
+		// Default info for unknown plugins
+		info = api.PluginInfo{
+			ID:          pluginID,
+			Name:        fmt.Sprintf("Plugin %s", pluginID),
+			Vendor:      "ClapGo",
+			URL:         "https://github.com/justyntemme/clapgo",
+			Version:     "1.0.0",
+			Description: fmt.Sprintf("ClapGo plugin: %s", pluginID),
+			Features:    []string{"audio-effect"},
+		}
 	}
 	
-	fmt.Println("Registering gain plugin:", gainInfo.ID)
-	registry.Register(gainInfo, func() api.Plugin {
-		// Create a stub plugin that satisfies the api.Plugin interface
-		// The real implementation will be loaded by the C bridge
+	// Register the stub plugin
+	fmt.Printf("Registering plugin stub: %s\n", info.ID)
+	registry.Register(info, func() api.Plugin {
 		return &StubPlugin{
-			id: gainInfo.ID,
-			info: gainInfo,
+			id:   info.ID,
+			info: info,
 		}
 	})
 }
 
-// registerSynthPlugin manually registers the synth plugin
-func registerSynthPlugin() {
-	synthInfo := api.PluginInfo{
-		ID:          "com.clapgo.synth",
-		Name:        "Simple Synth",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple synthesizer plugin using ClapGo",
-		Features:    []string{"instrument", "synthesizer", "stereo"},
+// searchForPlugins looks for available plugins
+// In a real implementation, this would scan directories, read manifests, etc.
+func searchForPlugins() {
+	// For this proof of concept, we'll just register the known plugins as stubs
+	knownPlugins := []string{
+		"com.clapgo.gain",
+		"com.clapgo.synth",
 	}
 	
-	fmt.Println("Registering synth plugin:", synthInfo.ID)
-	registry.Register(synthInfo, func() api.Plugin {
-		// Create a stub plugin that satisfies the api.Plugin interface
-		// The real implementation will be loaded by the C bridge
-		return &StubPlugin{
-			id: synthInfo.ID,
-			info: synthInfo,
-		}
-	})
+	for _, pluginID := range knownPlugins {
+		registerPluginStub(pluginID)
+	}
 }
