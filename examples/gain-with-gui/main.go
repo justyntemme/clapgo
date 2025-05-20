@@ -20,7 +20,7 @@ var (
 func init() {
 	// Register our gain plugin with GUI support
 	info := goclap.PluginInfo{
-		ID:          "com.clapgo.gain.gui",
+		ID:          "com.clapgo.gain-gui",
 		Name:        "Gain with GUI",
 		Vendor:      "ClapGo",
 		URL:         "https://github.com/justyntemme/clapgo",
@@ -279,6 +279,11 @@ func (p *GainPlugin) LoadState(data map[string]interface{}) {
 	if guiCreated, ok := data["gui_created"].(bool); ok {
 		p.guiCreated = guiCreated
 	}
+}
+
+// GetPluginID returns the plugin ID
+func (p *GainPlugin) GetPluginID() string {
+	return "com.clapgo.gain-gui"
 }
 
 // Convert linear gain to dB

@@ -225,6 +225,11 @@ func (p *GainPlugin) LoadState(data map[string]interface{}) {
 	// You could load other custom state values here
 }
 
+// GetPluginID returns the plugin ID
+func (p *GainPlugin) GetPluginID() string {
+	return "com.clapgo.gain"
+}
+
 // Convert linear gain to dB
 func linearToDb(linear float64) float64 {
 	if linear <= 0.0 {

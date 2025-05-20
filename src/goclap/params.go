@@ -190,6 +190,17 @@ func (pm *ParamManager) DenormalizeValue(paramID uint32, normalized float64) flo
 	return param.MinValue + normalized * (param.MaxValue - param.MinValue)
 }
 
+// SetParamByName sets a parameter value by name instead of ID
+func (pm *ParamManager) SetParamByName(name string, value float64) bool {
+	// Find the parameter ID by name
+	for id, param := range pm.params {
+		if param.Name == name {
+			return pm.SetParamValue(id, value)
+		}
+	}
+	return false
+}
+
 // GetParamInfoFromC converts C parameter info to Go
 func GetParamInfoFromC(cInfo *C.clap_param_info_t) ParamInfo {
 	if cInfo == nil {

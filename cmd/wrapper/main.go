@@ -28,6 +28,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"runtime/cgo"
 	"unsafe"
 
@@ -411,9 +412,15 @@ func GoOnMainThread(plugin unsafe.Pointer) {
 
 // InitGainPlugin creates and registers the gain plugin
 func InitGainPlugin() {
+	// Get plugin ID from environment variable or use default
+	pluginID := os.Getenv("CLAPGO_PLUGIN_ID")
+	if pluginID == "" {
+		pluginID = "com.clapgo.gain"
+	}
+	
 	// Register a simple gain plugin directly
 	info := goclap.PluginInfo{
-		ID:          "com.clapgo.gain",
+		ID:          pluginID,
 		Name:        "Simple Gain",
 		Vendor:      "ClapGo",
 		URL:         "https://github.com/justyntemme/clapgo",
@@ -428,6 +435,7 @@ func InitGainPlugin() {
 	gain := &GainPlugin{
 		gain:       1.0,
 		sampleRate: 44100.0,
+		pluginID:   pluginID,
 	}
 	
 	// Register the plugin
@@ -442,6 +450,15 @@ type GainPlugin struct {
 	isProcessing bool
 	audioPorts   *goclap.AudioPortsExtension
 	paramManager *goclap.ParamManager
+	pluginID     string
+}
+
+// GetPluginID returns the plugin ID
+func (p *GainPlugin) GetPluginID() string {
+	if p.pluginID == "" {
+		return os.Getenv("CLAPGO_PLUGIN_ID")
+	}
+	return p.pluginID
 }
 
 func (p *GainPlugin) Init() bool {

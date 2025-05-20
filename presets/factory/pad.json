@@ -1,0 +1,13 @@
+{
+    "name": "Pad Synth",
+    "description": "A smooth pad synth with longer attack and release",
+    "plugin_ids": ["com.clapgo.synth"],
+    "waveform": 0,
+    "attack": 0.5,
+    "decay": 0.8,
+    "sustain": 0.9,
+    "release": 1.5,
+    "state_data": {
+        "plugin_version": "1.0.0"
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Ambient Pad",
+  "description": "A smooth pad sound for ambient music",
+  "plugin_ids": ["com.clapgo.synth"],
+  "waveform": 0,
+  "attack": 0.8,
+  "decay": 1.5,
+  "sustain": 0.6,
+  "release": 1.2,
+  "state_data": {
+    "plugin_version": "1.0.0"
+  }
+}

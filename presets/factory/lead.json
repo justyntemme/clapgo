@@ -1,0 +1,13 @@
+{
+    "name": "Lead Synth",
+    "description": "A simple lead synth preset",
+    "plugin_ids": ["com.clapgo.synth"],
+    "waveform": 1,
+    "attack": 0.005,
+    "decay": 0.1,
+    "sustain": 0.8,
+    "release": 0.2,
+    "state_data": {
+        "plugin_version": "1.0.0"
+    }
+}
