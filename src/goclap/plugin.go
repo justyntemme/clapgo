@@ -8,6 +8,36 @@ import (
 	"unsafe"
 )
 
+// Extension IDs - Note that ExtParams, ExtState, and ExtGUI are declared in their respective files
+const (
+	ExtNotePorts            = "clap.note-ports"
+	ExtAudioPorts           = "clap.audio-ports"
+	ExtTimerSupport         = "clap.timer-support"
+	ExtVoiceInfo            = "clap.voice-info"
+	ExtThreadCheck          = "clap.thread-check"
+	ExtThreadPool           = "clap.thread-pool"
+	ExtLatency              = "clap.latency"
+	ExtTail                 = "clap.tail"
+	ExtRender               = "clap.render"
+	ExtPosixFDSupport       = "clap.posix-fd-support"
+	ExtTrackInfo            = "clap.track-info"
+	ExtLogSupport           = "clap.log"
+	ExtContextMenu          = "clap.context-menu"
+	ExtResourceDirectory    = "clap.ext.draft.resource-directory"
+	ExtPresetLoad           = "clap.preset-load"
+	ExtRemoteControls       = "clap.remote-controls"
+	ExtStateContext         = "clap.state-context"
+	ExtEventRegistry        = "clap.event-registry"
+	ExtParamIndication      = "clap.param-indication"
+	ExtAudioPortsConfig     = "clap.audio-ports-config"
+	ExtAudioPortsActivation = "clap.audio-ports-activation"
+	ExtConfigurableAudioPorts = "clap.configurable-audio-ports"
+	ExtAmbisonic            = "clap.ambisonic"
+	ExtSurround             = "clap.surround"
+	ExtNoteName             = "clap.note-name"
+	ExtTransportControl     = "clap.ext.draft.transport-control"
+)
+
 // PluginInfo holds metadata about a CLAP plugin.
 type PluginInfo struct {
 	ID          string
@@ -56,13 +86,12 @@ type AudioProcessor interface {
 	
 	// Get the parameter manager for this plugin
 	GetParamManager() *ParamManager
+	
+	// Get the plugin ID (for preset loading)
+	GetPluginID() string
 }
 
-// ProcessEvents wraps CLAP event access
-type ProcessEvents struct {
-	InEvents  unsafe.Pointer
-	OutEvents unsafe.Pointer
-}
+// ProcessEvents is declared in events.go
 
 // pluginRegistry maps plugin IDs to Go plugin instances
 var pluginRegistry = struct {
@@ -88,6 +117,9 @@ func RegisterPlugin(info PluginInfo, processor AudioProcessor) {
 	pluginInfoRegistry.Lock()
 	defer pluginInfoRegistry.Unlock()
 	
+	// Store with the original ID
+	// If a plugin with the same ID already exists, it will be replaced
+	// This should be fine for our proof of concept
 	pluginRegistry.plugins[info.ID] = processor
 	pluginInfoRegistry.infos[info.ID] = info
 }
@@ -113,6 +145,8 @@ func GetPluginInfoImpl(index uint32) PluginInfo {
 	// Convert infos map to a slice and get the item at the index
 	var plugins []PluginInfo
 	for _, info := range pluginInfoRegistry.infos {
+		// Store the original info from the map
+		// This ensures that the host sees the correct plugin ID
 		plugins = append(plugins, info)
 	}
 	
@@ -126,13 +160,17 @@ func GetPluginInfoImpl(index uint32) PluginInfo {
 // CreatePluginImpl creates a new plugin instance
 func CreatePluginImpl(pluginID string) AudioProcessor {
 	pluginRegistry.RLock()
-	processor, exists := pluginRegistry.plugins[pluginID]
-	pluginRegistry.RUnlock()
+	defer pluginRegistry.RUnlock()
 	
+	// Directly lookup the plugin by ID in our simplified registry
+	processor, exists := pluginRegistry.plugins[pluginID]
 	if !exists {
 		return nil
 	}
 	
+	// Return the processor
+	// In a production system, you'd want to create a new instance here
+	// using reflection or some factory pattern
 	return processor
 }
 
