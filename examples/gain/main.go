@@ -17,21 +17,13 @@ var (
 )
 
 func init() {
-	// Register our gain plugin with the plugin registry for instantiation
-	info := api.PluginInfo{
-		ID:          PluginID,
-		Name:        PluginName,
-		Vendor:      PluginVendor,
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     PluginVersion,
-		Description: PluginDescription,
-		Features:    []string{"audio-effect", "stereo", "mono"},
-	}
-	
+	// Create our gain plugin and register it with the registry
 	gainPlugin = NewGainPlugin()
-	registry.Register(info, func() api.Plugin { return gainPlugin })
+	
+	// Register the plugin with the registry
+	// This could also use registry.RegisterPlugin() if the GainPlugin
+	// implemented the api.PluginProvider interface
+	registry.Register(gainPlugin.GetPluginInfo(), func() api.Plugin { return gainPlugin })
 }
 
 //export GetPluginCount

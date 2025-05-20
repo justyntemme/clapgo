@@ -21,21 +21,13 @@ var (
 )
 
 func init() {
-	// Register our synth plugin with the plugin registry for instantiation
-	info := api.PluginInfo{
-		ID:          PluginID,
-		Name:        PluginName,
-		Vendor:      PluginVendor,
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     PluginVersion,
-		Description: PluginDescription,
-		Features:    []string{"instrument", "synthesizer", "stereo"},
-	}
-	
+	// Create our synth plugin
 	synthPlugin = NewSynthPlugin()
-	registry.Register(info, func() api.Plugin { return synthPlugin })
+	
+	// Register the plugin with the registry
+	// This could also use registry.RegisterPlugin() if the SynthPlugin
+	// implemented the api.PluginProvider interface
+	registry.Register(synthPlugin.GetPluginInfo(), func() api.Plugin { return synthPlugin })
 }
 
 //export GetPluginCount

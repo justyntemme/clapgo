@@ -1,5 +1,7 @@
 // Package registry provides a centralized registry for CLAP plugins.
 // It manages the registration, discovery, and instantiation of plugins.
+// This package allows plugins to register themselves with the system without
+// requiring code in the bridge package to know about specific plugins.
 package registry
 
 import (
@@ -24,6 +26,8 @@ type PluginEntry struct {
 }
 
 // Registry is the centralized registry for all plugins.
+// It implements the api.PluginRegistrar interface to provide
+// plugin registration functionality.
 type Registry struct {
 	// mu protects access to the registry maps
 	mu sync.RWMutex
@@ -42,6 +46,9 @@ func New() *Registry {
 		handles: make(map[uintptr]bool),
 	}
 }
+
+// Ensure the Registry implements the PluginRegistrar interface
+var _ api.PluginRegistrar = (*Registry)(nil)
 
 // Register registers a plugin with the registry.
 func (r *Registry) Register(info api.PluginInfo, creator func() api.Plugin) {
@@ -171,10 +178,35 @@ func (r *Registry) GetPluginFromPtr(ptr unsafe.Pointer) api.Plugin {
 	return plugin
 }
 
+// GetPluginIDs returns a slice of all registered plugin IDs.
+func (r *Registry) GetPluginIDs() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.plugins))
+	for id := range r.plugins {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // Global functions that operate on the global registry
 
 // Register registers a plugin with the global registry.
+// This function should be called by plugins during their initialization.
+// Each plugin should provide its own info and a creator function that returns
+// a new instance of the plugin when called.
 func Register(info api.PluginInfo, creator func() api.Plugin) {
+	globalRegistry.Register(info, creator)
+}
+
+// RegisterPlugin registers a plugin with the global registry using a PluginProvider.
+// This is a convenience function for plugins that implement the PluginProvider interface.
+func RegisterPlugin(provider api.PluginProvider) {
+	info := provider.GetPluginInfo()
+	creator := func() api.Plugin {
+		return provider.CreatePlugin()
+	}
 	globalRegistry.Register(info, creator)
 }
 
@@ -191,6 +223,12 @@ func GetPluginInfo(index uint32) api.PluginInfo {
 // CreatePlugin creates a new instance of a plugin by ID from the global registry.
 func CreatePlugin(id string) api.Plugin {
 	return globalRegistry.CreatePlugin(id)
+}
+
+// GetPluginIDs returns a slice of all registered plugin IDs.
+// This is useful for enumerating available plugins.
+func GetPluginIDs() []string {
+	return globalRegistry.GetPluginIDs()
 }
 
 // RegisterHandle registers a cgo.Handle with the global registry.
