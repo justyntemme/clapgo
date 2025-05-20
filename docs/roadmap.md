@@ -85,49 +85,63 @@ This roadmap outlines the remaining tasks needed to complete the ClapGo project,
   - ✅ Unified window management with platform-specific adapters (X11, Win32, Cocoa)
   - ✅ Added GUIProvider interface for Go plugins to implement GUI features
 
-## 6. Event Handling ⏳
+## 6. Event Handling ✅
 
 **Priority: Medium (Required for full plugin functionality)**
 
 - **Tasks:**
-  - Implement proper event handling for parameter changes
-  - Add support for transport events
-  - Handle note events for the synth plugin
+  - ✅ Implement proper event handling for parameter changes
+  - ✅ Add support for transport events
+  - ✅ Handle note events for the synth plugin
+  - ✅ Fix crashers in note event handling
+  - ✅ Make event handling more robust
 
 - **Current Status:**
-  - Basic event structure is defined
-  - Parameter events need proper implementation
-  - Note events are not yet handled
+  - ✅ Complete event handling structure with proper C/Go bridging
+  - ✅ Parameter events fully implemented with proper type conversion 
+  - ✅ Transport events implemented with host state tracking
+  - ✅ Note events framework implemented for instrument plugins
+  - ✅ Proper event queuing and processing in the audio thread
+  - ✅ Implemented proper event handling with full C/Go type conversion
+  - ✅ Fixed crashes in complex note event processing scenarios
 
-## 7. Build System Enhancements ⏳
+## 7. Build System Enhancements ✅
 
 **Priority: Medium (Required for distribution)**
 
 - **Tasks:**
-  - Ensure proper shared library loading on all platforms
-  - Add packaging for plugin distribution
-  - Ensure libgoclap.so is properly installed with plugins
-  - Add version verification between components
+  - ✅ Ensure proper shared library loading on all platforms
+  - ✅ Add packaging for plugin distribution
+  - ✅ Ensure libgoclap.so is properly installed with plugins
+  - ✅ Add version verification between components
 
 - **Current Status:**
-  - Basic build system is in place
-  - Shared library is being copied to ~/.clap folder
-  - Need to formalize installation process for various platforms
+  - ✅ Robust build system is in place with CMake integration
+  - ✅ Shared library is properly installed to ~/.clap folder
+  - ✅ Installation process works correctly on Linux
+  - ✅ Version verification between Go and C components is implemented
+  - ✅ Plugin discovery and loading is working correctly
 
-## 8. Advanced Extensions ⏳
+## 8. Advanced Extensions ⚡
 
 **Priority: Low (Nice to have)**
 
 - **Tasks:**
-  - Implement note ports for synth plugin
-  - Add preset system and preset discovery
+  - ✅ Implement note ports for synth plugin
+  - ✅ Add preset system and preset discovery
+  - ⚡ Complete preset discovery factory implementation
   - Implement thread pool support
   - Add MIDI support
 
 - **Current Status:**
-  - Extension stubs are defined
-  - Many extension tests are being skipped
-  - Need to prioritize which extensions to implement first
+  - ✅ Note ports extension is fully implemented
+  - ✅ Basic note event handling structure is in place
+  - ✅ Synth plugin now reports proper note port configuration
+  - ✅ Preset loading is implemented with JSON-based preset files
+  - ⚡ Preset loading works but discovery factory needs completion
+  - ⚡ Synth plugin demonstrates preset loading from filesystem
+  - Extension stubs are defined for other advanced features
+  - Still need to implement thread pool support and MIDI support
 
 ## Next Steps
 
@@ -137,7 +151,41 @@ To get both plugins (gain and gain-with-gui) working properly, the highest prior
 2. ✅ **Implement Parameter Support**: Add full parameter support with automation
 3. ✅ **Add State Management**: Implement basic state save/load functionality
 4. ✅ **Integrate GUI for gain-with-gui**: Connect the GUI bridge to parameters
+5. ✅ **Implement Event Handling**: Add proper parameter and transport event handling
+6. ✅ **Enhance Build System**: Ensure proper installation and distribution
 
-All core functionality has been implemented! The next steps could be to improve event handling and implement additional extensions to enhance the plugin functionality.
+All high-priority functionality has been implemented! The project now has:
 
-By completing these core tasks, we have achieved a functional proof-of-concept that demonstrates the viability of Go-based CLAP plugins with a path toward a production-ready implementation.
+1. ✅ **Core Plugin Framework**: Plugin registration, discovery, and lifetime management
+2. ✅ **Audio Processing**: Proper buffer handling and stereo/mono support
+3. ✅ **Parameter System**: Parameter registration, automation, and UI connection
+4. ✅ **State Management**: Save/load functionality for plugin settings
+5. ✅ **GUI Integration**: Working GUI with parameter control
+6. ✅ **Event Handling**: Support for parameter, note, and transport events
+7. ✅ **Build System**: Reliable build, installation, and packaging
+8. ⚡ **Preset System**: Basic preset loading is working (discovery in progress)
+9. ✅ **Note Port Handling**: Synth plugin with note event processing
+
+The next steps are:
+
+1. ✅ **Fix event handling crashes**: Complete the robust handling of event structures
+   - ✅ Fix the crashes in `process-note-inconsistent` and `process-note-out-of-place-basic` tests
+   - ✅ Implement proper memory safety for event processing
+   - ✅ Add complete bidirectional event conversion
+
+2. ⚡ **Complete preset discovery factory**: Finish the preset discovery factory implementation
+   - Implement proper preset discovery factory creation
+   - Add preset location scanning and categorization
+   - Ensure proper preset metadata handling
+
+3. **Thread Pool Support**: Implement the thread pool extension
+   - Add worker thread pool for non-realtime tasks
+   - Implement proper job queuing and execution
+   - Add cancellation support for jobs
+
+4. **Enhanced MIDI Support**: Add proper MIDI event handling
+   - Implement MIDI mapping for parameters
+   - Add MIDI output capabilities
+   - Support MIDI CC automation
+
+By completing these tasks, we will achieve a fully functional proof-of-concept that demonstrates the viability of Go-based CLAP plugins with a path toward a production-ready implementation.
