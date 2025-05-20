@@ -1,0 +1,223 @@
+// build: CGO_ENABLED=1 go build -buildmode=c-shared -o gain.clap ./examples/gain
+
+package main
+
+import (
+	"math"
+	"unsafe"
+
+	"github.com/justyntemme/clapgo/internal/registry"
+	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/clap"
+)
+
+func init() {
+	// Create plugin info
+	info := api.PluginInfo{
+		ID:          "com.clapgo.gain",
+		Name:        "Simple Gain",
+		Vendor:      "ClapGo",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     "1.0.0",
+		Description: "A simple gain plugin using ClapGo",
+		Features:    []string{"audio-effect", "stereo", "mono"},
+	}
+
+	// Register the plugin with the registry
+	registry.Register(info, func() api.Plugin {
+		return NewGainPlugin(info)
+	})
+}
+
+// GainPlugin implements a simple gain plugin.
+type GainPlugin struct {
+	*clap.BasePlugin
+	gain         float64
+	paramManager *clap.ParamManager
+}
+
+// NewGainPlugin creates a new gain plugin.
+func NewGainPlugin(info api.PluginInfo) *GainPlugin {
+	plugin := &GainPlugin{
+		BasePlugin:   clap.NewBasePlugin(info),
+		gain:         1.0, // 0dB
+		paramManager: clap.NewParamManager(),
+	}
+	
+	// Register parameters
+	plugin.paramManager.RegisterParam(api.ParamInfo{
+		ID:           1,
+		Name:         "Gain",
+		Module:       "",
+		MinValue:     0.0,  // -inf dB
+		MaxValue:     2.0,  // +6 dB
+		DefaultValue: 1.0,  // 0 dB
+		Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+	})
+	
+	return plugin
+}
+
+// Init initializes the plugin.
+func (p *GainPlugin) Init() bool {
+	// Call base implementation
+	if !p.BasePlugin.Init() {
+		return false
+	}
+	
+	// Additional initialization
+	return true
+}
+
+// Process handles audio processing.
+func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+	// Check if we're in a valid state for processing
+	if !p.IsActivated || !p.IsProcessing {
+		return api.ProcessError
+	}
+	
+	// Process parameter changes from events
+	if events != nil {
+		// Get number of events
+		eventCount := events.GetInputEventCount()
+		
+		// Process each event
+		for i := uint32(0); i < eventCount; i++ {
+			event := events.GetInputEvent(i)
+			if event == nil {
+				continue
+			}
+			
+			// Handle parameter changes
+			if event.Type == api.EventTypeParamValue {
+				if paramEvent, ok := event.Data.(api.ParamEvent); ok {
+					if paramEvent.ParamID == 1 { // Gain parameter
+						p.gain = paramEvent.Value
+					}
+				}
+			}
+		}
+	}
+	
+	// If no audio inputs or outputs, nothing to do
+	if len(audioIn) == 0 || len(audioOut) == 0 {
+		return api.ProcessContinue
+	}
+	
+	// Get the number of channels (use min of input and output)
+	numChannels := len(audioIn)
+	if len(audioOut) < numChannels {
+		numChannels = len(audioOut)
+	}
+	
+	// Process audio - apply gain to each sample
+	for ch := 0; ch < numChannels; ch++ {
+		inChannel := audioIn[ch]
+		outChannel := audioOut[ch]
+		
+		// Make sure we have enough buffer space
+		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
+			return api.ProcessError
+		}
+		
+		// Apply gain to each sample
+		for i := uint32(0); i < framesCount; i++ {
+			outChannel[i] = inChannel[i] * float32(p.gain)
+		}
+	}
+	
+	// Check if the output is silent
+	isSilent := p.gain < 0.0001 // -80dB
+	
+	if isSilent {
+		return api.ProcessSleep
+	}
+	
+	return api.ProcessContinue
+}
+
+// GetExtension retrieves a plugin extension.
+func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
+	// Check for parameter extension
+	if id == api.ExtParams {
+		// In a real implementation, we would return a pointer to the parameter extension
+		return nil
+	}
+	
+	// Let the base implementation handle other extensions
+	return p.BasePlugin.GetExtension(id)
+}
+
+// GetParamCount returns the number of parameters.
+func (p *GainPlugin) GetParamCount() uint32 {
+	return p.paramManager.GetParamCount()
+}
+
+// GetParamInfo returns information about a parameter.
+func (p *GainPlugin) GetParamInfo(paramID uint32) api.ParamInfo {
+	return p.paramManager.GetParamInfo(paramID)
+}
+
+// GetParamValue returns the current value of a parameter.
+func (p *GainPlugin) GetParamValue(paramID uint32) float64 {
+	if paramID == 1 {
+		return p.gain
+	}
+	return 0.0
+}
+
+// SetParamValue sets the value of a parameter.
+func (p *GainPlugin) SetParamValue(paramID uint32, value float64) {
+	if paramID == 1 {
+		// Clamp to range
+		info := p.paramManager.GetParamInfo(paramID)
+		if info.Flags&api.ParamIsBoundedBelow != 0 && value < info.MinValue {
+			value = info.MinValue
+		}
+		if info.Flags&api.ParamIsBoundedAbove != 0 && value > info.MaxValue {
+			value = info.MaxValue
+		}
+		
+		p.gain = value
+	}
+}
+
+// FlushParams writes all parameter changes to the DSP.
+func (p *GainPlugin) FlushParams() {
+	// Nothing to do in this implementation
+}
+
+// SaveState returns the plugin state.
+func (p *GainPlugin) SaveState() map[string]interface{} {
+	return map[string]interface{}{
+		"plugin_version": "1.0.0",
+		"gain":           p.gain,
+	}
+}
+
+// LoadState loads the plugin state.
+func (p *GainPlugin) LoadState(state map[string]interface{}) {
+	if gain, ok := state["gain"].(float64); ok {
+		p.gain = gain
+	}
+}
+
+// Convert linear gain to dB
+func linearToDb(linear float64) float64 {
+	if linear <= 0.0 {
+		return -math.MaxFloat64
+	}
+	return 20.0 * math.Log10(linear)
+}
+
+// Convert dB to linear gain
+func dbToLinear(db float64) float64 {
+	return math.Pow(10.0, db/20.0)
+}
+
+func main() {
+	// This main function is required for building a shared library
+	// but is not used when the library is loaded by a host
+}

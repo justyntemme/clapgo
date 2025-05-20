@@ -1,0 +1,100 @@
+# Template Makefile for ClapGo plugins
+# Copy this to each plugin directory and customize as needed
+
+# Plugin name (defaults to directory name)
+PLUGIN_NAME ?= $(shell basename $(CURDIR))
+
+# Directories
+ROOT_DIR ?= ../..
+BUILD_DIR ?= build
+CLAP_INCLUDE_DIR ?= $(ROOT_DIR)/include/clap/include
+C_BRIDGE_DIR ?= $(ROOT_DIR)/src/c
+
+# Platform detection
+UNAME := $(shell uname)
+ifeq ($(UNAME), Darwin)
+    PLATFORM := macos
+    SO_EXT := dylib
+    CLAP_FORMAT := bundle
+else ifeq ($(UNAME), Linux)
+    PLATFORM := linux
+    SO_EXT := so
+    CLAP_FORMAT := so
+else
+    PLATFORM := windows
+    SO_EXT := dll
+    CLAP_FORMAT := dll
+endif
+
+# Compilation flags
+CC := gcc
+LD := gcc
+CFLAGS := -I$(CLAP_INCLUDE_DIR) -I$(C_BRIDGE_DIR) -fPIC -Wall -Wextra
+LDFLAGS := -shared
+
+ifeq ($(DEBUG), 1)
+    CFLAGS += -g -O0 -DDEBUG
+else
+    CFLAGS += -O2 -DNDEBUG
+endif
+
+# Go compilation
+GO := go
+CGO_ENABLED := 1
+GO_FLAGS := -buildmode=c-shared
+GO_BUILD_FLAGS := -ldflags="-s -w"
+ifeq ($(DEBUG), 1)
+    GO_BUILD_FLAGS := -gcflags="all=-N -l"
+endif
+
+# Plugin-specific Go files
+GO_FILES := $(wildcard *.go)
+
+# Object files
+C_BRIDGE_SOURCES := $(wildcard $(C_BRIDGE_DIR)/*.c)
+C_BRIDGE_OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(C_BRIDGE_SOURCES:.c=.o)))
+
+# Output files
+GO_LIB := $(BUILD_DIR)/lib$(PLUGIN_NAME).$(SO_EXT)
+PLUGIN_CLAP := $(BUILD_DIR)/$(PLUGIN_NAME).clap
+
+# Main targets
+.PHONY: all clean
+
+all: $(PLUGIN_CLAP)
+
+# Create build directory
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+# Build Go plugin library
+$(GO_LIB): $(GO_FILES) | $(BUILD_DIR)
+	@echo "Building Go plugin library for $(PLUGIN_NAME)..."
+	CGO_ENABLED=$(CGO_ENABLED) CLAPGO_PLUGIN_ID="com.clapgo.$(PLUGIN_NAME)" \
+	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $@ $(GO_FILES)
+
+# Compile C bridge files
+$(BUILD_DIR)/%.o: $(C_BRIDGE_DIR)/%.c | $(BUILD_DIR)
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -DCLAPGO_PLUGIN_ID=\"com.clapgo.$(PLUGIN_NAME)\" -c $< -o $@
+
+# Link final CLAP plugin
+$(PLUGIN_CLAP): $(C_BRIDGE_OBJECTS) $(GO_LIB)
+	@echo "Linking $(PLUGIN_NAME).clap..."
+	$(LD) $(LDFLAGS) -o $@ $(C_BRIDGE_OBJECTS) \
+		-DCLAPGO_PLUGIN_ID=\"com.clapgo.$(PLUGIN_NAME)\"
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning $(PLUGIN_NAME)..."
+	rm -rf $(BUILD_DIR)
+
+# Debug info
+debug:
+	@echo "Plugin name: $(PLUGIN_NAME)"
+	@echo "Platform: $(PLATFORM)"
+	@echo "Go files: $(GO_FILES)"
+	@echo "C bridge sources: $(C_BRIDGE_SOURCES)"
+	@echo "C bridge objects: $(C_BRIDGE_OBJECTS)"
+	@echo "Go library: $(GO_LIB)"
+	@echo "CLAP plugin: $(PLUGIN_CLAP)"
