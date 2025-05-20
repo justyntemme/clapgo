@@ -1,9 +1,14 @@
 #include <cstring>
 #include <memory>
-#include "../../src/c/plugin.h"
-#include "local-gui-factory.hh"
-#include "plugin-proxy.hh"
-#include "parameter-proxy.hh"
+#include "../../clap-plugins/plugins/gui/local-gui-factory.hh"
+#include "../../clap-plugins/plugins/gui/plugin-proxy.hh"
+#include "../../clap-plugins/plugins/gui/parameter-proxy.hh"
+#include "../../include/clap/include/clap/clap.h"
+
+// Simple replacement of the old plugin.h structure
+typedef struct {
+    void* go_instance;
+} go_plugin_data_t;
 
 // Go GUI function declarations
 extern "C" {
@@ -333,6 +338,9 @@ static const clap_plugin_gui_t clapgo_gui_extension = {
 
 // Override the get_extension function to provide GUI extension
 extern const void* clapgo_plugin_get_extension_with_gui(const clap_plugin_t* plugin, const char* id);
+
+// Declare the original get_extension function
+extern "C" const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char* id);
 
 #ifdef __cplusplus
 }

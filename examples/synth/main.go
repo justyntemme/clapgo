@@ -13,17 +13,7 @@ import (
 	"unsafe"
 )
 
-// TODO: This example needs to be updated to fully use the new API interfaces.
-// Currently, it's only partially updated to allow compilation.
-
-// CLAP process status codes
-const (
-	CLAP_PROCESS_ERROR             = 0
-	CLAP_PROCESS_CONTINUE          = 1
-	CLAP_PROCESS_CONTINUE_IF_NOT_QUIET = 2
-	CLAP_PROCESS_TAIL              = 3
-	CLAP_PROCESS_SLEEP             = 4
-)
+// This example demonstrates a simple synthesizer plugin using the new API interfaces.
 
 // Export Go plugin functionality
 var (
@@ -32,7 +22,7 @@ var (
 
 func init() {
 	// Register our synth plugin
-	info := goclap.PluginInfo{
+	info := api.PluginInfo{
 		ID:          "com.clapgo.synth",
 		Name:        "Simple Synth",
 		Vendor:      "ClapGo",
@@ -45,7 +35,7 @@ func init() {
 	}
 	
 	synthPlugin = NewSynthPlugin()
-	goclap.RegisterPlugin(info, synthPlugin)
+	registry.Register(info, func() api.Plugin { return synthPlugin })
 }
 
 //export SynthGetPluginCount
@@ -71,8 +61,7 @@ type SynthPlugin struct {
 	sampleRate   float64
 	isActivated  bool
 	isProcessing bool
-	paramManager *goclap.ParamManager
-	host         *goclap.Host
+	host         unsafe.Pointer
 	
 	// Parameters
 	volume       float64  // Master volume
@@ -85,8 +74,8 @@ type SynthPlugin struct {
 	// Transport state
 	transportInfo TransportInfo
 	
-	// Preset provider
-	presetProvider *goclap.DefaultPresetProvider
+	// Parameter information
+	paramInfos   []api.ParamInfo
 }
 
 // TransportInfo holds host transport information
@@ -109,7 +98,6 @@ func NewSynthPlugin() *SynthPlugin {
 		sampleRate:   44100.0,
 		isActivated:  false,
 		isProcessing: false,
-		paramManager: goclap.NewParamManager(),
 		volume:       0.7,  // -3dB
 		waveform:     0,    // sine
 		attack:       0.01, // 10ms
@@ -121,84 +109,63 @@ func NewSynthPlugin() *SynthPlugin {
 		},
 	}
 	
-	// Create preset provider
-	presetProviderDesc := goclap.PresetDiscoveryProviderDescriptor{
-		ID:     "com.clapgo.synth.presets",
-		Name:   "Simple Synth Presets",
-		Vendor: "ClapGo",
+	// Define parameters
+	plugin.paramInfos = []api.ParamInfo{
+		{
+			ID:           1,
+			Name:         "Volume",
+			Module:       "",
+			MinValue:     0.0,
+			MaxValue:     1.0,
+			DefaultValue: 0.7,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		},
+		{
+			ID:           2,
+			Name:         "Waveform",
+			Module:       "",
+			MinValue:     0.0,
+			MaxValue:     2.0,
+			DefaultValue: 0.0,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove | api.ParamIsSteppable,
+		},
+		{
+			ID:           3,
+			Name:         "Attack",
+			Module:       "ADSR",
+			MinValue:     0.001,
+			MaxValue:     2.0,
+			DefaultValue: 0.01,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		},
+		{
+			ID:           4,
+			Name:         "Decay",
+			Module:       "ADSR",
+			MinValue:     0.001,
+			MaxValue:     2.0,
+			DefaultValue: 0.1,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		},
+		{
+			ID:           5,
+			Name:         "Sustain",
+			Module:       "ADSR",
+			MinValue:     0.0,
+			MaxValue:     1.0,
+			DefaultValue: 0.7,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		},
+		{
+			ID:           6,
+			Name:         "Release",
+			Module:       "ADSR",
+			MinValue:     0.001,
+			MaxValue:     5.0,
+			DefaultValue: 0.3,
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		},
 	}
-	
-	// The location where presets are stored
-	presetDir := "presets"
-	
-	// Initialize preset provider
-	plugin.presetProvider = goclap.NewDefaultPresetProvider(
-		presetProviderDesc,
-		[]string{"json"},
-		presetDir,
-		[]string{"com.clapgo.synth"},
-	)
-	
-	// Register parameters
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           1,
-		Name:         "Volume",
-		Module:       "",
-		MinValue:     0.0,
-		MaxValue:     1.0,
-		DefaultValue: 0.7,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
-	
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           2,
-		Name:         "Waveform",
-		Module:       "",
-		MinValue:     0.0,
-		MaxValue:     2.0,
-		DefaultValue: 0.0,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove | goclap.ParamIsSteppable,
-	})
-	
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           3,
-		Name:         "Attack",
-		Module:       "ADSR",
-		MinValue:     0.001,
-		MaxValue:     2.0,
-		DefaultValue: 0.01,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
-	
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           4,
-		Name:         "Decay",
-		Module:       "ADSR",
-		MinValue:     0.001,
-		MaxValue:     2.0,
-		DefaultValue: 0.1,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
-	
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           5,
-		Name:         "Sustain",
-		Module:       "ADSR",
-		MinValue:     0.0,
-		MaxValue:     1.0,
-		DefaultValue: 0.7,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
-	
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
-		ID:           6,
-		Name:         "Release",
-		Module:       "ADSR",
-		MinValue:     0.001,
-		MaxValue:     5.0,
-		DefaultValue: 0.3,
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
 	
 	return plugin
 }
@@ -254,18 +221,20 @@ func (p *SynthPlugin) Reset() {
 }
 
 // Process processes audio data
-func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *goclap.ProcessEvents) int {
+func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
 	// Check if we're in a valid state for processing
 	if !p.isActivated || !p.isProcessing {
-		return CLAP_PROCESS_ERROR
+		return api.ProcessError
 	}
 	
 	// Process events (parameters, transport, notes, etc.)
-	p.processEvents(events, framesCount)
+	if events != nil {
+		p.processEventHandler(events, framesCount)
+	}
 	
 	// If no outputs, nothing to do
 	if len(audioOut) == 0 {
-		return CLAP_PROCESS_CONTINUE
+		return api.ProcessContinue
 	}
 	
 	// Get the number of output channels
@@ -275,7 +244,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	for ch := 0; ch < numChannels; ch++ {
 		outChannel := audioOut[ch]
 		if len(outChannel) < int(framesCount) {
-			return CLAP_PROCESS_ERROR
+			return api.ProcessError
 		}
 		
 		// Clear the output buffer
@@ -325,162 +294,74 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	
 	// Check if we have any active voices
 	if !hasActiveVoices {
-		return CLAP_PROCESS_SLEEP
+		return api.ProcessSleep
 	}
 	
-	return CLAP_PROCESS_CONTINUE
+	return api.ProcessContinue
 }
 
-// processEvents handles all incoming events
-func (p *SynthPlugin) processEvents(processEvents *goclap.ProcessEvents, frameCount uint32) {
-	if processEvents == nil {
-		return
-	}
-	
-	// Create wrappers for input/output events
-	inputEvents := &goclap.InputEvents{Ptr: processEvents.InEvents}
-	outputEvents := &goclap.OutputEvents{Ptr: processEvents.OutEvents}
-	
-	// Early return if no input events
-	if inputEvents.Ptr == nil {
+// processEventHandler handles all incoming events using the new EventHandler interface
+func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount uint32) {
+	if events == nil {
 		return
 	}
 	
 	// Process each event
-	eventCount := inputEvents.GetEventCount()
+	eventCount := events.GetInputEventCount()
 	for i := uint32(0); i < eventCount; i++ {
-		event := inputEvents.GetEvent(i)
+		event := events.GetInputEvent(i)
 		if event == nil {
-			continue
-		}
-		
-		// Only process events from the core CLAP space
-		if event.Space != 0 {
 			continue
 		}
 		
 		// Handle each event type safely
 		switch event.Type {
-		case goclap.EventTypeParamValue:
-			p.handleParamEvent(event)
-		case goclap.EventTypeTransport:
-			p.handleTransportEvent(event)
-		case goclap.EventTypeNoteOn:
-			p.handleNoteOnEvent(event)
-		case goclap.EventTypeNoteOff:
-			p.handleNoteOffEvent(event)
-		case goclap.EventTypeNoteChoke:
-			p.handleNoteChokeEvent(event)
-		case goclap.EventTypeNoteExpression:
-			p.handleNoteExpressionEvent(event)
-		case goclap.EventTypeNoteEnd:
-			// Note end events are sent from plugin to host, not handled here
-			continue
-		}
-		
-		// For each note on event, send a corresponding note end event when done
-		// This is a simplified example - in a real plugin you would only send
-		// note end when a voice actually finishes
-		if event.Type == goclap.EventTypeNoteOn && outputEvents.Ptr != nil {
-			// Just for demonstration - in a real plugin, you'd send this when the note actually ends
-			if noteEvent, ok := event.Data.(goclap.NoteEvent); ok {
-				// Create a note end event
-				// In a real plugin, you'd track voices and send this when the voice ends
-				endEvent := &goclap.Event{
-					Time:  event.Time + frameCount - 1, // At the end of this processing block
-					Type:  goclap.EventTypeNoteEnd,
-					Space: 0, // Core event space
-					Data:  noteEvent,
-				}
-				
-				// Try to push the event
-				outputEvents.PushEvent(endEvent)
+		case api.EventTypeParamValue:
+			if paramEvent, ok := event.Data.(api.ParamEvent); ok {
+				p.handleParameterChange(paramEvent)
+			}
+		case api.EventTypeNoteOn:
+			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
+				p.handleNoteOn(noteEvent)
+			}
+		case api.EventTypeNoteOff:
+			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
+				p.handleNoteOff(noteEvent)
 			}
 		}
 	}
 }
 
-// handleParamEvent processes parameter change events
-func (p *SynthPlugin) handleParamEvent(event *goclap.Event) {
-	paramEvent, ok := event.Data.(goclap.ParamEvent)
-	if !ok {
-		return
-	}
-	
+// handleParameterChange processes a parameter change event
+func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamEvent) {
 	// Handle the parameter change based on its ID
 	switch paramEvent.ParamID {
 	case 1: // Volume
 		p.volume = paramEvent.Value
-		
 	case 2: // Waveform
 		p.waveform = int(math.Round(paramEvent.Value))
-		
 	case 3: // Attack
 		p.attack = paramEvent.Value
-		
 	case 4: // Decay
 		p.decay = paramEvent.Value
-		
 	case 5: // Sustain
 		p.sustain = paramEvent.Value
-		
 	case 6: // Release
 		p.release = paramEvent.Value
 	}
 }
 
-// handleTransportEvent processes transport events
-func (p *SynthPlugin) handleTransportEvent(event *goclap.Event) {
-	transportEvent, ok := event.Data.(goclap.TransportEvent)
-	if !ok {
-		return
-	}
-	
-	// Extract transport information
-	if transportEvent.Flags&goclap.TransportHasTransport != 0 {
-		// Update play state
-		p.transportInfo.IsPlaying = (transportEvent.Flags&goclap.TransportIsPlaying) != 0
-		
-		// Update tempo if available
-		if transportEvent.Flags&goclap.TransportHasTempo != 0 {
-			p.transportInfo.Tempo = transportEvent.Tempo
-		}
-		
-		// Update position information
-		if transportEvent.Flags&goclap.TransportHasBeatsTime != 0 {
-			p.transportInfo.BeatPosition = float64(transportEvent.SongPosBeats)
-			p.transportInfo.BarNumber = int(transportEvent.BarNumber)
-		}
-		
-		// Update time in seconds
-		if transportEvent.Flags&goclap.TransportHasSecondsTime != 0 {
-			p.transportInfo.SecondsPosition = transportEvent.SongPosSeconds
-		}
-		
-		// Update time signature
-		if transportEvent.Flags&goclap.TransportHasTimeSignature != 0 {
-			p.transportInfo.TimeSignature.Numerator = int(transportEvent.TimeSigNumerator)
-			p.transportInfo.TimeSignature.Denominator = int(transportEvent.TimeSigDenominator)
-		}
-	}
-}
-
-// handleNoteOnEvent processes note on events
-func (p *SynthPlugin) handleNoteOnEvent(event *goclap.Event) {
-	// Type assertion with safety check
-	noteEvent, ok := event.Data.(goclap.NoteEvent)
-	if !ok {
-		return
-	}
-	
+// handleNoteOn processes a note on event
+func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
 	}
 	
 	// Ensure velocity is positive
-	if noteEvent.Velocity <= 0 {
-		noteEvent.Velocity = 0.01 // Very quiet but not silent
+	velocity := noteEvent.Value
+	if velocity <= 0 {
+		velocity = 0.01 // Very quiet but not silent
 	}
 	
 	// Find a free voice slot or steal an existing one
@@ -491,21 +372,15 @@ func (p *SynthPlugin) handleNoteOnEvent(event *goclap.Event) {
 		NoteID:      noteEvent.NoteID,
 		Channel:     noteEvent.Channel,
 		Key:         noteEvent.Key,
-		Velocity:    noteEvent.Velocity,
+		Velocity:    velocity,
 		Phase:       0.0,
 		IsActive:    true,
 		ReleasePhase: -1.0, // Not in release phase
 	}
 }
 
-// handleNoteOffEvent processes note off events
-func (p *SynthPlugin) handleNoteOffEvent(event *goclap.Event) {
-	// Type assertion with safety check
-	noteEvent, ok := event.Data.(goclap.NoteEvent)
-	if !ok {
-		return
-	}
-	
+// handleNoteOff processes a note off event
+func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent) {
 	// Find the voice with this note ID or key/channel combination
 	for _, voice := range p.voices {
 		// Safety check
@@ -524,70 +399,6 @@ func (p *SynthPlugin) handleNoteOffEvent(event *goclap.Event) {
 	}
 }
 
-// handleNoteChokeEvent processes note choke events
-func (p *SynthPlugin) handleNoteChokeEvent(event *goclap.Event) {
-	// Type assertion with safety check
-	noteEvent, ok := event.Data.(goclap.NoteEvent)
-	if !ok {
-		return
-	}
-	
-	// Find the voice with this note ID or key/channel combination
-	// and immediately silence it
-	for i, voice := range p.voices {
-		// Safety check for nil voice
-		if voice == nil {
-			continue
-		}
-		
-		// Match voices using wildcard rules from CLAP spec
-		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
-		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
-		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
-			// Immediately silence the voice
-			p.voices[i] = nil
-		}
-	}
-}
-
-// handleNoteExpressionEvent processes note expression events
-func (p *SynthPlugin) handleNoteExpressionEvent(event *goclap.Event) {
-	// Type assertion with safety check
-	exprEvent, ok := event.Data.(goclap.NoteExpressionEvent)
-	if !ok {
-		return
-	}
-	
-	// Find the voice with matching note_id, key, and channel using CLAP wildcard rules
-	for _, voice := range p.voices {
-		// Safety check for active voices
-		if voice == nil || !voice.IsActive {
-			continue
-		}
-		
-		// Match using CLAP wildcard rules
-		if (exprEvent.NoteID >= 0 && voice.NoteID == exprEvent.NoteID) ||
-		   (exprEvent.NoteID < 0 && voice.Key == exprEvent.Key && 
-		    (exprEvent.Channel < 0 || voice.Channel == exprEvent.Channel)) {
-			
-			// Handle different expression types
-			switch exprEvent.Expression {
-			case goclap.NoteExpressionVolume:
-				// Adjust the voice's volume
-				voice.Velocity = exprEvent.Value
-				
-			// Add other expression handlers as needed
-			case goclap.NoteExpressionTuning:
-				// Could adjust tuning if we implemented it
-				break
-				
-			case goclap.NoteExpressionVibrato:
-				// Could implement vibrato if needed
-				break
-			}
-		}
-	}
-}
 
 // findFreeVoice finds a free voice slot or steals an existing one
 func (p *SynthPlugin) findFreeVoice() int {
@@ -688,66 +499,52 @@ func noteToFrequency(note int) float64 {
 // GetExtension gets a plugin extension
 func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 	// Check for parameter extension
-	if id == goclap.ExtParams {
+	if id == api.ExtParams {
 		// TODO: Implement proper parameter extension
-		// For now, return nil since GetExtension is not implemented
 		return nil
 	}
 	
 	// Check for state extension
-	if id == goclap.ExtState {
-		return p.getStateExtension()
+	if id == api.ExtState {
+		// TODO: Implement proper state extension
+		return nil
 	}
 	
 	// Check for note ports extension
-	if id == goclap.ExtNotePorts {
-		return p.getNotePortsExtension()
+	if id == api.ExtNotePorts {
+		// TODO: Implement proper note ports extension
+		return nil
 	}
 	
 	// Check for audio ports extension
-	if id == goclap.ExtAudioPorts {
-		return p.getAudioPortsExtension()
+	if id == api.ExtAudioPorts {
+		// TODO: Implement proper audio ports extension
+		return nil
 	}
 	
 	// Check for preset load extension
-	if id == goclap.ExtPresetLoad {
-		return p.getPresetLoadExtension()
+	if id == api.ExtPresetLoad {
+		// TODO: Implement proper preset load extension
+		return nil
 	}
 	
 	// No other extensions supported
 	return nil
 }
 
-// getStateExtension returns the state extension implementation
-func (p *SynthPlugin) getStateExtension() unsafe.Pointer {
-	// In a real implementation, this would return a pointer to a C struct
-	return nil
-}
-
-// getNotePortsExtension returns the note ports extension implementation
-func (p *SynthPlugin) getNotePortsExtension() unsafe.Pointer {
-	// Create the note ports extension
-	notePortsExt := goclap.NewPluginNotePortsExtension(p)
-	if notePortsExt != nil {
-		return notePortsExt.GetExtensionPointer()
+// GetPluginInfo returns information about the plugin
+func (p *SynthPlugin) GetPluginInfo() api.PluginInfo {
+	return api.PluginInfo{
+		ID:          "com.clapgo.synth",
+		Name:        "Simple Synth",
+		Vendor:      "ClapGo",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     "1.0.0",
+		Description: "A simple synthesizer using ClapGo",
+		Features:    []string{"instrument", "synthesizer", "stereo"},
 	}
-	return nil
-}
-
-// getAudioPortsExtension returns the audio ports extension implementation
-func (p *SynthPlugin) getAudioPortsExtension() unsafe.Pointer {
-	// In a real implementation, this would return a pointer to a C struct
-	return nil
-}
-
-// getPresetLoadExtension returns the preset load extension implementation
-func (p *SynthPlugin) getPresetLoadExtension() unsafe.Pointer {
-	// Create and return the preset load extension
-	presetExt := goclap.NewPresetLoadExtension(p)
-	if presetExt != nil {
-		return presetExt.GetExtensionPointer()
-	}
-	return nil
 }
 
 // OnMainThread is called on the main thread
@@ -755,10 +552,6 @@ func (p *SynthPlugin) OnMainThread() {
 	// Nothing to do
 }
 
-// GetParamManager returns the parameter manager for this plugin
-func (p *SynthPlugin) GetParamManager() *goclap.ParamManager {
-	return p.paramManager
-}
 
 // GetPluginID returns the plugin ID
 func (p *SynthPlugin) GetPluginID() string {
@@ -846,36 +639,7 @@ func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) 
 	return true
 }
 
-// Implementation of NotePortProvider interface
-
-// GetNoteInputPortCount returns the number of note input ports
-func (p *SynthPlugin) GetNoteInputPortCount() uint32 {
-	return 1 // One MIDI input port
-}
-
-// GetNoteOutputPortCount returns the number of note output ports
-func (p *SynthPlugin) GetNoteOutputPortCount() uint32 {
-	return 0 // No output ports
-}
-
-// GetNoteInputPortInfo returns info about a note input port
-func (p *SynthPlugin) GetNoteInputPortInfo(index uint32) *goclap.NotePortInfo {
-	if index != 0 {
-		return nil
-	}
-	
-	return &goclap.NotePortInfo{
-		ID:                1,
-		SupportedDialects: goclap.NoteDialectCLAP | goclap.NoteDialectMIDI,
-		PreferredDialect:  goclap.NoteDialectCLAP,
-		Name:              "MIDI Input",
-	}
-}
-
-// GetNoteOutputPortInfo returns info about a note output port
-func (p *SynthPlugin) GetNoteOutputPortInfo(index uint32) *goclap.NotePortInfo {
-	return nil // No output ports
-}
+// TODO: Implement proper NotePortProvider interface
 
 func main() {
 	// This is not called when used as a plugin,

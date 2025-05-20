@@ -23,7 +23,7 @@ var (
 
 func init() {
 	// Register our gain plugin with GUI support
-	info := goclap.PluginInfo{
+	info := api.PluginInfo{
 		ID:          "com.clapgo.gain-gui",
 		Name:        "Gain with GUI",
 		Vendor:      "ClapGo",
@@ -36,7 +36,7 @@ func init() {
 	}
 	
 	gainPlugin = NewGainPlugin()
-	goclap.RegisterPlugin(info, gainPlugin)
+	registry.Register(info, func() api.Plugin { return gainPlugin })
 }
 
 //export GainGetPluginCount
@@ -51,8 +51,8 @@ type GainPlugin struct {
 	sampleRate   float64
 	isActivated  bool
 	isProcessing bool
-	paramManager *goclap.ParamManager
-	host         *goclap.Host
+	paramInfo    api.ParamInfo
+	host         unsafe.Pointer
 	
 	// GUI-related fields
 	hasGUI       bool
@@ -67,20 +67,19 @@ func NewGainPlugin() *GainPlugin {
 		sampleRate:   44100.0,
 		isActivated:  false,
 		isProcessing: false,
-		paramManager: goclap.NewParamManager(),
 		hasGUI:       true,
 	}
 	
-	// Register parameters
-	plugin.paramManager.RegisterParam(goclap.ParamInfo{
+	// Set up parameter info
+	plugin.paramInfo = api.ParamInfo{
 		ID:           1,
 		Name:         "Gain",
 		Module:       "",
 		MinValue:     0.0,  // -inf dB
 		MaxValue:     2.0,  // +6 dB
 		DefaultValue: 1.0,  // 0 dB
-		Flags:        goclap.ParamIsAutomatable | goclap.ParamIsBoundedBelow | goclap.ParamIsBoundedAbove,
-	})
+		Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+	}
 	
 	return plugin
 }
@@ -127,26 +126,25 @@ func (p *GainPlugin) Reset() {
 }
 
 // Process processes audio data
-func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *goclap.ProcessEvents) int {
+func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
 	// Check if we're in a valid state for processing
 	if !p.isActivated || !p.isProcessing {
-		return 0 // CLAP_PROCESS_ERROR
+		return api.ProcessError
 	}
 	
 	// Process parameter changes from events
-	if events != nil && events.InEvents != nil {
-		inputEvents := &goclap.InputEvents{Ptr: events.InEvents}
-		eventCount := inputEvents.GetEventCount()
+	if events != nil {
+		eventCount := events.GetInputEventCount()
 		
 		for i := uint32(0); i < eventCount; i++ {
-			event := inputEvents.GetEvent(i)
+			event := events.GetInputEvent(i)
 			if event == nil {
 				continue
 			}
 			
 			// Handle parameter changes
-			if event.Type == goclap.EventTypeParamValue {
-				paramEvent, ok := event.Data.(goclap.ParamEvent)
+			if event.Type == api.EventTypeParamValue {
+				paramEvent, ok := event.Data.(api.ParamEvent)
 				if ok && paramEvent.ParamID == 1 { // Gain parameter
 					p.gain = paramEvent.Value
 				}
@@ -156,7 +154,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	
 	// If no audio inputs or outputs, nothing to do
 	if len(audioIn) == 0 || len(audioOut) == 0 {
-		return 1 // CLAP_PROCESS_CONTINUE
+		return api.ProcessContinue
 	}
 	
 	// Get the number of channels (use min of input and output)
@@ -172,7 +170,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 		
 		// Make sure we have enough buffer space
 		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			return 0 // CLAP_PROCESS_ERROR
+			return api.ProcessError
 		}
 		
 		// Apply gain to each sample
@@ -185,21 +183,21 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	isSilent := p.gain < 0.0001 // -80dB
 	
 	if isSilent {
-		return 4 // CLAP_PROCESS_SLEEP
+		return api.ProcessSleep
 	}
 	
-	return 1 // CLAP_PROCESS_CONTINUE
+	return api.ProcessContinue
 }
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
 	// Check for parameter extension
-	if id == goclap.ExtParams {
+	if id == api.ExtParams {
 		return nil // Not implemented in this simplified version
 	}
 	
 	// Check for state extension
-	if id == goclap.ExtState {
+	if id == api.ExtState {
 		return nil // Not implemented in this simplified version
 	}
 	
@@ -215,7 +213,7 @@ func (p *GainPlugin) HasGUI() bool {
 // GetPreferredGUIAPI returns the preferred GUI API
 func (p *GainPlugin) GetPreferredGUIAPI() (api string, isFloating bool) {
 	// Default to X11 on Linux, adjust based on OS
-	return goclap.WindowAPIX11, false
+	return api.WindowAPIX11, false
 }
 
 // OnGUICreated is called when the GUI is created
@@ -253,9 +251,19 @@ func (p *GainPlugin) OnMainThread() {
 	// Nothing to do
 }
 
-// GetParamManager returns the parameter manager for this plugin
-func (p *GainPlugin) GetParamManager() *goclap.ParamManager {
-	return p.paramManager
+// GetPluginInfo returns information about the plugin
+func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
+	return api.PluginInfo{
+		ID:          "com.clapgo.gain-gui",
+		Name:        "Gain with GUI",
+		Vendor:      "ClapGo",
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     "1.0.0",
+		Description: "A gain plugin with GUI support using ClapGo",
+		Features:    []string{"audio-effect", "stereo", "mono", "gui"},
+	}
 }
 
 // SaveState returns custom state data for the plugin

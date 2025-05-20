@@ -106,6 +106,33 @@ func (e *EventHandler) GetInputEvent(index uint32) *api.Event {
 			Cookie:  unsafe.Pointer(paramEvent.cookie),
 			Value:   float64(paramEvent.value),
 		}
+	case C.CLAP_EVENT_NOTE_ON:
+		noteEvent := (*C.clap_event_note_t)(eventPtr)
+		goEvent.Data = api.NoteEvent{
+			NoteID:  int32(noteEvent.note_id),
+			Port:    int16(noteEvent.port_index),
+			Channel: int16(noteEvent.channel),
+			Key:     int16(noteEvent.key),
+			Value:   float64(noteEvent.velocity),
+		}
+	case C.CLAP_EVENT_NOTE_OFF:
+		noteEvent := (*C.clap_event_note_t)(eventPtr)
+		goEvent.Data = api.NoteEvent{
+			NoteID:  int32(noteEvent.note_id),
+			Port:    int16(noteEvent.port_index),
+			Channel: int16(noteEvent.channel),
+			Key:     int16(noteEvent.key),
+			Value:   float64(noteEvent.velocity),
+		}
+	case C.CLAP_EVENT_NOTE_CHOKE:
+		noteEvent := (*C.clap_event_note_t)(eventPtr)
+		goEvent.Data = api.NoteEvent{
+			NoteID:  int32(noteEvent.note_id),
+			Port:    int16(noteEvent.port_index),
+			Channel: int16(noteEvent.channel),
+			Key:     int16(noteEvent.key),
+			Value:   float64(noteEvent.velocity),
+		}
 	// Add more event types as needed
 	}
 

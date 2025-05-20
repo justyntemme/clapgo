@@ -144,6 +144,24 @@ type ParamEvent struct {
 	Flags uint32
 }
 
+// NoteEvent represents a note event (note on, note off, etc.).
+type NoteEvent struct {
+	// NoteID is a unique identifier for the note instance
+	NoteID int32
+
+	// Port is the port index
+	Port int16
+
+	// Channel is the channel index (0-15)
+	Channel int16
+
+	// Key is the note key (0-127)
+	Key int16
+
+	// Value is the note velocity or other value
+	Value float64
+}
+
 // Process status codes and event types are defined in constants.go
 
 // Factory creates plugin instances.

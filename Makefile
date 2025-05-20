@@ -80,7 +80,7 @@ build-go:
 	@mkdir -p $(BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) $(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) \
 		-o $(BUILD_DIR)/libgoclap.$(SO_EXT) \
-		./cmd/goclap
+		./cmd/clapgo
 
 # Plugin build rules
 # Common function to build a plugin
