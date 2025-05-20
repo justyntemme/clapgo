@@ -6,11 +6,15 @@ package main
 import "C"
 import (
 	"encoding/json"
-	"github.com/justyntemme/clapgo/src/goclap"
+	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/registry"
 	"math"
 	"os"
 	"unsafe"
 )
+
+// TODO: This example needs to be updated to fully use the new API interfaces.
+// Currently, it's only partially updated to allow compilation.
 
 // CLAP process status codes
 const (

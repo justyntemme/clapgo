@@ -144,27 +144,7 @@ type ParamEvent struct {
 	Flags uint32
 }
 
-// These constants define the event types used in the CLAP API.
-const (
-	EventTypeNoteOn        = 0
-	EventTypeNoteOff       = 1
-	EventTypeNoteChoke     = 2
-	EventTypeNoteExpression = 3
-	EventTypeParamValue    = 4
-	EventTypeParamMod      = 5
-	EventTypeTransport     = 6
-	EventTypeMIDI          = 7
-	EventTypeMIDI2         = 8
-)
-
-// These constants define plugin process status codes.
-const (
-	ProcessError           = 0
-	ProcessContinue        = 1
-	ProcessContinueIfNotQuiet = 2
-	ProcessTail            = 3
-	ProcessSleep           = 4
-)
+// Process status codes and event types are defined in constants.go
 
 // Factory creates plugin instances.
 type Factory interface {
@@ -187,17 +167,4 @@ type Creator interface {
 	GetPluginInfo() PluginInfo
 }
 
-// These constants define the extension IDs used in the CLAP API.
-const (
-	ExtAudioPorts           = "clap.audio-ports"
-	ExtParams               = "clap.params"
-	ExtState                = "clap.state"
-	ExtGUI                  = "clap.gui"
-	ExtNotePorts            = "clap.note-ports"
-	ExtTimerSupport         = "clap.timer-support"
-	ExtLatency              = "clap.latency"
-	ExtTail                 = "clap.tail"
-	ExtRender               = "clap.render"
-	ExtPresetLoad           = "clap.preset-load"
-	ExtThreadPool           = "clap.thread-pool"
-)
+// Extension IDs are defined in constants.go

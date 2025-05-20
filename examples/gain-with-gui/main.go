@@ -9,8 +9,12 @@ import (
 	"math"
 	"unsafe"
 
-	"github.com/justyntemme/clapgo/src/goclap"
+	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/registry"
 )
+
+// TODO: This example needs to be updated to fully use the new API interfaces.
+// Currently, it's only partially updated to allow compilation.
 
 // Export Go plugin functionality
 var (

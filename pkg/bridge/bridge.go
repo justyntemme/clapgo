@@ -1,51 +1,122 @@
-package main
+// Package bridge provides a bridge between the CLAP C API and Go.
+// It handles all CGO interactions and type conversions.
+package bridge
 
-/*
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include "../../include/clap/include/clap/clap.h"
-
-// Forward declarations of exported functions
-uint32_t GetPluginCount();
-struct clap_plugin_descriptor* GetPluginInfo(uint32_t index);
-void* CreatePlugin(struct clap_host *host, char *plugin_id);
-bool GetVersion(uint32_t *major, uint32_t *minor, uint32_t *patch);
-
-// Plugin lifecycle functions
-bool GoInit(void *plugin);
-void GoDestroy(void *plugin);
-bool GoActivate(void *plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames);
-void GoDeactivate(void *plugin);
-bool GoStartProcessing(void *plugin);
-void GoStopProcessing(void *plugin);
-void GoReset(void *plugin);
-int32_t GoProcess(void *plugin, struct clap_process *process);
-void* GoGetExtension(void *plugin, char *id);
-void GoOnMainThread(void *plugin);
-*/
+// #include <stdint.h>
+// #include <stdbool.h>
+// #include <stdlib.h>
+// #include "../../include/clap/include/clap/clap.h"
+//
+// // Helpers for handling events
+// static inline uint32_t clap_input_events_size(const clap_input_events_t* events, const void* events_ctx) {
+//     if (events && events->size) {
+//         return events->size(events_ctx);
+//     }
+//     return 0;
+// }
+//
+// static inline const clap_event_header_t* clap_input_events_get(const clap_input_events_t* events, 
+//                                            const void* events_ctx, 
+//                                            uint32_t index) {
+//     if (events && events->get) {
+//         return events->get(events_ctx, index);
+//     }
+//     return NULL;
+// }
+//
+// static inline bool clap_output_events_try_push(const clap_output_events_t* events, 
+//                                 const void* events_ctx,
+//                                 const clap_event_header_t* event) {
+//     if (events && events->try_push) {
+//         return events->try_push(events_ctx, event);
+//     }
+//     return false;
+// }
 import "C"
 import (
 	"fmt"
 	"runtime/cgo"
-	"sync"
 	"unsafe"
 
-	"github.com/justyntemme/clapgo/internal/registry"
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/registry"
 )
 
-// handleRegistry maintains a registry of all allocated handles for proper cleanup
-var handleRegistry = struct {
-	sync.RWMutex
-	handles map[uintptr]bool
-}{
-	handles: make(map[uintptr]bool),
+// Version information for the bridge
+const (
+	VersionMajor = 0
+	VersionMinor = 2
+	VersionPatch = 0
+)
+
+// EventHandler implements the api.EventHandler interface for CLAP events
+type EventHandler struct {
+	InEvents  unsafe.Pointer
+	OutEvents unsafe.Pointer
+}
+
+// ProcessInputEvents processes all events in the input queue
+func (e *EventHandler) ProcessInputEvents() {
+	// Implementation depends on specific event types needed
+	// Each plugin should implement its own event processing
+}
+
+// AddOutputEvent adds an event to the output queue
+func (e *EventHandler) AddOutputEvent(eventType int, data interface{}) {
+	// Implementation depends on specific event types needed
+}
+
+// GetInputEventCount returns the number of input events
+func (e *EventHandler) GetInputEventCount() uint32 {
+	if e.InEvents == nil {
+		return 0
+	}
+
+	inEvents := (*C.clap_input_events_t)(e.InEvents)
+	return uint32(C.clap_input_events_size(inEvents, e.InEvents))
+}
+
+// GetInputEvent retrieves an input event by index
+func (e *EventHandler) GetInputEvent(index uint32) *api.Event {
+	if e.InEvents == nil {
+		return nil
+	}
+
+	inEvents := (*C.clap_input_events_t)(e.InEvents)
+	eventPtr := unsafe.Pointer(C.clap_input_events_get(inEvents, e.InEvents, C.uint32_t(index)))
+	if eventPtr == nil {
+		return nil
+	}
+
+	// Convert C event to Go event
+	event := (*C.clap_event_header_t)(eventPtr)
+
+	// Create a Go event based on the type
+	goEvent := &api.Event{
+		Type: int(event._type),
+		Time: uint32(event.time),
+	}
+
+	// Process specific event types
+	switch event._type {
+	case C.CLAP_EVENT_PARAM_VALUE:
+		paramEvent := (*C.clap_event_param_value_t)(eventPtr)
+		goEvent.Data = api.ParamEvent{
+			ParamID: uint32(paramEvent.param_id),
+			Cookie:  unsafe.Pointer(paramEvent.cookie),
+			Value:   float64(paramEvent.value),
+		}
+	// Add more event types as needed
+	}
+
+	return goEvent
 }
 
 //export GetPluginCount
 func GetPluginCount() C.uint32_t {
-	return C.uint32_t(registry.GetPluginCount())
+	count := registry.GetPluginCount()
+	fmt.Printf("Go: GetPluginCount returning %d\n", count)
+	return C.uint32_t(count)
 }
 
 //export GetPluginInfo
@@ -98,22 +169,20 @@ func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
 //export CreatePlugin
 func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: CreatePlugin with ID: %s\n", id)
+	
 	plugin := registry.CreatePlugin(id)
 	
 	if plugin == nil {
+		fmt.Printf("Error: Failed to create plugin with ID: %s\n", id)
 		return nil
 	}
 	
 	// Create a handle to the plugin
 	handle := cgo.NewHandle(plugin)
 	
-	// Register the handle
-	handleRegistry.Lock()
-	handleRegistry.handles[uintptr(handle)] = true
-	handleRegistry.Unlock()
-	
-	// Print some debugging info
-	fmt.Printf("Creating plugin with ID: %s\n", id)
+	// Register the handle for cleanup
+	registry.RegisterHandle(handle)
 	
 	return unsafe.Pointer(uintptr(handle))
 }
@@ -122,42 +191,20 @@ func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 func GetVersion(major, minor, patch *C.uint32_t) C.bool {
 	// Return the bridge version
 	if major != nil {
-		*major = 0
+		*major = C.uint32_t(VersionMajor)
 	}
 	if minor != nil {
-		*minor = 2
+		*minor = C.uint32_t(VersionMinor)
 	}
 	if patch != nil {
-		*patch = 0
+		*patch = C.uint32_t(VersionPatch)
 	}
 	return C.bool(true)
 }
 
-// GetPluginFromPtr retrieves the Go plugin from a plugin pointer
-func GetPluginFromPtr(ptr unsafe.Pointer) api.Plugin {
-	if ptr == nil {
-		return nil
-	}
-	
-	// Convert the plugin pointer back to a handle
-	handle := cgo.Handle(uintptr(ptr))
-	
-	// Get the plugin from the handle
-	value := handle.Value()
-	
-	// Try to cast to Plugin
-	plugin, ok := value.(api.Plugin)
-	if !ok {
-		fmt.Printf("Error: Failed to cast handle value to Plugin, got %T\n", value)
-		return nil
-	}
-	
-	return plugin
-}
-
 //export GoInit
 func GoInit(plugin unsafe.Pointer) C.bool {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -167,7 +214,7 @@ func GoInit(plugin unsafe.Pointer) C.bool {
 
 //export GoDestroy
 func GoDestroy(plugin unsafe.Pointer) {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -176,18 +223,12 @@ func GoDestroy(plugin unsafe.Pointer) {
 	
 	// Release the handle to prevent memory leaks
 	handle := cgo.Handle(uintptr(plugin))
-	
-	handleRegistry.Lock()
-	if _, exists := handleRegistry.handles[uintptr(handle)]; exists {
-		handle.Delete()
-		delete(handleRegistry.handles, uintptr(handle))
-	}
-	handleRegistry.Unlock()
+	registry.UnregisterHandle(handle)
 }
 
 //export GoActivate
 func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -197,7 +238,7 @@ func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames
 
 //export GoDeactivate
 func GoDeactivate(plugin unsafe.Pointer) {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -207,7 +248,7 @@ func GoDeactivate(plugin unsafe.Pointer) {
 
 //export GoStartProcessing
 func GoStartProcessing(plugin unsafe.Pointer) C.bool {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.bool(false)
 	}
@@ -217,7 +258,7 @@ func GoStartProcessing(plugin unsafe.Pointer) C.bool {
 
 //export GoStopProcessing
 func GoStopProcessing(plugin unsafe.Pointer) {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -227,7 +268,7 @@ func GoStopProcessing(plugin unsafe.Pointer) {
 
 //export GoReset
 func GoReset(plugin unsafe.Pointer) {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -235,38 +276,9 @@ func GoReset(plugin unsafe.Pointer) {
 	p.Reset()
 }
 
-// ClapEventHandler implements the api.EventHandler interface
-// for CLAP events.
-type ClapEventHandler struct {
-	InEvents  unsafe.Pointer
-	OutEvents unsafe.Pointer
-}
-
-// ProcessInputEvents processes all events in the input queue.
-func (e *ClapEventHandler) ProcessInputEvents() {
-	// Actual implementation would process events from CLAP
-}
-
-// AddOutputEvent adds an event to the output queue.
-func (e *ClapEventHandler) AddOutputEvent(eventType int, data interface{}) {
-	// Actual implementation would send events to CLAP
-}
-
-// GetInputEventCount returns the number of input events.
-func (e *ClapEventHandler) GetInputEventCount() uint32 {
-	// Actual implementation would get count from CLAP
-	return 0
-}
-
-// GetInputEvent retrieves an input event by index.
-func (e *ClapEventHandler) GetInputEvent(index uint32) *api.Event {
-	// Actual implementation would get event from CLAP
-	return nil
-}
-
 //export GoProcess
 func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return C.int32_t(api.ProcessError)
 	}
@@ -282,7 +294,7 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	if process.audio_inputs != nil && process.audio_inputs_count > 0 {
 		// Get the number of input ports
 		inputsCount := int(process.audio_inputs_count)
-		audioIn = make([][]float32, 0, inputsCount)
+		audioIn = make([][]float32, 0, inputsCount*2) // Assume stereo as worst case
 		
 		// Iterate through each input port
 		for i := 0; i < inputsCount; i++ {
@@ -313,7 +325,7 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	if process.audio_outputs != nil && process.audio_outputs_count > 0 {
 		// Get the number of output ports
 		outputsCount := int(process.audio_outputs_count)
-		audioOut = make([][]float32, 0, outputsCount)
+		audioOut = make([][]float32, 0, outputsCount*2) // Assume stereo as worst case
 		
 		// Iterate through each output port
 		for i := 0; i < outputsCount; i++ {
@@ -341,7 +353,7 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	}
 	
 	// Create the event handler
-	events := &ClapEventHandler{
+	events := &EventHandler{
 		InEvents:  unsafe.Pointer(process.in_events),
 		OutEvents: unsafe.Pointer(process.out_events),
 	}
@@ -353,7 +365,7 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 
 //export GoGetExtension
 func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return nil
 	}
@@ -364,7 +376,7 @@ func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
 
 //export GoOnMainThread
 func GoOnMainThread(plugin unsafe.Pointer) {
-	p := GetPluginFromPtr(plugin)
+	p := registry.GetPluginFromPtr(plugin)
 	if p == nil {
 		return
 	}
@@ -372,18 +384,7 @@ func GoOnMainThread(plugin unsafe.Pointer) {
 	p.OnMainThread()
 }
 
-// CleanupAllHandles releases all registered handles
-func CleanupAllHandles() {
-	handleRegistry.Lock()
-	defer handleRegistry.Unlock()
-	
-	for h := range handleRegistry.handles {
-		handle := cgo.Handle(h)
-		handle.Delete()
-		delete(handleRegistry.handles, h)
-	}
-}
-
+// init initializes the bridge
 func init() {
-	fmt.Println("Initializing ClapGo bridge...")
+	fmt.Println("Initializing ClapGo bridge")
 }

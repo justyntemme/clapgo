@@ -31,25 +31,7 @@ type AudioPortInfo struct {
 	InPlacePair uint32
 }
 
-// These constants define audio port flags.
-const (
-	AudioPortIsMain  = 1 << 0
-	AudioPortIsCVOut = 1 << 1
-	AudioPortIsCVIn  = 1 << 2
-	AudioPortIsAux   = 1 << 3
-	AudioPortIsSidechain = 1 << 4
-)
-
-// These constants define standard port types.
-const (
-	PortMono        = "mono"
-	PortStereo      = "stereo"
-	PortSurround    = "surround"
-	PortAmbisonic   = "ambisonic"
-)
-
-// Invalid ID constant for ports without a pair.
-const InvalidID = 0xFFFFFFFF
+// Audio port flags and port types are defined in constants.go
 
 // ParamsProvider is an extension for plugins that have parameters.
 // It allows hosts to query and manipulate plugin parameters.
@@ -94,23 +76,7 @@ type ParamInfo struct {
 	Flags uint32
 }
 
-// These constants define parameter flags.
-const (
-	ParamIsSteppable      = 1 << 0
-	ParamIsPeriodic       = 1 << 1
-	ParamIsHidden         = 1 << 2
-	ParamIsReadonly       = 1 << 3
-	ParamIsBypass         = 1 << 4
-	ParamIsAutomatable    = 1 << 5
-	ParamIsAutomatePerNote = 1 << 6
-	ParamIsAutomatePerKey = 1 << 7
-	ParamIsAutomatePerChannel = 1 << 8
-	ParamIsAutomatePerPort = 1 << 9
-	ParamIsModulatable    = 1 << 10
-	ParamIsPerformanceParameter = 1 << 11
-	ParamIsBoundedBelow   = 1 << 12
-	ParamIsBoundedAbove   = 1 << 13
-)
+// Parameter flags are defined in constants.go
 
 // StateProvider is an extension for plugins that can save and load state.
 // It allows hosts to save and restore plugin state.
@@ -147,13 +113,7 @@ type GUIProvider interface {
 	OnGUIHidden()
 }
 
-// These constants define GUI API identifiers.
-const (
-	WindowAPIX11     = "x11"
-	WindowAPIWin32   = "win32"
-	WindowAPICocoa   = "cocoa"
-	WindowAPIWayland = "wayland"
-)
+// GUI API identifiers are defined in constants.go
 
 // NotePortsProvider is an extension for plugins that have note ports.
 // It allows hosts to query information about the plugin's note ports.
@@ -183,17 +143,7 @@ type NotePortInfo struct {
 	PreferredDialect uint32
 }
 
-// These constants define note port flags.
-const (
-	NotePortIsMain = 1 << 0
-)
-
-// These constants define note dialects.
-const (
-	NoteDialectCLAP = 1 << 0
-	NoteDialectMIDI1 = 1 << 1
-	NoteDialectMIDI2 = 1 << 2
-)
+// Note port flags and dialects are defined in constants.go
 
 // LatencyProvider is an extension for plugins that have latency.
 // It allows hosts to query the plugin's latency.
@@ -216,8 +166,4 @@ type PresetLoadProvider interface {
 	LoadPreset(locationKind uint32, location, loadKey string) bool
 }
 
-// These constants define preset location kinds.
-const (
-	PresetLocationFilePath = 0
-	PresetLocationFileFD = 1
-)
+// Preset location kinds are defined in constants.go
