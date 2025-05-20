@@ -199,14 +199,10 @@ func ResetImpl(processor AudioProcessor) {
 }
 
 // ProcessImpl processes audio
-func ProcessImpl(processor AudioProcessor, steadyTime int64, framesCount uint32, events *ProcessEvents) int {
+func ProcessImpl(processor AudioProcessor, steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *ProcessEvents) int {
 	if processor == nil {
 		return 0 // CLAP_PROCESS_ERROR
 	}
-	
-	// In a real implementation, we would convert C audio buffers to Go slices
-	var audioIn [][]float32
-	var audioOut [][]float32
 	
 	status := processor.Process(steadyTime, framesCount, audioIn, audioOut, events)
 	return status

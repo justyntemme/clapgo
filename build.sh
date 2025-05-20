@@ -102,7 +102,9 @@ cmake --build --preset "$cmake_preset" --config $build_config -j$(nproc 2>/dev/n
 # Build the shared Go library
 echo "Building libgoclap.so shared library..."
 mkdir -p $build_dir/src
+mkdir -p ~/.clap
 CGO_ENABLED=1 go build -buildmode=c-shared -o $build_dir/src/libgoclap.so ./cmd/wrapper
+cp $build_dir/src/libgoclap.so ~/.clap/
 
 # Test if requested
 if $test; then
