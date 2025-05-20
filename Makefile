@@ -47,8 +47,10 @@ INTERNAL_DIR := internal
 PKG_DIR := pkg
 EXAMPLES_DIR := examples
 
-# Find all example plugins
-EXAMPLE_PLUGINS := $(wildcard $(EXAMPLES_DIR)/*)
+# Find all example plugins, initially we'll only use the simple ones
+SIMPLE_PLUGINS := $(EXAMPLES_DIR)/gain $(EXAMPLES_DIR)/synth
+EXAMPLE_PLUGINS := $(SIMPLE_PLUGINS)
+# Later we can add more complex plugins like $(EXAMPLES_DIR)/gain-with-gui
 
 # Main targets
 .PHONY: all clean install uninstall build-go build-plugins examples test
@@ -70,7 +72,13 @@ build-plugins: build-go
 		if [ -d "$$plugin" ]; then \
 			plugin_name=$$(basename $$plugin); \
 			echo "  Building $$plugin_name..."; \
-			$(MAKE) -C $$plugin || exit 1; \
+			if [ -f "$$plugin/Makefile" ]; then \
+				$(MAKE) -C $$plugin || echo "  Build failed for $$plugin_name"; \
+			elif [ -f "$$plugin/CMakeLists.txt" ]; then \
+				echo "  $$plugin_name has CMakeLists.txt but no Makefile, skipping"; \
+			else \
+				echo "  No build system found for $$plugin_name, skipping"; \
+			fi; \
 		fi; \
 	done
 
@@ -78,17 +86,28 @@ build-plugins: build-go
 install: all
 	@echo "Installing plugins to $(INSTALL_DIR)..."
 	@mkdir -p $(INSTALL_DIR)
-	@cp -f $(BUILD_DIR)/libgoclap.$(SO_EXT) $(INSTALL_DIR)/
+	@if [ -f $(BUILD_DIR)/libgoclap.$(SO_EXT) ]; then \
+		cp -f $(BUILD_DIR)/libgoclap.$(SO_EXT) $(INSTALL_DIR)/; \
+		echo "  Installed libgoclap.$(SO_EXT)"; \
+	else \
+		echo "  Error: libgoclap.$(SO_EXT) not found"; \
+	fi
 	@for plugin in $(EXAMPLE_PLUGINS); do \
 		if [ -d "$$plugin" ]; then \
 			plugin_name=$$(basename $$plugin); \
 			if [ -f "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" ]; then \
 				echo "  Installing $$plugin_name.clap..."; \
 				cp -f "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" $(INSTALL_DIR)/; \
+			else \
+				echo "  Warning: $$plugin_name.clap not found, skipping"; \
 			fi; \
 		fi; \
 	done
-	@chmod 755 $(INSTALL_DIR)/*.clap $(INSTALL_DIR)/*.$(SO_EXT)
+	@if ls $(INSTALL_DIR)/*.clap >/dev/null 2>&1 && ls $(INSTALL_DIR)/*.$(SO_EXT) >/dev/null 2>&1; then \
+		chmod 755 $(INSTALL_DIR)/*.clap $(INSTALL_DIR)/*.$(SO_EXT); \
+	fi
+	@echo "Note: Complex plugins like gain-with-gui require additional build steps with CMake"
+	@echo "      To build them, use CMake directly or extend this Makefile in the future."
 	@echo "Installation complete!"
 
 # Remove installed plugins

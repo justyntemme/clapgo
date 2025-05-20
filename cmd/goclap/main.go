@@ -5,6 +5,23 @@ package main
 #include <stdbool.h>
 #include <stdlib.h>
 #include "../../include/clap/include/clap/clap.h"
+
+// Helper functions to call function pointers in the clap_input_events interface
+static uint32_t clap_input_events_size(const clap_input_events_t *events, const void *events_ctx) {
+    if (events && events->size) {
+        return events->size(events_ctx);
+    }
+    return 0;
+}
+
+static const clap_event_header_t *clap_input_events_get(const clap_input_events_t *events, 
+                                                const void *events_ctx, 
+                                                uint32_t index) {
+    if (events && events->get) {
+        return events->get(events_ctx, index);
+    }
+    return NULL;
+}
 */
 import "C"
 import (
@@ -261,7 +278,8 @@ func (e *ClapEventHandler) GetInputEventCount() uint32 {
 	}
 	
 	inEvents := (*C.clap_input_events_t)(e.InEvents)
-	return uint32(inEvents.size(e.InEvents))
+	// Call our C helper function to invoke the size function pointer
+	return uint32(C.clap_input_events_size(inEvents, e.InEvents))
 }
 
 // GetInputEvent retrieves an input event by index.
@@ -271,7 +289,8 @@ func (e *ClapEventHandler) GetInputEvent(index uint32) *api.Event {
 	}
 	
 	inEvents := (*C.clap_input_events_t)(e.InEvents)
-	eventPtr := inEvents.get(e.InEvents, C.uint32_t(index))
+	// Call our C helper function to invoke the get function pointer
+	eventPtr := unsafe.Pointer(C.clap_input_events_get(inEvents, e.InEvents, C.uint32_t(index)))
 	if eventPtr == nil {
 		return nil
 	}

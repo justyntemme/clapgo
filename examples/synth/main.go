@@ -685,7 +685,9 @@ func noteToFrequency(note int) float64 {
 func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 	// Check for parameter extension
 	if id == goclap.ExtParams {
-		return p.paramManager.GetExtension()
+		// TODO: Implement proper parameter extension
+		// For now, return nil since GetExtension is not implemented
+		return nil
 	}
 	
 	// Check for state extension
