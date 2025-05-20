@@ -4,7 +4,6 @@ package main
 import "C"
 import (
 	"fmt"
-	"os"
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/api"
@@ -14,41 +13,18 @@ import (
 // Main is the main entry point for the bridge when built as a shared library
 // This isn't called directly but is required for the package to work as a shared library
 func Main() {
-	// Get the plugin ID from environment variable
-	pluginID := os.Getenv("CLAPGO_PLUGIN_ID")
-	if pluginID != "" {
-		fmt.Printf("ClapGo bridge initialized for plugin ID: %s\n", pluginID)
+	fmt.Println("ClapGo bridge initialized")
 		
-		// Verify the plugin ID is registered
-		count := registry.GetPluginCount()
-		found := false
-		
+	// List all registered plugins
+	count := registry.GetPluginCount()
+	if count > 0 {
+		fmt.Printf("Found %d registered plugins:\n", count)
 		for i := uint32(0); i < count; i++ {
 			info := registry.GetPluginInfo(i)
-			if info.ID == pluginID {
-				found = true
-				fmt.Printf("Plugin '%s' (%s) successfully registered\n", info.Name, info.ID)
-				break
-			}
-		}
-		
-		if !found {
-			fmt.Printf("Warning: Plugin ID '%s' not found in registry. Available plugins: %d\n", pluginID, count)
+			fmt.Printf("  %d: %s (%s)\n", i, info.Name, info.ID)
 		}
 	} else {
-		fmt.Println("ClapGo bridge initialized (no specific plugin ID)")
-		
-		// List all registered plugins
-		count := registry.GetPluginCount()
-		if count > 0 {
-			fmt.Printf("Found %d registered plugins:\n", count)
-			for i := uint32(0); i < count; i++ {
-				info := registry.GetPluginInfo(i)
-				fmt.Printf("  %d: %s (%s)\n", i, info.Name, info.ID)
-			}
-		} else {
-			fmt.Println("Warning: No plugins registered")
-		}
+		fmt.Println("Warning: No plugins registered")
 	}
 }
 
@@ -143,21 +119,10 @@ func registerPlugins() {
 	if !hasRegisteredPlugins {
 		fmt.Println("Plugin registry initialized")
 		
-		// Get plugin ID from environment variable (if specified)
-		pluginID := os.Getenv("CLAPGO_PLUGIN_ID")
-		if pluginID != "" {
-			// When building the plugin-specific library, register a stub implementation
-			// that will later be replaced by the actual implementation
-			registerPluginStub(pluginID)
-		} else {
-			// When building the main bridge library, we need to detect plugins
-			// This could involve scanning directories or using a manifest
-			// For now, we'll just register known plugins as stubs
-			
-			// Since this is a PoC, we'll just register the known plugins
-			// In a real implementation, this would scan for plugins dynamically
-			searchForPlugins()
-		}
+		// Since this is a PoC, we just search for known plugins
+		// The actual plugins will be registered by their own packages
+		// using exported functions that the bridge can call
+		searchForPlugins()
 		
 		hasRegisteredPlugins = true
 	}

@@ -80,7 +80,7 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern uint32_t SynthGetPluginCount();
+extern uint32_t GetPluginCount();
 
 #ifdef __cplusplus
 }

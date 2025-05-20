@@ -57,23 +57,12 @@ CLAP_INCLUDE_DIR := ./include/clap/include
 # Define plugin directories
 EXAMPLE_PLUGINS := $(EXAMPLES_DIR)/gain $(EXAMPLES_DIR)/synth
 
-# Define plugin IDs and names
-PLUGIN_ID_gain := com.clapgo.gain
-PLUGIN_ID_synth := com.clapgo.synth
-
 # Main targets
 .PHONY: all clean install uninstall build-go build-plugins examples test print-plugin-id
 
-# Helper target to print plugin ID
+# Helper target to print plugin ID (deprecated, kept for backward compatibility)
 print-plugin-id:
-	@for cfg in $(PLUGIN_CONFIGS); do \
-		name=$$(echo $$cfg | cut -d: -f1); \
-		id=$$(echo $$cfg | cut -d: -f2); \
-		if [ "$$name" = "$(NAME)" ]; then \
-			echo "$$id"; \
-			break; \
-		fi; \
-	done
+	@echo "Plugin IDs are now handled through exported Go functions in each plugin"
 
 all: build-go build-plugins
 
@@ -96,17 +85,17 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR):
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT): $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
 	@echo "Building Go plugin library for $(1)..."
 	@cd $(EXAMPLES_DIR)/$(1) && \
-	CGO_ENABLED=$(CGO_ENABLED) CLAPGO_PLUGIN_ID="$(PLUGIN_ID_$(1))" \
+	CGO_ENABLED=$(CGO_ENABLED) \
 	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/lib$(1).$(SO_EXT) *.go
 
 # C bridge objects
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o: $(C_SRC_DIR)/bridge.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
 	@echo "Compiling C bridge for $(1)..."
-	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID_$(1))\" -c $(C_SRC_DIR)/bridge.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/bridge.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o
 
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o: $(C_SRC_DIR)/plugin.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
 	@echo "Compiling C plugin for $(1)..."
-	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -DCLAPGO_PLUGIN_ID=\"$(PLUGIN_ID_$(1))\" -c $(C_SRC_DIR)/plugin.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/plugin.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
 
 # Final CLAP plugin
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).$(SO_EXT) $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o
