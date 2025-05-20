@@ -37,6 +37,9 @@ CC := gcc
 LD := gcc
 CFLAGS := -I./include/clap/include -fPIC -Wall -Wextra
 LDFLAGS := -shared
+ifeq ($(PLATFORM), linux)
+    LDFLAGS += -Wl,-rpath,'$$$$ORIGIN'
+endif
 ifeq ($(DEBUG), 1)
     CFLAGS += -g -O0 -DDEBUG
 else
@@ -80,7 +83,7 @@ build-go:
 	@mkdir -p $(BUILD_DIR)
 	@CGO_ENABLED=$(CGO_ENABLED) $(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) \
 		-o $(BUILD_DIR)/libgoclap.$(SO_EXT) \
-		./cmd/clapgo
+		./pkg/bridge
 
 # Plugin build rules
 # Common function to build a plugin
@@ -139,6 +142,11 @@ install: all
 			if [ -f "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" ]; then \
 				echo "  Installing $$plugin_name.clap..."; \
 				cp -f "$$plugin/$(BUILD_DIR)/$$plugin_name.clap" $(INSTALL_DIR)/; \
+				# Copy the plugin's library to the same directory as the plugin for runtime loading\
+				if [ -f "$$plugin/$(BUILD_DIR)/lib$$plugin_name.$(SO_EXT)" ]; then \
+					echo "  Installing lib$$plugin_name.$(SO_EXT)..."; \
+					cp -f "$$plugin/$(BUILD_DIR)/lib$$plugin_name.$(SO_EXT)" $(INSTALL_DIR)/; \
+				fi; \
 			else \
 				echo "  Warning: $$plugin_name.clap not found, skipping"; \
 			fi; \
