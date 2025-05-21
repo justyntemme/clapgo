@@ -1,34 +1,26 @@
-the implementation plan for overhauling the project to use direct manifest-based plugin loading while ensuring
-  the Go runtime is properly loaded with the necessary function handlers.
+# ClapGo TODO List
 
-  Step 1: Enhance the Manifest Handling
+## Manifest-Based Plugin Loading
+- ✓ Design standard exported function names for plugin libraries
+- ✓ Update bridge.go to guarantee all required functions are exported
+- ✓ Modify bridge.c to use the standard exported functions
+- Test bridge implementation with clap-validator
+- Implement comprehensive error handling and logging
 
-  First, we need to make manifest loading the primary path rather than a fallback:
+## Plugin System Enhancements
+- Enhance manifest handling as the primary loading mechanism
+- Update plugin creation to use manifest data for instantiation
+- Ensure proper memory management between C and Go
+- Streamline the Go side of the bridge
 
-  1. Modify clapgo_init() in bridge.c to search for and load manifests first
-  2. Use the manifest's goSharedLibrary to load the proper library
-  3. Use the manifest's entryPoint to find the entry point function
+## Plugin Features
+- Create additional example plugins (MIDI effect, instrument)
+- Add support for parameter automation
+- Implement preset management
+- Support for CLAP extensions
 
-  Step 2: Create a Direct Plugin Loading System
-
-  Create a system to directly load plugins from manifests:
-
-  1. Add a mapping structure to track manifest-loaded plugins
-  2. Create functions to locate and call the entry points defined in manifests
-  3. Skip the Go registry for plugin discovery, using the manifest instead
-
-  Step 3: Update Plugin Creation
-
-  Modify how plugins are created:
-
-  1. Update clapgo_create_plugin() to use the manifest data for creating instances
-  2. Call the entry point function directly from the loaded shared library
-  3. Ensure proper handle and memory management between C and Go
-
-  Step 4: Simplify the Go Side
-
-  Streamline the Go side of the bridge:
-
-  1. Remove unnecessary registry code for plugin discovery
-  2. Keep minimal handle tracking for memory safety
-  3. Focus on clean plugin implementation interfaces
+## Documentation
+- Document plugin manifest format
+- Create plugin development guide
+- Add comprehensive API documentation
+- Document plugin function interfaces

@@ -54,17 +54,11 @@ typedef uint32_t (*clapgo_get_plugin_count_func)(void);
 typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
 typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
-// Manifest plugin entry structure - tracks a loaded manifest
-typedef struct {
-    plugin_manifest_t manifest;
-    clapgo_library_t library;
-    clapgo_create_plugin_func entry_point;
-    const clap_plugin_descriptor_t* descriptor;
-    bool loaded;
-} manifest_plugin_entry_t;
+// Forward declaration - manifest_plugin_entry_t is now defined in bridge.c
 
-// Library handle for the Go shared library
-extern clapgo_library_t clapgo_lib;
+// Library handle for the Go shared library - no longer needed globally
+// as each manifest entry has its own library handle
+clapgo_library_t clapgo_lib;
 
 // Manifest plugin registry
 extern manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
@@ -146,30 +140,8 @@ typedef clap_process_status (*clapgo_plugin_process_func)(void* plugin, const cl
 typedef const void* (*clapgo_plugin_get_extension_func)(void* plugin, const char* id);
 typedef void (*clapgo_plugin_on_main_thread_func)(void* plugin);
 
-// External function pointers
-extern clapgo_get_plugin_count_func go_get_plugin_count;
-extern clapgo_create_plugin_func go_create_plugin;
-extern clapgo_get_version_func go_get_version;
-
-// Standardized plugin metadata export functions
-extern clapgo_export_plugin_id_func go_export_plugin_id;
-extern clapgo_export_plugin_name_func go_export_plugin_name;
-extern clapgo_export_plugin_vendor_func go_export_plugin_vendor;
-extern clapgo_export_plugin_version_func go_export_plugin_version;
-extern clapgo_export_plugin_description_func go_export_plugin_description;
-extern clapgo_get_registered_plugin_count_func go_get_registered_plugin_count;
-extern clapgo_get_registered_plugin_id_by_index_func go_get_registered_plugin_id_by_index;
-
-extern clapgo_plugin_init_func go_plugin_init;
-extern clapgo_plugin_destroy_func go_plugin_destroy;
-extern clapgo_plugin_activate_func go_plugin_activate;
-extern clapgo_plugin_deactivate_func go_plugin_deactivate;
-extern clapgo_plugin_start_processing_func go_plugin_start_processing;
-extern clapgo_plugin_stop_processing_func go_plugin_stop_processing;
-extern clapgo_plugin_reset_func go_plugin_reset;
-extern clapgo_plugin_process_func go_plugin_process;
-extern clapgo_plugin_get_extension_func go_plugin_get_extension;
-extern clapgo_plugin_on_main_thread_func go_plugin_on_main_thread;
+// We no longer need these external function pointers as each manifest entry has its own set
+// of function pointers and we no longer use registry-related functions
 
 #ifdef __cplusplus
 }

@@ -7,32 +7,32 @@ package main
 // #include <stdlib.h>
 // #include "../../include/clap/include/clap/clap.h"
 //
-// // Forward declarations of the functions exported by Go
-// uint32_t GetPluginCount();
-// struct clap_plugin_descriptor *GetPluginInfo(uint32_t index);
-// void* CreatePlugin(struct clap_host *host, char *plugin_id);
-// bool GetVersion(uint32_t *major, uint32_t *minor, uint32_t *patch);
+// // Forward declarations of the standardized functions exported by Go
+// uint32_t ClapGo_GetPluginCount();
+// struct clap_plugin_descriptor *ClapGo_GetPluginDescriptor(uint32_t index);
+// void* ClapGo_CreatePlugin(struct clap_host *host, char *plugin_id);
+// bool ClapGo_GetVersion(uint32_t *major, uint32_t *minor, uint32_t *patch);
 //
 // // Plugin metadata export functions
-// uint32_t GetRegisteredPluginCount();
-// char* GetRegisteredPluginIDByIndex(uint32_t index);
-// char* ExportPluginID(char* plugin_id);
-// char* ExportPluginName(char* plugin_id);
-// char* ExportPluginVendor(char* plugin_id);
-// char* ExportPluginVersion(char* plugin_id);
-// char* ExportPluginDescription(char* plugin_id);
+// uint32_t ClapGo_GetRegisteredPluginCount();
+// char* ClapGo_GetRegisteredPluginIDByIndex(uint32_t index);
+// char* ClapGo_GetPluginID(char* plugin_id);
+// char* ClapGo_GetPluginName(char* plugin_id);
+// char* ClapGo_GetPluginVendor(char* plugin_id);
+// char* ClapGo_GetPluginVersion(char* plugin_id);
+// char* ClapGo_GetPluginDescription(char* plugin_id);
 //
 // // Plugin lifecycle functions
-// bool GoInit(void *plugin);
-// void GoDestroy(void *plugin);
-// bool GoActivate(void *plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames);
-// void GoDeactivate(void *plugin);
-// bool GoStartProcessing(void *plugin);
-// void GoStopProcessing(void *plugin);
-// void GoReset(void *plugin);
-// int32_t GoProcess(void *plugin, struct clap_process *process);
-// void *GoGetExtension(void *plugin, char *id);
-// void GoOnMainThread(void *plugin);
+// bool ClapGo_PluginInit(void *plugin);
+// void ClapGo_PluginDestroy(void *plugin);
+// bool ClapGo_PluginActivate(void *plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames);
+// void ClapGo_PluginDeactivate(void *plugin);
+// bool ClapGo_PluginStartProcessing(void *plugin);
+// void ClapGo_PluginStopProcessing(void *plugin);
+// void ClapGo_PluginReset(void *plugin);
+// int32_t ClapGo_PluginProcess(void *plugin, struct clap_process *process);
+// void *ClapGo_PluginGetExtension(void *plugin, char *id);
+// void ClapGo_PluginOnMainThread(void *plugin);
 //
 // // Helpers for handling events
 // static inline uint32_t clap_input_events_size(const clap_input_events_t* events, const void* events_ctx) {
@@ -76,151 +76,6 @@ const (
 	VersionPatch = 0
 )
 
-// GainPlugin implements a simple gain plugin directly in the bridge
-// This is a temporary solution until we find a way to properly load plugins
-type GainPlugin struct {
-	// Plugin state
-	gain         float64
-	sampleRate   float64
-	isActivated  bool
-	isProcessing bool
-	host         unsafe.Pointer
-}
-
-// Init initializes the plugin
-func (p *GainPlugin) Init() bool {
-	return true
-}
-
-// Destroy cleans up plugin resources
-func (p *GainPlugin) Destroy() {
-	// Nothing to clean up
-}
-
-// Activate prepares the plugin for processing
-func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
-	p.sampleRate = sampleRate
-	p.isActivated = true
-	return true
-}
-
-// Deactivate stops the plugin from processing
-func (p *GainPlugin) Deactivate() {
-	p.isActivated = false
-}
-
-// StartProcessing begins audio processing
-func (p *GainPlugin) StartProcessing() bool {
-	if !p.isActivated {
-		return false
-	}
-	p.isProcessing = true
-	return true
-}
-
-// StopProcessing ends audio processing
-func (p *GainPlugin) StopProcessing() {
-	p.isProcessing = false
-}
-
-// Reset resets the plugin state
-func (p *GainPlugin) Reset() {
-	p.gain = 1.0
-}
-
-// Process processes audio data
-func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
-	// Check if we're in a valid state for processing
-	if !p.isActivated || !p.isProcessing {
-		return api.ProcessError
-	}
-	
-	// Process parameter changes from events
-	if events != nil {
-		eventCount := events.GetInputEventCount()
-		
-		for i := uint32(0); i < eventCount; i++ {
-			event := events.GetInputEvent(i)
-			if event == nil {
-				continue
-			}
-			
-			// Handle parameter changes
-			if event.Type == api.EventTypeParamValue {
-				paramEvent, ok := event.Data.(api.ParamEvent)
-				if ok && paramEvent.ParamID == 1 { // Gain parameter
-					p.gain = paramEvent.Value
-				}
-			}
-		}
-	}
-	
-	// If no audio inputs or outputs, nothing to do
-	if len(audioIn) == 0 || len(audioOut) == 0 {
-		return api.ProcessContinue
-	}
-	
-	// Get the number of channels (use min of input and output)
-	numChannels := len(audioIn)
-	if len(audioOut) < numChannels {
-		numChannels = len(audioOut)
-	}
-	
-	// Process audio - apply gain to each sample
-	for ch := 0; ch < numChannels; ch++ {
-		inChannel := audioIn[ch]
-		outChannel := audioOut[ch]
-		
-		// Make sure we have enough buffer space
-		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			return api.ProcessError
-		}
-		
-		// Apply gain to each sample
-		for i := uint32(0); i < framesCount; i++ {
-			outChannel[i] = inChannel[i] * float32(p.gain)
-		}
-	}
-	
-	// Check if the output is silent
-	isSilent := p.gain < 0.0001 // -80dB
-	
-	if isSilent {
-		return api.ProcessSleep
-	}
-	
-	return api.ProcessContinue
-}
-
-// GetExtension gets a plugin extension
-func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	return nil
-}
-
-// OnMainThread is called on the main thread
-func (p *GainPlugin) OnMainThread() {
-	// Nothing to do
-}
-
-// GetPluginInfo returns information about the plugin
-func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
-	return api.PluginInfo{
-		ID:          "com.clapgo.gain",
-		Name:        "Simple Gain",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A simple gain plugin using ClapGo",
-		Features:    []string{"audio-effect", "stereo", "mono"},
-	}
-}
-
-// GetPluginID returns the plugin ID
-func (p *GainPlugin) GetPluginID() string {
-	return "com.clapgo.gain"
-}
 
 // EventHandler implements the api.EventHandler interface for CLAP events
 type EventHandler struct {
@@ -334,20 +189,32 @@ func (e *EventHandler) GetInputEvent(index uint32) *api.Event {
 	return goEvent
 }
 
-//export GetPluginCount
-func GetPluginCount() C.uint32_t {
-	// This is a temporary fix: We hardcode 1 because we know we have one plugin
-	// In a real implementation, this should scan the plugin directory
-	// or use plugin metadata to determine the count
-	fmt.Printf("Go: GetPluginCount (hardcoded to 1)\n")
-	return C.uint32_t(1)
+//export ClapGo_GetPluginCount
+func ClapGo_GetPluginCount() C.uint32_t {
+	// Return the count from the registry
+	count := registry.GetPluginCount()
+	fmt.Printf("Go: ClapGo_GetPluginCount returning %d\n", count)
+	return C.uint32_t(count)
 }
 
-//export GetPluginInfo
-func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
-	// For now, hardcode the info for our one plugin since registry might be empty
-	// In a real implementation, this should use plugin metadata
+//export ClapGo_GetPluginDescriptor
+// ClapGo_GetPluginDescriptor returns a plugin descriptor for the plugin at the given index
+func ClapGo_GetPluginDescriptor(index C.uint32_t) *C.struct_clap_plugin_descriptor {
+	fmt.Printf("Go: ClapGo_GetPluginDescriptor for index: %d\n", index)
 	
+	// Get plugin info from the registry
+	registryCount := registry.GetPluginCount()
+	if uint32(index) < registryCount {
+		info := registry.GetPluginInfo(uint32(index))
+		return createDescriptorFromPluginInfo(info)
+	}
+	
+	fmt.Printf("Error: Plugin index %d out of range\n", index)
+	return nil
+}
+
+// Helper function to create a descriptor from plugin info
+func createDescriptorFromPluginInfo(info api.PluginInfo) *C.struct_clap_plugin_descriptor {
 	// Create a new descriptor
 	desc := C.calloc(1, C.size_t(unsafe.Sizeof(C.struct_clap_plugin_descriptor{})))
 	descriptor := (*C.struct_clap_plugin_descriptor)(desc)
@@ -358,17 +225,17 @@ func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
 	descriptor.clap_version.revision = 0
 	
 	// Convert all strings to C strings
-	descriptor.id = C.CString("com.clapgo.gain")
-	descriptor.name = C.CString("Simple Gain")
-	descriptor.vendor = C.CString("ClapGo")
-	descriptor.url = C.CString("https://github.com/justyntemme/clapgo")
-	descriptor.manual_url = C.CString("https://github.com/justyntemme/clapgo")
-	descriptor.support_url = C.CString("https://github.com/justyntemme/clapgo/issues")
-	descriptor.version = C.CString("1.0.0")
-	descriptor.description = C.CString("A simple gain plugin using ClapGo")
+	descriptor.id = C.CString(info.ID)
+	descriptor.name = C.CString(info.Name)
+	descriptor.vendor = C.CString(info.Vendor)
+	descriptor.url = C.CString(info.URL)
+	descriptor.manual_url = C.CString(info.ManualURL)
+	descriptor.support_url = C.CString(info.SupportURL)
+	descriptor.version = C.CString(info.Version)
+	descriptor.description = C.CString(info.Description)
 	
 	// Add feature strings
-	features := []string{"audio-effect", "stereo", "mono"}
+	features := info.Features
 	
 	// Allocate memory for the feature array (plus 1 for NULL terminator)
 	featureArray := C.calloc(C.size_t(len(features)+1), C.size_t(unsafe.Sizeof(uintptr(0))))
@@ -383,44 +250,37 @@ func GetPluginInfo(index C.uint32_t) *C.struct_clap_plugin_descriptor {
 	
 	descriptor.features = (**C.char)(featureArray)
 	
-	fmt.Printf("GetPluginInfo returning descriptor for: %s\n", C.GoString(descriptor.id))
-	
+	fmt.Printf("Created descriptor for: %s\n", info.ID)
 	return descriptor
 }
 
-//export CreatePlugin
-func CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
+
+//export ClapGo_CreatePlugin
+func ClapGo_CreatePlugin(host *C.struct_clap_host, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
-	fmt.Printf("Go: CreatePlugin with ID: %s\n", id)
+	fmt.Printf("Go: ClapGo_CreatePlugin with ID: %s\n", id)
 	
-	// In a real implementation, this should create the correct plugin
-	// based on the ID. For now, hardcode creating a GainPlugin
-	
-	// Import the gain plugin package to ensure its init function runs
-	// This doesn't work in the current architecture, need a better approach
-	// For now, create a plugin directly
-	
-	// Create a new gain plugin
-	plugin := &GainPlugin{
-		gain:         1.0, // 0dB
-		sampleRate:   44100.0,
-		isActivated:  false,
-		isProcessing: false,
+	// Create a plugin from the registry
+	plug := registry.CreatePlugin(id)
+	if plug != nil {
+		// Set host if needed
+		
+		// Create a handle to the plugin
+		handle := cgo.NewHandle(plug)
+		
+		// Register the handle for cleanup
+		registry.RegisterHandle(handle)
+		
+		fmt.Printf("Created plugin instance from registry: %s\n", id)
+		return unsafe.Pointer(uintptr(handle))
 	}
 	
-	// Create a handle to the plugin
-	handle := cgo.NewHandle(plugin)
-	
-	// Register the handle for cleanup
-	registry.RegisterHandle(handle)
-	
-	fmt.Printf("Created hardcoded gain plugin instance\n")
-	
-	return unsafe.Pointer(uintptr(handle))
+	fmt.Printf("Error: Unable to create plugin with ID: %s\n", id)
+	return nil
 }
 
-//export GetVersion
-func GetVersion(major, minor, patch *C.uint32_t) C.bool {
+//export ClapGo_GetVersion
+func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
 	// Return the bridge version
 	if major != nil {
 		*major = C.uint32_t(VersionMajor)
@@ -431,26 +291,30 @@ func GetVersion(major, minor, patch *C.uint32_t) C.bool {
 	if patch != nil {
 		*patch = C.uint32_t(VersionPatch)
 	}
+	fmt.Printf("Go: ClapGo_GetVersion returning %d.%d.%d\n", VersionMajor, VersionMinor, VersionPatch)
 	return C.bool(true)
 }
 
-//export GoInit
-func GoInit(plugin unsafe.Pointer) C.bool {
+//export ClapGo_PluginInit
+func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginInit\n")
 		return C.bool(false)
 	}
 	
 	return C.bool(p.Init())
 }
 
-//export GoDestroy
-func GoDestroy(plugin unsafe.Pointer) {
+//export ClapGo_PluginDestroy
+func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginDestroy\n")
 		return
 	}
 	
+	fmt.Printf("Go: Destroying plugin\n")
 	p.Destroy()
 	
 	// Release the handle to prevent memory leaks
@@ -458,60 +322,71 @@ func GoDestroy(plugin unsafe.Pointer) {
 	registry.UnregisterHandle(handle)
 }
 
-//export GoActivate
-func GoActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
+//export ClapGo_PluginActivate
+func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginActivate\n")
 		return C.bool(false)
 	}
 	
+	fmt.Printf("Go: Activating plugin with sample rate %f\n", sampleRate)
 	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
 }
 
-//export GoDeactivate
-func GoDeactivate(plugin unsafe.Pointer) {
+//export ClapGo_PluginDeactivate
+func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginDeactivate\n")
 		return
 	}
 	
+	fmt.Printf("Go: Deactivating plugin\n")
 	p.Deactivate()
 }
 
-//export GoStartProcessing
-func GoStartProcessing(plugin unsafe.Pointer) C.bool {
+//export ClapGo_PluginStartProcessing
+func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginStartProcessing\n")
 		return C.bool(false)
 	}
 	
+	fmt.Printf("Go: Starting processing\n")
 	return C.bool(p.StartProcessing())
 }
 
-//export GoStopProcessing
-func GoStopProcessing(plugin unsafe.Pointer) {
+//export ClapGo_PluginStopProcessing
+func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginStopProcessing\n")
 		return
 	}
 	
+	fmt.Printf("Go: Stopping processing\n")
 	p.StopProcessing()
 }
 
-//export GoReset
-func GoReset(plugin unsafe.Pointer) {
+//export ClapGo_PluginReset
+func ClapGo_PluginReset(plugin unsafe.Pointer) {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginReset\n")
 		return
 	}
 	
+	fmt.Printf("Go: Resetting plugin\n")
 	p.Reset()
 }
 
-//export GoProcess
-func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t {
+//export ClapGo_PluginProcess
+func ClapGo_PluginProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginProcess\n")
 		return C.int32_t(api.ProcessError)
 	}
 	
@@ -595,24 +470,28 @@ func GoProcess(plugin unsafe.Pointer, process *C.struct_clap_process) C.int32_t 
 	return C.int32_t(status)
 }
 
-//export GoGetExtension
-func GoGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
+//export ClapGo_PluginGetExtension
+func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginGetExtension\n")
 		return nil
 	}
 	
 	extID := C.GoString(id)
+	fmt.Printf("Go: Getting extension %s\n", extID)
 	return p.GetExtension(extID)
 }
 
-//export GoOnMainThread
-func GoOnMainThread(plugin unsafe.Pointer) {
+//export ClapGo_PluginOnMainThread
+func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	p := GetPluginFromPtr(plugin)
 	if p == nil {
+		fmt.Printf("Error: Failed to get plugin from pointer in ClapGo_PluginOnMainThread\n")
 		return
 	}
 	
+	fmt.Printf("Go: Executing on main thread\n")
 	p.OnMainThread()
 }
 
@@ -631,86 +510,124 @@ func init() {
 
 // Export plugin metadata functions that the C code expects
 
-//export GetRegisteredPluginCount
-func GetRegisteredPluginCount() uint32 {
-	return registry.GetPluginCount()
+//export ClapGo_GetRegisteredPluginCount
+func ClapGo_GetRegisteredPluginCount() uint32 {
+	count := registry.GetPluginCount()
+	fmt.Printf("Go: ClapGo_GetRegisteredPluginCount returning %d\n", count)
+	return count
 }
 
-//export GetRegisteredPluginIDByIndex
-func GetRegisteredPluginIDByIndex(index uint32) *C.char {
+//export ClapGo_GetRegisteredPluginIDByIndex
+func ClapGo_GetRegisteredPluginIDByIndex(index uint32) *C.char {
 	info := registry.GetPluginInfo(index)
 	if info.ID == "" {
+		fmt.Printf("Go: Plugin at index %d not found\n", index)
 		return C.CString("")
 	}
+	fmt.Printf("Go: Found plugin at index %d with ID %s\n", index, info.ID)
 	return C.CString(info.ID)
 }
 
-//export ExportPluginID
-func ExportPluginID(pluginID *C.char) *C.char {
+//export ClapGo_GetPluginID
+func ClapGo_GetPluginID(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: Getting plugin ID for %s\n", id)
+	
 	// Find the plugin info by ID
 	count := registry.GetPluginCount()
 	for i := uint32(0); i < count; i++ {
 		info := registry.GetPluginInfo(i)
 		if info.ID == id {
+			fmt.Printf("Go: Found plugin ID %s\n", info.ID)
 			return C.CString(info.ID)
 		}
 	}
+	
+	fmt.Printf("Go: Plugin ID %s not found\n", id)
 	return C.CString("unknown")
 }
 
-//export ExportPluginName
-func ExportPluginName(pluginID *C.char) *C.char {
+//export ClapGo_GetPluginName
+func ClapGo_GetPluginName(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: Getting plugin name for %s\n", id)
+	
 	// Find the plugin info by ID
 	count := registry.GetPluginCount()
 	for i := uint32(0); i < count; i++ {
 		info := registry.GetPluginInfo(i)
 		if info.ID == id {
+			fmt.Printf("Go: Found plugin name %s\n", info.Name)
 			return C.CString(info.Name)
 		}
 	}
+	
+	fmt.Printf("Go: Plugin name for %s not found\n", id)
 	return C.CString("Unknown Plugin")
 }
 
-//export ExportPluginVendor
-func ExportPluginVendor(pluginID *C.char) *C.char {
+//export ClapGo_GetPluginVendor
+func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: Getting plugin vendor for %s\n", id)
+	
 	// Find the plugin info by ID
 	count := registry.GetPluginCount()
 	for i := uint32(0); i < count; i++ {
 		info := registry.GetPluginInfo(i)
 		if info.ID == id {
+			fmt.Printf("Go: Found plugin vendor %s\n", info.Vendor)
 			return C.CString(info.Vendor)
 		}
 	}
+	
+	fmt.Printf("Go: Plugin vendor for %s not found\n", id)
 	return C.CString("Unknown Vendor")
 }
 
-//export ExportPluginVersion
-func ExportPluginVersion(pluginID *C.char) *C.char {
+//export ClapGo_GetPluginVersion
+func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: Getting plugin version for %s\n", id)
+	
 	// Find the plugin info by ID
 	count := registry.GetPluginCount()
 	for i := uint32(0); i < count; i++ {
 		info := registry.GetPluginInfo(i)
 		if info.ID == id {
+			fmt.Printf("Go: Found plugin version %s\n", info.Version)
 			return C.CString(info.Version)
 		}
 	}
+	
+	fmt.Printf("Go: Plugin version for %s not found\n", id)
 	return C.CString("0.0.0")
 }
 
-//export ExportPluginDescription
-func ExportPluginDescription(pluginID *C.char) *C.char {
+//export ClapGo_GetPluginDescription
+func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
+	fmt.Printf("Go: Getting plugin description for %s\n", id)
+	
 	// Find the plugin info by ID
 	count := registry.GetPluginCount()
 	for i := uint32(0); i < count; i++ {
 		info := registry.GetPluginInfo(i)
 		if info.ID == id {
+			fmt.Printf("Go: Found plugin description: %s\n", info.Description)
 			return C.CString(info.Description)
 		}
 	}
+	
+	fmt.Printf("Go: Plugin description for %s not found\n", id)
 	return C.CString("No description available")
 }
+
+// Note: The ClapGo bridge uses both the manifest system and the registry system together.
+// The manifest system (on the C side) loads plugin metadata from JSON files and identifies
+// which shared library to load. When the C side loads that shared library, the Go code in that
+// library registers plugins with the registry system. This allows us to have a standardized
+// approach to plugin management that is consistent with the CLAP plugin ecosystem.
+//
+// The standardized export functions (ClapGo_*) provide a stable interface between the Go 
+// and C sides of the bridge.
