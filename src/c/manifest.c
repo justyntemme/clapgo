@@ -18,8 +18,7 @@ void manifest_init(plugin_manifest_t* manifest) {
     strcpy(manifest->plugin.manual_url, "https://github.com/justyntemme/clapgo");
     strcpy(manifest->plugin.support_url, "https://github.com/justyntemme/clapgo/issues");
     
-    // Default build info
-    strcpy(manifest->build.entry_point, "CreatePlugin");
+    // No default entry_point - we use standardized export functions
 }
 
 bool manifest_load_from_file(const char* path, plugin_manifest_t* manifest) {
@@ -156,14 +155,7 @@ bool manifest_load_from_file(const char* path, plugin_manifest_t* manifest) {
             }
         }
         
-        // Parse entry point
-        struct json_object* entry_obj;
-        if (json_object_object_get_ex(build_obj, "entryPoint", &entry_obj)) {
-            const char* entry = json_object_get_string(entry_obj);
-            if (entry) {
-                strncpy(manifest->build.entry_point, entry, sizeof(manifest->build.entry_point) - 1);
-            }
-        }
+        // We don't need the entry_point field anymore - we use standardized export functions
     }
     
     // Parse extensions array

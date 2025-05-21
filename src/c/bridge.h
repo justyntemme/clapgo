@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "../../include/clap/include/clap/clap.h"
+#include "manifest.h"
 
 // Platform detection
 #if defined(_WIN32) || defined(_WIN64)
@@ -33,6 +34,9 @@
 #define CLAPGO_API_VERSION_MINOR 2
 #define CLAPGO_API_VERSION_PATCH 0
 
+// Maximum number of manifests that can be tracked
+#define MAX_PLUGIN_MANIFESTS 32
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,10 +45,30 @@ extern "C" {
 typedef struct go_plugin_data {
     void* go_instance;
     const clap_plugin_descriptor_t* descriptor;
+    // For manifest-loaded plugins, store the manifest index
+    int manifest_index;
 } go_plugin_data_t;
+
+// Forward declaration of function types
+typedef uint32_t (*clapgo_get_plugin_count_func)(void);
+typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
+typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
+
+// Manifest plugin entry structure - tracks a loaded manifest
+typedef struct {
+    plugin_manifest_t manifest;
+    clapgo_library_t library;
+    clapgo_create_plugin_func entry_point;
+    const clap_plugin_descriptor_t* descriptor;
+    bool loaded;
+} manifest_plugin_entry_t;
 
 // Library handle for the Go shared library
 extern clapgo_library_t clapgo_lib;
+
+// Manifest plugin registry
+extern manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
+extern int manifest_plugin_count;
 
 // Initialize the bridge - loads the Go library and initializes the plugin
 bool clapgo_init(const char* plugin_path);
@@ -69,6 +93,21 @@ bool clapgo_load_library(const char* path);
 void clapgo_unload_library(void);
 clapgo_symbol_t clapgo_get_symbol(const char* name);
 
+// Find manifest files for the plugin
+int clapgo_find_manifests(const char* plugin_path);
+
+// Load a manifest plugin by index
+bool clapgo_load_manifest_plugin(int index);
+
+// Find a manifest plugin by ID
+int clapgo_find_manifest_plugin_by_id(const char* plugin_id);
+
+// Create a plugin instance from a manifest entry
+const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host, int index);
+
+// Check if the library can be loaded directly from the manifest
+bool clapgo_check_direct_loading_supported(const plugin_manifest_t* manifest);
+
 // Plugin callback implementations
 bool clapgo_plugin_init(const clap_plugin_t* plugin);
 void clapgo_plugin_destroy(const clap_plugin_t* plugin);
@@ -85,10 +124,7 @@ void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin);
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input);
 bool clapgo_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info);
 
-// Function pointer types for Go exports
-typedef uint32_t (*clapgo_get_plugin_count_func)(void);
-typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
-typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
+// Function pointer types for other Go exports
 
 // Function pointer types for standardized plugin metadata exports
 typedef char* (*clapgo_export_plugin_id_func)(const char* plugin_id);
