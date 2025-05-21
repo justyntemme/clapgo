@@ -9,7 +9,7 @@
     "url": "https://github.com/justyntemme/clapgo",
     "manualUrl": "https://github.com/justyntemme/clapgo",
     "supportUrl": "https://github.com/justyntemme/clapgo/issues",
-    "features": ["instrument", "synthesizer", "stereo", "mono"]
+    "features": ["instrument", "synthesizer", "stereo"]
   },
   "build": {
     "goSharedLibrary": "libsynth.so",
@@ -28,44 +28,24 @@
     {
       "id": "clap.state",
       "supported": false
-    },
-    {
-      "id": "clap.preset-load",
-      "supported": true
     }
   ],
   "parameters": [
     {
       "id": 1,
-      "name": "Attack",
-      "minValue": 0.001,
-      "maxValue": 2.0,
-      "defaultValue": 0.1,
-      "flags": ["automatable", "bounded-below", "bounded-above"]
-    },
-    {
-      "id": 2,
-      "name": "Decay",
-      "minValue": 0.001,
-      "maxValue": 5.0,
-      "defaultValue": 0.3,
-      "flags": ["automatable", "bounded-below", "bounded-above"]
-    },
-    {
-      "id": 3,
-      "name": "Sustain",
+      "name": "Volume",
       "minValue": 0.0,
       "maxValue": 1.0,
       "defaultValue": 0.7,
       "flags": ["automatable", "bounded-below", "bounded-above"]
     },
     {
-      "id": 4,
-      "name": "Release",
-      "minValue": 0.001,
-      "maxValue": 10.0,
-      "defaultValue": 0.5,
-      "flags": ["automatable", "bounded-below", "bounded-above"]
+      "id": 2,
+      "name": "Waveform",
+      "minValue": 0.0,
+      "maxValue": 2.0,
+      "defaultValue": 0.0,
+      "flags": ["automatable", "bounded-below", "bounded-above", "steppable"]
     }
   ]
 }

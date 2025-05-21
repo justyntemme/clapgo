@@ -49,19 +49,12 @@ typedef struct go_plugin_data {
     int manifest_index;
 } go_plugin_data_t;
 
-// Forward declaration of function types
-typedef uint32_t (*clapgo_get_plugin_count_func)(void);
-typedef void* (*clapgo_create_plugin_func)(const clap_host_t* host, const char* plugin_id);
-typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
-// Forward declaration - manifest_plugin_entry_t is now defined in bridge.c
+// Forward declaration
+struct manifest_plugin_entry_t;
 
-// Library handle for the Go shared library - no longer needed globally
-// as each manifest entry has its own library handle
-clapgo_library_t clapgo_lib;
 
-// Manifest plugin registry
-extern manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
+// Manifest plugin registry - external declarations
 extern int manifest_plugin_count;
 
 // Initialize the bridge - loads the Go library and initializes the plugin
@@ -82,10 +75,6 @@ const clap_plugin_descriptor_t* clapgo_get_plugin_descriptor(uint32_t index);
 // Get the plugin factory (CLAP interface)
 const clap_plugin_factory_t* clapgo_get_plugin_factory(void);
 
-// Library loading utilities
-bool clapgo_load_library(const char* path);
-void clapgo_unload_library(void);
-clapgo_symbol_t clapgo_get_symbol(const char* name);
 
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path);
@@ -140,8 +129,10 @@ typedef clap_process_status (*clapgo_plugin_process_func)(void* plugin, const cl
 typedef const void* (*clapgo_plugin_get_extension_func)(void* plugin, const char* id);
 typedef void (*clapgo_plugin_on_main_thread_func)(void* plugin);
 
-// We no longer need these external function pointers as each manifest entry has its own set
-// of function pointers and we no longer use registry-related functions
+// Function pointer types for plugin creation and versioning
+typedef void* (*clapgo_create_plugin_func)(void* host, const char* plugin_id);
+typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
+
 
 #ifdef __cplusplus
 }

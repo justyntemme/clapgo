@@ -1,5 +1,6 @@
 #include "bridge.h"
 #include "manifest.h"
+// Note: removed plugin.h include as it's legacy
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -41,104 +42,10 @@ typedef struct {
 manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
 int manifest_plugin_count = 0;
 
-// We don't need these anymore as we're using the manifest_plugins array directly
-// and manifest_plugin_count for the count
 
 
-// Track which descriptor fields are dynamically allocated
-typedef struct {
-    bool id;
-    bool name;
-    bool vendor;
-    bool url;
-    bool manual_url;
-    bool support_url;
-    bool version;
-    bool description;
-    bool features_array;
-    bool features_strings;
-} descriptor_allocated_fields_t;
 
-// Array to track allocated fields for each descriptor
-static descriptor_allocated_fields_t *descriptor_allocations = NULL;
 
-// Platform-specific shared library loading implementation
-bool clapgo_load_library(const char* path) {
-    if (clapgo_lib != NULL) {
-        // Library already loaded
-        return true;
-    }
-    
-    if (path == NULL) {
-        fprintf(stderr, "Error: Cannot load library, path is NULL\n");
-        return false;
-    }
-    
-#if defined(CLAPGO_OS_WINDOWS)
-    // Windows implementation
-    clapgo_lib = LoadLibraryA(path);
-    if (clapgo_lib == NULL) {
-        DWORD error = GetLastError();
-        fprintf(stderr, "Error: Failed to load library: %s (error code: %lu)\n", path, error);
-        return false;
-    }
-#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
-    // macOS and Linux implementation (both use dlopen)
-    clapgo_lib = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
-    if (clapgo_lib == NULL) {
-        fprintf(stderr, "Error: Failed to load library: %s (%s)\n", path, dlerror());
-        return false;
-    }
-#else
-    #error "Unsupported platform"
-#endif
-
-    return true;
-}
-
-void clapgo_unload_library(void) {
-    if (clapgo_lib == NULL) {
-        return;
-    }
-    
-#if defined(CLAPGO_OS_WINDOWS)
-    FreeLibrary(clapgo_lib);
-#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
-    dlclose(clapgo_lib);
-#endif
-
-    clapgo_lib = NULL;
-    
-    // We no longer use global function pointers - they're stored in each manifest entry
-}
-
-clapgo_symbol_t clapgo_get_symbol(const char* name) {
-    if (clapgo_lib == NULL || name == NULL) {
-        return NULL;
-    }
-    
-    clapgo_symbol_t symbol = NULL;
-    
-#if defined(CLAPGO_OS_WINDOWS)
-    symbol = GetProcAddress(clapgo_lib, name);
-    if (symbol == NULL) {
-        DWORD error = GetLastError();
-        fprintf(stderr, "Error: Failed to get symbol: %s (error code: %lu)\n", name, error);
-    }
-#elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
-    // Clear any existing errors
-    dlerror();
-    
-    symbol = dlsym(clapgo_lib, name);
-    const char* error = dlerror();
-    if (error != NULL) {
-        fprintf(stderr, "Error: Failed to get symbol: %s (%s)\n", name, error);
-        symbol = NULL;
-    }
-#endif
-
-    return symbol;
-}
 
 // Helper function to load all required symbols for a manifest plugin entry
 static bool clapgo_load_symbols_for_entry(manifest_plugin_entry_t* entry) {
@@ -230,119 +137,7 @@ static bool clapgo_load_symbols_for_entry(manifest_plugin_entry_t* entry) {
     return true;
 }
 
-// Create a deep copy of a string, returning NULL if input is NULL
-static char* deep_copy_string(const char* str) {
-    if (!str) return NULL;
-    return strdup(str);
-}
 
-// Helper function to free a descriptor's dynamically allocated fields
-static void free_descriptor_fields(const clap_plugin_descriptor_t* descriptor, descriptor_allocated_fields_t* alloc_info) {
-    if (!descriptor || !alloc_info) return;
-    
-    // Free all string fields that were allocated
-    if (alloc_info->id && descriptor->id) free((void*)descriptor->id);
-    if (alloc_info->name && descriptor->name) free((void*)descriptor->name);
-    if (alloc_info->vendor && descriptor->vendor) free((void*)descriptor->vendor);
-    if (alloc_info->url && descriptor->url) free((void*)descriptor->url);
-    if (alloc_info->manual_url && descriptor->manual_url) free((void*)descriptor->manual_url);
-    if (alloc_info->support_url && descriptor->support_url) free((void*)descriptor->support_url);
-    if (alloc_info->version && descriptor->version) free((void*)descriptor->version);
-    if (alloc_info->description && descriptor->description) free((void*)descriptor->description);
-    
-    // Free features array and its contents if allocated
-    if (alloc_info->features_array && descriptor->features) {
-        if (alloc_info->features_strings) {
-            // Free each feature string
-            for (int i = 0; descriptor->features[i] != NULL; i++) {
-                free((void*)descriptor->features[i]);
-            }
-        }
-        free((void*)descriptor->features);
-    }
-}
-
-// Helper function to create a deep copy of a descriptor
-static clap_plugin_descriptor_t* create_descriptor_copy(const clap_plugin_descriptor_t* src, 
-                                                       descriptor_allocated_fields_t* alloc_info) {
-    if (!src) return NULL;
-    
-    // Initialize the allocation tracking
-    memset(alloc_info, 0, sizeof(descriptor_allocated_fields_t));
-    
-    // Allocate the descriptor
-    clap_plugin_descriptor_t* desc = calloc(1, sizeof(clap_plugin_descriptor_t));
-    if (!desc) return NULL;
-    
-    // Copy the version info
-    desc->clap_version = src->clap_version;
-    
-    // Create deep copies of all string fields
-    desc->id = deep_copy_string(src->id);
-    alloc_info->id = (desc->id != NULL);
-    
-    desc->name = deep_copy_string(src->name);
-    alloc_info->name = (desc->name != NULL);
-    
-    desc->vendor = deep_copy_string(src->vendor);
-    alloc_info->vendor = (desc->vendor != NULL);
-    
-    desc->url = deep_copy_string(src->url);
-    alloc_info->url = (desc->url != NULL);
-    
-    desc->manual_url = deep_copy_string(src->manual_url);
-    alloc_info->manual_url = (desc->manual_url != NULL);
-    
-    desc->support_url = deep_copy_string(src->support_url);
-    alloc_info->support_url = (desc->support_url != NULL);
-    
-    desc->version = deep_copy_string(src->version);
-    alloc_info->version = (desc->version != NULL);
-    
-    desc->description = deep_copy_string(src->description);
-    alloc_info->description = (desc->description != NULL);
-    
-    // Copy features array if present
-    if (src->features) {
-        // Count the number of features
-        int feature_count = 0;
-        while (src->features[feature_count] != NULL) {
-            feature_count++;
-        }
-        
-        // Allocate the array (+1 for NULL terminator)
-        const char** features = calloc(feature_count + 1, sizeof(char*));
-        if (!features) {
-            // Failed to allocate, clean up and return NULL
-            free_descriptor_fields(desc, alloc_info);
-            free(desc);
-            return NULL;
-        }
-        
-        alloc_info->features_array = true;
-        alloc_info->features_strings = true;
-        
-        // Copy each feature string
-        for (int i = 0; i < feature_count; i++) {
-            features[i] = deep_copy_string(src->features[i]);
-            if (!features[i] && src->features[i]) {
-                // Failed to copy a feature, clean up and return NULL
-                for (int j = 0; j < i; j++) {
-                    free((void*)features[j]);
-                }
-                free(features);
-                free_descriptor_fields(desc, alloc_info);
-                free(desc);
-                return NULL;
-            }
-        }
-        
-        // Set the features array
-        desc->features = features;
-    }
-    
-    return desc;
-}
 
 // Helper function to check if a file exists
 static bool file_exists(const char* path) {
@@ -465,7 +260,6 @@ int clapgo_find_manifests(const char* plugin_path) {
             printf("Loaded manifest: %s\n", manifest_path);
             manifest_plugins[0].loaded = false;
             manifest_plugins[0].library = NULL;
-            manifest_plugins[0].entry_point = NULL;
             manifest_plugins[0].descriptor = NULL;
             manifest_plugin_count = 1;
         } else {
@@ -746,7 +540,6 @@ void clapgo_deinit(void) {
             #endif
             
             manifest_plugins[i].library = NULL;
-            manifest_plugins[i].entry_point = NULL;
             manifest_plugins[i].loaded = false;
             
             // Free manifest resources
@@ -755,13 +548,6 @@ void clapgo_deinit(void) {
     }
     
     manifest_plugin_count = 0;
-    
-    // We don't need to free plugin_descriptors and plugin_count anymore
-    // as they are no longer used. The descriptor cleanup is handled in
-    // the manifest_plugins cleanup above.
-    
-    // Unload the shared library
-    clapgo_unload_library();
     
     printf("ClapGo plugin deinitialized successfully\n");
 }

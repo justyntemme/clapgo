@@ -7,9 +7,9 @@ import "C"
 import (
 	"encoding/json"
 	"github.com/justyntemme/clapgo/pkg/api"
-	"github.com/justyntemme/clapgo/pkg/registry"
 	"math"
 	"os"
+	"runtime/cgo"
 	"unsafe"
 )
 
@@ -23,16 +23,120 @@ var (
 func init() {
 	// Create our synth plugin
 	synthPlugin = NewSynthPlugin()
-	
-	// Register the plugin with the registry
-	// This could also use registry.RegisterPlugin() if the SynthPlugin
-	// implemented the api.PluginProvider interface
-	registry.Register(synthPlugin.GetPluginInfo(), func() api.Plugin { return synthPlugin })
 }
 
-//export GetPluginCount
-func GetPluginCount() C.uint32_t {
-	return 1
+// Standardized exports for manifest system
+
+//export ClapGo_CreatePlugin
+func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
+	id := C.GoString(pluginID)
+	if id == PluginID {
+		handle := cgo.NewHandle(synthPlugin)
+		return unsafe.Pointer(handle)
+	}
+	return nil
+}
+
+//export ClapGo_PluginInit
+func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.Init())
+}
+
+//export ClapGo_PluginDestroy
+func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	handle := cgo.Handle(plugin)
+	p := handle.Value().(*SynthPlugin)
+	p.Destroy()
+	handle.Delete()
+}
+
+//export ClapGo_PluginActivate
+func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+}
+
+//export ClapGo_PluginDeactivate
+func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.Deactivate()
+}
+
+//export ClapGo_PluginStartProcessing
+func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.StartProcessing())
+}
+
+//export ClapGo_PluginStopProcessing
+func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.StopProcessing()
+}
+
+//export ClapGo_PluginReset
+func ClapGo_PluginReset(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.Reset()
+}
+
+//export ClapGo_PluginProcess
+func ClapGo_PluginProcess(plugin unsafe.Pointer, steadyTime C.int64_t, framesCount C.uint32_t, audioIn, audioOut unsafe.Pointer, events unsafe.Pointer) C.int {
+	if plugin == nil {
+		return C.int(api.ProcessError)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Convert audio buffers (simplified for this example)
+	// In a real implementation, you'd properly convert the C audio buffers
+	var audioInSlice, audioOutSlice [][]float32
+	
+	// Convert events
+	var eventHandler api.EventHandler
+	
+	result := p.Process(int64(steadyTime), uint32(framesCount), audioInSlice, audioOutSlice, eventHandler)
+	return C.int(result)
+}
+
+//export ClapGo_PluginGetExtension
+func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
+	if plugin == nil {
+		return nil
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	extID := C.GoString(id)
+	return p.GetExtension(extID)
+}
+
+//export ClapGo_PluginOnMainThread
+func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.OnMainThread()
 }
 
 // Voice represents a single active note

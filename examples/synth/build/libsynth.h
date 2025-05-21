@@ -80,7 +80,17 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern uint32_t GetPluginCount();
+extern void* ClapGo_CreatePlugin(void* host, char* pluginID);
+extern _Bool ClapGo_PluginInit(void* plugin);
+extern void ClapGo_PluginDestroy(void* plugin);
+extern _Bool ClapGo_PluginActivate(void* plugin, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
+extern void ClapGo_PluginDeactivate(void* plugin);
+extern _Bool ClapGo_PluginStartProcessing(void* plugin);
+extern void ClapGo_PluginStopProcessing(void* plugin);
+extern void ClapGo_PluginReset(void* plugin);
+extern int ClapGo_PluginProcess(void* plugin, int64_t steadyTime, uint32_t framesCount, void* audioIn, void* audioOut, void* events);
+extern void* ClapGo_PluginGetExtension(void* plugin, char* id);
+extern void ClapGo_PluginOnMainThread(void* plugin);
 
 #ifdef __cplusplus
 }

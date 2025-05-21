@@ -1,4 +1,5 @@
 #include "bridge.h"
+// Note: plugin.h contains legacy declarations - we only need bridge.h
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
