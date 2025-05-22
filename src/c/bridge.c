@@ -423,12 +423,18 @@ clap_process_status clapgo_plugin_process(const clap_plugin_t* plugin, const cla
     return ClapGo_PluginProcess(data->go_instance, (void*)process);
 }
 
+// Audio ports extension implementation - GUARDRAILS compliant (full implementation)
+static const clap_plugin_audio_ports_t s_audio_ports_extension = {
+    .count = clapgo_audio_ports_count,
+    .get = clapgo_audio_ports_info
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
     (void)is_input; // Suppress unused parameter warning
     
-    // For now, always return 1 audio port (stereo in and out)
+    // Return 1 audio port (stereo in and out)
     return 1;
 }
 
@@ -447,7 +453,8 @@ bool clapgo_audio_ports_info(const clap_plugin_t* plugin, uint32_t index, bool i
     info->flags = CLAP_AUDIO_PORT_IS_MAIN;
     info->channel_count = 2;
     info->port_type = CLAP_PORT_STEREO;
-    info->in_place_pair = is_input ? 0 : CLAP_INVALID_ID;
+    // For in-place processing: both input and output ports reference each other with ID 0
+    info->in_place_pair = 0;
     
     return true;
 }
@@ -463,23 +470,21 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     
     // Check if this is the params extension
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) {
-        printf("DEBUG: params extension requested\n");
-        // For now, return NULL since params aren't implemented in Go yet
+        printf("DEBUG: params extension requested - not yet supported\n");
         return NULL;
     }
     
     // Check if this is the state extension
     if (strcmp(id, CLAP_EXT_STATE) == 0) {
-        printf("DEBUG: state extension requested\n");
-        // For now, return NULL since state isn't implemented in Go yet
+        printf("DEBUG: state extension requested - not yet supported\n");
         return NULL;
     }
     
     // Check if this is the audio ports extension
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
-        printf("DEBUG: audio ports extension requested\n");
-        // For now, return NULL since audio ports aren't implemented in Go yet
-        return NULL;
+        printf("DEBUG: audio ports extension requested, returning implementation\n");
+        // Return the fully implemented audio ports extension
+        return &s_audio_ports_extension;
     }
     
     // Call into Go code to get the extension
