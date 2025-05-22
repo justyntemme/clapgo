@@ -518,13 +518,8 @@ func (p *GainPlugin) handleParameterChange(paramEvent api.ParamEvent) {
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	// Check for parameter extension
-	if id == api.ExtParams {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// No other extensions supported
+	// Extensions are handled by the C bridge layer
+	// The bridge provides params, state, and audio ports extensions
 	return nil
 }
 
@@ -553,6 +548,85 @@ func (p *GainPlugin) GetPluginID() string {
 	return PluginID
 }
 
+// SaveState saves the plugin state to a stream
+func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
+	out := api.NewOutputStream(stream)
+	
+	// Write state version
+	if err := out.WriteUint32(1); err != nil {
+		return false
+	}
+	
+	// Write parameter count
+	paramCount := p.paramManager.GetParameterCount()
+	if err := out.WriteUint32(paramCount); err != nil {
+		return false
+	}
+	
+	// Write each parameter ID and value
+	for i := uint32(0); i < paramCount; i++ {
+		info, err := p.paramManager.GetParameterInfoByIndex(i)
+		if err != nil {
+			return false
+		}
+		
+		// Write parameter ID
+		if err := out.WriteUint32(info.ID); err != nil {
+			return false
+		}
+		
+		// Write parameter value
+		value := p.paramManager.GetParameterValue(info.ID)
+		if err := out.WriteFloat64(value); err != nil {
+			return false
+		}
+	}
+	
+	return true
+}
+
+// LoadState loads the plugin state from a stream
+func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
+	in := api.NewInputStream(stream)
+	
+	// Read state version
+	version, err := in.ReadUint32()
+	if err != nil || version != 1 {
+		return false
+	}
+	
+	// Read parameter count
+	paramCount, err := in.ReadUint32()
+	if err != nil {
+		return false
+	}
+	
+	// Read each parameter ID and value
+	for i := uint32(0); i < paramCount; i++ {
+		// Read parameter ID
+		paramID, err := in.ReadUint32()
+		if err != nil {
+			return false
+		}
+		
+		// Read parameter value
+		value, err := in.ReadFloat64()
+		if err != nil {
+			return false
+		}
+		
+		// Set parameter value
+		p.paramManager.SetParameterValue(paramID, value)
+		
+		// Update internal state if this is the gain parameter
+		if paramID == 0 {
+			atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
+		}
+	}
+	
+	return true
+}
+
 // Helper functions for atomic float64 operations
 func floatToBits(f float64) uint64 {
 	return *(*uint64)(unsafe.Pointer(&f))
@@ -560,6 +634,24 @@ func floatToBits(f float64) uint64 {
 
 func floatFromBits(b uint64) float64 {
 	return *(*float64)(unsafe.Pointer(&b))
+}
+
+//export ClapGo_PluginStateSave
+func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.bool(p.SaveState(stream))
+}
+
+//export ClapGo_PluginStateLoad
+func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.bool(p.LoadState(stream))
 }
 
 func main() {

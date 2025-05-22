@@ -1,5 +1,7 @@
 package api
 
+import "unsafe"
+
 // AudioPortsProvider is an extension for plugins that have audio ports.
 // It allows hosts to query information about the plugin's audio ports.
 type AudioPortsProvider interface {
@@ -79,13 +81,17 @@ type ParamInfo struct {
 // Parameter flags are defined in constants.go
 
 // StateProvider is an extension for plugins that can save and load state.
-// It allows hosts to save and restore plugin state.
+// It allows hosts to save and restore plugin state using CLAP's stream interface.
 type StateProvider interface {
-	// SaveState returns the plugin state as a map.
-	SaveState() map[string]interface{}
+	// SaveState saves the plugin state to a stream.
+	// The stream parameter is an unsafe.Pointer to a clap_ostream_t.
+	// Returns true if the state was saved successfully.
+	SaveState(stream unsafe.Pointer) bool
 
-	// LoadState loads the plugin state from a map.
-	LoadState(state map[string]interface{})
+	// LoadState loads the plugin state from a stream.
+	// The stream parameter is an unsafe.Pointer to a clap_istream_t.
+	// Returns true if the state was loaded successfully.
+	LoadState(stream unsafe.Pointer) bool
 }
 
 // GUIProvider is an extension for plugins with a graphical user interface.

@@ -26,7 +26,7 @@ endif
 # Go configuration
 GO := go
 CGO_ENABLED := 1
-GO_FLAGS := -buildmode=c-archive
+GO_FLAGS := -buildmode=c-shared
 GO_BUILD_FLAGS := -ldflags="-s -w"
 ifeq ($(DEBUG), 1)
     GO_BUILD_FLAGS := -gcflags="all=-N -l"
@@ -88,12 +88,12 @@ define build_plugin
 $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR):
 	@mkdir -p $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
 
-# Go static library for the plugin
-$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).a: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
-	@echo "Building Go static library for $(1)..."
+# Go shared library for the plugin
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Building Go shared library for $(1)..."
 	@cd $(EXAMPLES_DIR)/$(1) && \
 	CGO_ENABLED=$(CGO_ENABLED) \
-	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/lib$(1).a *.go
+	$(GO) build $(GO_FLAGS) $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/lib$(1).so *.go
 	@if [ -f "$(EXAMPLES_DIR)/$(1)/$(1).json" ]; then \
 		echo "Copying manifest file for $(1)..."; \
 		cp "$(EXAMPLES_DIR)/$(1)/$(1).json" "$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/"; \
@@ -112,10 +112,10 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o: $(C_SRC_DIR)/manifest.c | $(EXAMPL
 	@echo "Compiling C manifest for $(1)..."
 	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/manifest.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
 
-# Final CLAP plugin - truly self-contained with statically linked Go code
-$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).a $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
-	@echo "Linking truly self-contained $(1).clap..."
-	$(LD) $(LDFLAGS) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).a $(shell pkg-config --libs json-c)
+# Final CLAP plugin - linked with shared Go library
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
+	@echo "Linking $(1).clap with shared library..."
+	$(LD) $(LDFLAGS) -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o -l$(1) $(shell pkg-config --libs json-c)
 
 # Build target for each plugin
 build-$(1): build-go $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap
@@ -144,6 +144,11 @@ install: all
 				echo "    Copied $$plugin_name.clap"; \
 				chmod 755 "$$plugin_dir"/$$plugin_name.clap; \
 			fi; \
+			if [ -f "$$plugin/$(BUILD_DIR)/lib$$plugin_name.so" ]; then \
+				cp -f "$$plugin/$(BUILD_DIR)/lib$$plugin_name.so" "$$plugin_dir/"; \
+				echo "    Copied lib$$plugin_name.so"; \
+				chmod 755 "$$plugin_dir"/lib$$plugin_name.so; \
+			fi; \
 			if [ -f "$$plugin/$$plugin_name.json" ]; then \
 				cp -f "$$plugin/$$plugin_name.json" "$$plugin_dir/$$plugin_name.json"; \
 				echo "    Copied $$plugin_name.json manifest"; \
@@ -157,9 +162,11 @@ install: all
 	@echo "Directory structure:"
 	@echo "  $(INSTALL_DIR)/gain/"
 	@echo "    ├── gain.clap"
+	@echo "    ├── libgain.so"
 	@echo "    └── gain.json"
 	@echo "  $(INSTALL_DIR)/synth/"
 	@echo "    ├── synth.clap"
+	@echo "    ├── libsynth.so"
 	@echo "    └── synth.json"
 
 # Remove installed plugins

@@ -39,6 +39,10 @@ extern bool ClapGo_PluginParamsValueToText(void* plugin, uint32_t param_id, doub
 extern bool ClapGo_PluginParamsTextToValue(void* plugin, uint32_t param_id, char* text, double* value);
 extern void ClapGo_PluginParamsFlush(void* plugin, void* in_events, void* out_events);
 
+// State extension Go exports
+extern bool ClapGo_PluginStateSave(void* plugin, void* stream);
+extern bool ClapGo_PluginStateLoad(void* plugin, void* stream);
+
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
     printf("Searching for manifest for plugin: %s\n", plugin_path);
@@ -449,6 +453,16 @@ static const clap_plugin_params_t s_params_extension = {
     .flush = clapgo_params_flush
 };
 
+// Forward declarations for state extension
+static bool clapgo_state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream);
+static bool clapgo_state_load(const clap_plugin_t* plugin, const clap_istream_t* stream);
+
+// State extension structure - GUARDRAILS compliant (full implementation)
+static const clap_plugin_state_t s_state_extension = {
+    .save = clapgo_state_save,
+    .load = clapgo_state_load
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -496,8 +510,8 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     
     // Check if this is the state extension
     if (strcmp(id, CLAP_EXT_STATE) == 0) {
-        printf("DEBUG: state extension requested - not yet supported\n");
-        return NULL;
+        printf("DEBUG: state extension requested, returning implementation\n");
+        return &s_state_extension;
     }
     
     // Check if this is the audio ports extension
@@ -590,4 +604,28 @@ static void clapgo_params_flush(const clap_plugin_t* plugin, const clap_input_ev
     
     // Call into Go to handle flush
     ClapGo_PluginParamsFlush(data->go_instance, (void*)in, (void*)out);
+}
+
+// State extension implementation - GUARDRAILS compliant (full implementation)
+
+// Save plugin state to stream
+static bool clapgo_state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
+    if (!plugin || !stream) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to save state
+    return ClapGo_PluginStateSave(data->go_instance, (void*)stream);
+}
+
+// Load plugin state from stream
+static bool clapgo_state_load(const clap_plugin_t* plugin, const clap_istream_t* stream) {
+    if (!plugin || !stream) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to load state
+    return ClapGo_PluginStateLoad(data->go_instance, (void*)stream);
 }
