@@ -2,6 +2,7 @@
 add_go_library(gain-go
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/main.go
+        ${CMAKE_CURRENT_SOURCE_DIR}/constants.go
     OUTPUT_NAME
         gain
 )

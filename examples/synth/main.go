@@ -631,31 +631,31 @@ func noteToFrequency(note int) float64 {
 func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 	// Check for parameter extension
 	if id == api.ExtParams {
-		// TODO: Implement proper parameter extension
+		// Extension not yet supported
 		return nil
 	}
 	
 	// Check for state extension
 	if id == api.ExtState {
-		// TODO: Implement proper state extension
+		// Extension not yet supported
 		return nil
 	}
 	
 	// Check for note ports extension
 	if id == api.ExtNotePorts {
-		// TODO: Implement proper note ports extension
+		// Extension not yet supported
 		return nil
 	}
 	
 	// Check for audio ports extension
 	if id == api.ExtAudioPorts {
-		// TODO: Implement proper audio ports extension
+		// Extension not yet supported
 		return nil
 	}
 	
 	// Check for preset load extension
 	if id == api.ExtPresetLoad {
-		// TODO: Implement proper preset load extension
+		// Extension not yet supported
 		return nil
 	}
 	

@@ -456,11 +456,36 @@ bool clapgo_audio_ports_info(const clap_plugin_t* plugin, uint32_t index, bool i
 const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char* id) {
     if (!plugin || !id) return NULL;
     
+    printf("DEBUG: get_extension called for id: %s\n", id);
+    
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return NULL;
     
+    // Check if this is the params extension
+    if (strcmp(id, CLAP_EXT_PARAMS) == 0) {
+        printf("DEBUG: params extension requested\n");
+        // For now, return NULL since params aren't implemented in Go yet
+        return NULL;
+    }
+    
+    // Check if this is the state extension
+    if (strcmp(id, CLAP_EXT_STATE) == 0) {
+        printf("DEBUG: state extension requested\n");
+        // For now, return NULL since state isn't implemented in Go yet
+        return NULL;
+    }
+    
+    // Check if this is the audio ports extension
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
+        printf("DEBUG: audio ports extension requested\n");
+        // For now, return NULL since audio ports aren't implemented in Go yet
+        return NULL;
+    }
+    
     // Call into Go code to get the extension
-    return ClapGo_PluginGetExtension(data->go_instance, (char*)id);
+    void* ext = ClapGo_PluginGetExtension(data->go_instance, (char*)id);
+    printf("DEBUG: Go returned extension: %p\n", ext);
+    return ext;
 }
 
 // Handle main thread tasks for a plugin instance

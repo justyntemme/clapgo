@@ -378,8 +378,8 @@ func (p *GainPlugin) handleParameterChange(paramEvent api.ParamEvent) {
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
 	// Check for parameter extension
 	if id == api.ExtParams {
-		// Return parameter extension using our abstraction
-		return nil // TODO: Implement proper parameter extension
+		// Extension not yet supported
+		return nil
 	}
 	
 	// No other extensions supported
