@@ -91,12 +91,13 @@ type PluginInfo struct {
 }
 
 // EventHandler handles plugin events during processing.
+// All C event conversion is handled automatically by the implementation.
 type EventHandler interface {
 	// ProcessInputEvents processes all incoming events in the event queue.
 	// This should be called during the Process method to handle parameter changes, etc.
 	ProcessInputEvents()
 
-	// AddOutputEvent adds an event to the output event queue.
+	// AddOutputEvent adds an event to the output event queue (legacy interface).
 	// Events can include parameter changes, MIDI events, etc.
 	AddOutputEvent(eventType int, data interface{})
 
@@ -104,7 +105,12 @@ type EventHandler interface {
 	GetInputEventCount() uint32
 
 	// GetInputEvent retrieves an input event by index.
+	// C events are automatically converted to Go types.
 	GetInputEvent(index uint32) *Event
+
+	// PushOutputEvent pushes a typed output event to the host.
+	// This is the preferred method over AddOutputEvent.
+	PushOutputEvent(event *Event) bool
 }
 
 // Event represents an event in the CLAP processing context.

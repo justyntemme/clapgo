@@ -219,11 +219,11 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
 	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
 	
-	// Create event handler for input/output events
-	eventHandler := &ProcessEventHandler{
-		inputEvents:  cProcess.in_events,
-		outputEvents: cProcess.out_events,
-	}
+	// Create event handler using the new abstraction
+	eventHandler := api.NewEventProcessor(
+		unsafe.Pointer(cProcess.in_events),
+		unsafe.Pointer(cProcess.out_events),
+	)
 	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
@@ -254,49 +254,6 @@ func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	p.OnMainThread()
 }
 
-// ProcessEventHandler implements the EventHandler interface for CLAP events
-type ProcessEventHandler struct {
-	inputEvents  *C.clap_input_events_t
-	outputEvents *C.clap_output_events_t
-}
-
-// ProcessInputEvents processes all incoming events
-func (h *ProcessEventHandler) ProcessInputEvents() {
-	// For now, this is a simplified implementation
-	// In a full implementation, this would process all CLAP events
-}
-
-// AddOutputEvent adds an event to the output queue
-func (h *ProcessEventHandler) AddOutputEvent(eventType int, data interface{}) {
-	// For now, this is a simplified implementation
-	// In a full implementation, this would create and push CLAP events
-}
-
-// GetInputEventCount returns the number of input events
-func (h *ProcessEventHandler) GetInputEventCount() uint32 {
-	if h.inputEvents == nil {
-		return 0
-	}
-	
-	// Call the CLAP API to get event count
-	// Using the size function pointer from the input events structure
-	if h.inputEvents.size != nil {
-		return uint32(C.clap_input_events_size_helper(h.inputEvents))
-	}
-	
-	return 0
-}
-
-// GetInputEvent retrieves an input event by index
-func (h *ProcessEventHandler) GetInputEvent(index uint32) *api.Event {
-	if h.inputEvents == nil {
-		return nil
-	}
-	
-	// This would need proper implementation to convert CLAP events to Go events
-	// For now, return nil to prevent crashes
-	return nil
-}
 
 // GainPlugin implements a simple gain plugin
 type GainPlugin struct {
