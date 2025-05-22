@@ -2,6 +2,17 @@
 
 This document provides critical constraints and guidelines for maintaining architectural integrity while developing ClapGo. These guardrails prevent common anti-patterns and ensure decisions align with our chosen manifest-driven, C bridge architecture.
 
+## 🔴 CRITICAL: The Manifest System IS the Plugin Registration
+
+**THE MANIFEST JSON FILE IS THE ONLY PLUGIN REGISTRATION SYSTEM.**
+
+- **NEVER** create Go-side plugin registration mechanisms
+- **NEVER** implement plugin discovery in Go code  
+- **NEVER** build registration interfaces or global registries
+- The C bridge reads the manifest JSON and handles ALL plugin discovery
+- Go plugins are loaded by the C bridge based on manifest declarations
+- This is NOT negotiable - the manifest system is fundamental to the architecture
+
 ## 🚫 Architecture Anti-Patterns to NEVER Implement
 
 ### 1. Registration Systems in Go

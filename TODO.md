@@ -1,227 +1,233 @@
-# ClapGo TODO: C Bridge Abstraction Tasks
+# ClapGo TODO: Move All CGO to Library
 
-This document identifies all areas where example plugins interact with C/CGO code and outlines tasks to abstract these interactions into the Go library for a cleaner plugin development experience.
+This document outlines the plan to move ALL CGO code from example plugins into the pkg/ library, eliminating boilerplate and making plugin development pure Go.
 
-## Current C Bridge Touchpoints in Examples
+## Current State: Heavy CGO in Every Plugin
 
-### 1. CGO Import and C Header Inclusion
-**Location**: All example plugins (gain/main.go:3-21, synth/main.go:3-21)
-**Current Implementation**:
+Currently, EVERY plugin must include:
+- CGO imports and C headers (21 lines of C code)
+- 20+ exported C functions (~500 lines of boilerplate)
+- Manual C type conversions throughout
+- Unsafe pointer handling everywhere
+- Direct C struct manipulation
+
+This results in:
+- **90% boilerplate, 10% plugin logic**
+- **Massive code duplication** across plugins
+- **Error-prone** C type conversions
+- **High barrier to entry** for Go developers
+
+## Goal: Pure Go Plugin Development
+
+Move ALL CGO code into the clapgo library so plugins become:
+- **100% pure Go code**
+- **No CGO imports**
+- **No exported C functions**
+- **No unsafe pointers**
+- **Just implement an interface**
+
+## Implementation Plan
+
+### Phase 1: Create Plugin Interface & Base Implementation
+
+1. **Define Complete Plugin Interface** in `pkg/clapgo/plugin.go`:
 ```go
-// #cgo CFLAGS: -I../../include/clap/include
-// #include "../../include/clap/include/clap/clap.h"
-// #include <stdlib.h>
-// Helper functions for CLAP event handling...
+type Plugin interface {
+    // Lifecycle
+    Init() bool
+    Destroy()
+    Activate(sampleRate float64, minFrames, maxFrames uint32) bool
+    Deactivate()
+    StartProcessing() bool
+    StopProcessing()
+    Reset()
+    
+    // Core processing
+    Process(steadyTime int64, frames uint32, audioIn, audioOut [][]float32, events EventHandler) int
+    
+    // Extensions
+    GetExtension(id string) unsafe.Pointer
+    OnMainThread()
+    
+    // Parameters
+    GetParameterCount() uint32
+    GetParameterInfo(index uint32) (ParamInfo, error)
+    GetParameterValue(id uint32) float64
+    SetParameterValue(id uint32, value float64) error
+    FormatParameterValue(id uint32, value float64) string
+    ParseParameterValue(id uint32, text string) (float64, error)
+    FlushParameters(events EventHandler)
+    
+    // State
+    SaveState(stream OutputStream) bool
+    LoadState(stream InputStream) bool
+    
+    // Metadata
+    GetInfo() PluginInfo
+}
 ```
-**TODO**: Move all C imports and helper functions to the bridge package
 
-### 2. Exported C Functions (Plugin Lifecycle)
-**Location**: All plugins export 20+ C functions
-**Functions**:
-- `ClapGo_CreatePlugin`
-- `ClapGo_GetVersion`
-- `ClapGo_GetPluginID/Name/Vendor/Version/Description`
-- `ClapGo_PluginInit/Destroy/Activate/Deactivate`
-- `ClapGo_PluginStartProcessing/StopProcessing/Reset`
-- `ClapGo_PluginProcess`
-- `ClapGo_PluginGetExtension`
-- `ClapGo_PluginOnMainThread`
-- `ClapGo_PluginParamsCount/GetInfo/GetValue/ValueToText/TextToValue/Flush`
-- `ClapGo_PluginStateSave/Load`
-
-**TODO**: Generate these exports automatically in the bridge package
-
-### 3. CGO Handle Management
-**Location**: gain/main.go:49-50, 102, 112-114, etc.
-**Current Implementation**:
+2. **Create BasePlugin** with safe defaults:
 ```go
-handle := cgo.NewHandle(gainPlugin)
-p := cgo.Handle(plugin).Value().(*GainPlugin)
-handle.Delete()
+type BasePlugin struct{}
+
+// All methods have safe default implementations
+func (p *BasePlugin) Process(...) int {
+    // Default: copy input to output
+    for ch := range audioOut {
+        copy(audioOut[ch], audioIn[ch])
+    }
+    return ProcessContinue
+}
 ```
-**TODO**: Abstract handle management into the bridge
 
-### 4. C Type Conversions
-**Location**: Throughout all examples
-**Examples**:
-- `C.bool()` conversions
-- `C.uint32_t()` conversions
-- `C.double()` conversions
-- `C.CString()` and `C.GoString()` for strings
-- `C.clap_param_info_t` struct manipulation
-- `C.clap_process_t` struct access
+### Phase 2: Move All CGO Exports to Library
 
-**TODO**: Hide all C type conversions behind Go-native interfaces
-
-### 5. Direct C Struct Manipulation
-**Location**: gain/main.go:236-258 (parameter info)
-**Current Implementation**:
+1. **Create `pkg/clapgo/exports.go`** containing ALL ClapGo_* functions:
 ```go
-cInfo := (*C.clap_param_info_t)(info)
-cInfo.id = C.clap_id(paramInfo.ID)
-cInfo.flags = C.CLAP_PARAM_IS_AUTOMATABLE | C.CLAP_PARAM_IS_MODULATABLE
-// Manual byte copying for strings...
+//export ClapGo_CreatePlugin
+func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
+    id := C.GoString(pluginID)
+    if CreatePluginFunc == nil {
+        return nil
+    }
+    plugin := CreatePluginFunc(id)
+    if plugin == nil {
+        return nil
+    }
+    handle := cgo.NewHandle(plugin)
+    return unsafe.Pointer(handle)
+}
+
+//export ClapGo_PluginInit
+func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
+    if plugin == nil {
+        return C.bool(false)
+    }
+    p := cgo.Handle(plugin).Value().(Plugin)
+    return C.bool(p.Init())
+}
+
+// ... ALL 20+ other exports
 ```
-**TODO**: Create Go structs that automatically marshal to C
 
-### 6. Unsafe Pointer Usage
-**Location**: Throughout all examples
-**Uses**:
-- Plugin handle passing
-- Stream pointers for state save/load
-- Extension pointers
-- Process struct pointers
-- Event handler pointers
-
-**TODO**: Wrap all unsafe operations in safe Go APIs
-
-### 7. Manual Memory Management
-**Location**: String conversions, buffer management
-**Current Issues**:
-- `C.CString()` allocations without corresponding `C.free()`
-- Manual buffer size calculations
-- Direct memory access for audio buffers
-
-**TODO**: Implement automatic memory management
-
-### 8. Audio Buffer Conversion
-**Location**: Already abstracted via `api.ConvertFromCBuffers()`
-**Status**: ✅ Already abstracted properly
-
-### 9. Event Processing
-**Location**: Already abstracted via `api.EventHandler`
-**Status**: ✅ Already abstracted properly
-
-### 10. GUI C++ Integration (gain-with-gui)
-**Location**: gui_bridge.cpp
-**Current Implementation**:
-- Separate C++ file required
-- Complex GUI factory management
-- Manual window API handling
-- C++ class implementations
-
-**TODO**: Create Go GUI abstraction that generates required C++ code
-
-## Proposed Abstraction Architecture
-
-### 1. Plugin Registration System
+2. **Single Factory Function** for developers to implement:
 ```go
-// Instead of manual exports, plugins would:
-type MyPlugin struct {
-    clapgo.BasePlugin
+// The ONLY thing developers need to provide
+var CreatePluginFunc func(pluginID string) Plugin
+```
+
+### Phase 3: Refactor Parameter Handling
+
+Move all C struct manipulation into library helpers:
+```go
+// In library - handles all C conversions
+func convertParamInfoToC(info ParamInfo, cInfo *C.clap_param_info_t) {
+    cInfo.id = C.clap_id(info.ID)
+    cInfo.flags = C.uint32_t(info.Flags)
+    // ... handle all string copying, etc.
+}
+```
+
+### Phase 4: Simplify State Management
+
+Abstract away stream handling:
+```go
+// Library provides wrapped stream types
+type OutputStream interface {
+    WriteUint32(v uint32) error
+    WriteFloat64(v float64) error
+    WriteBytes(b []byte) error
+}
+
+// Plugin just works with Go types
+func (p *MyPlugin) SaveState(out OutputStream) bool {
+    out.WriteUint32(1) // version
+    out.WriteFloat64(p.gain)
+    return true
+}
+```
+
+## Result: Clean Plugin Code
+
+A complete gain plugin becomes:
+```go
+package main
+
+import (
+    "github.com/justyntemme/clapgo/pkg/clapgo"
+)
+
+type GainPlugin struct {
+    clapgo.BasePlugin  // Embed for defaults
+    gain float64
+}
+
+func (p *GainPlugin) Process(steadyTime int64, frames uint32, audioIn, audioOut [][]float32, events clapgo.EventHandler) int {
+    // Handle parameter changes
+    for i := uint32(0); i < events.GetInputEventCount(); i++ {
+        if event := events.GetInputEvent(i); event.Type == clapgo.EventTypeParamValue {
+            if param, ok := event.Data.(clapgo.ParamEvent); ok && param.ParamID == 0 {
+                p.gain = param.Value
+            }
+        }
+    }
+    
+    // Process audio
+    for ch := range audioOut {
+        for i := range audioOut[ch] {
+            audioOut[ch][i] = audioIn[ch][i] * float32(p.gain)
+        }
+    }
+    
+    return clapgo.ProcessContinue
+}
+
+func (p *GainPlugin) GetParameterCount() uint32 { return 1 }
+
+func (p *GainPlugin) GetParameterInfo(index uint32) (clapgo.ParamInfo, error) {
+    if index == 0 {
+        return clapgo.ParamInfo{
+            ID:      0,
+            Name:    "Gain",
+            Min:     0.0,
+            Max:     2.0,
+            Default: 1.0,
+        }, nil
+    }
+    return clapgo.ParamInfo{}, clapgo.ErrInvalidParam
 }
 
 func init() {
-    clapgo.RegisterPlugin(&MyPlugin{})
+    // The ONLY setup required
+    clapgo.CreatePluginFunc = func(pluginID string) clapgo.Plugin {
+        if pluginID == "com.example.gain" {
+            return &GainPlugin{gain: 1.0}
+        }
+        return nil
+    }
+}
+
+func main() {
+    // Empty - required for c-shared build
 }
 ```
 
-### 2. Automatic Export Generation
-- Build-time code generation for all required C exports
-- Plugin developers never see C code
-- All lifecycle methods handled automatically
+## Benefits
 
-### 3. Parameter System Enhancement
-```go
-// Current: Manual C struct manipulation
-// Proposed:
-plugin.RegisterParam(clapgo.FloatParam{
-    ID: 1,
-    Name: "Gain",
-    Range: clapgo.Range{Min: 0.0, Max: 2.0},
-    Default: 1.0,
-})
-```
+1. **660+ lines → ~50 lines** for a basic plugin
+2. **Zero CGO code** in plugins
+3. **No manual memory management**
+4. **Type-safe Go interfaces**
+5. **Impossible to forget exports** - they're all in the library
+6. **Easy to understand** - just implement methods
+7. **Gradual implementation** - BasePlugin provides defaults
 
-### 4. State Management
-```go
-// Current: Manual stream handling with unsafe pointers
-// Proposed:
-func (p *MyPlugin) SaveState() ([]byte, error)
-func (p *MyPlugin) LoadState(data []byte) error
-```
+## Success Metrics
 
-### 5. GUI Framework
-```go
-// Proposed Go-only GUI API:
-func (p *MyPlugin) CreateGUI() clapgo.GUI {
-    return clapgo.NewGUI(
-        clapgo.Size{Width: 400, Height: 300},
-        clapgo.Resizable(true),
-    )
-}
-```
-
-## Implementation Priority
-
-### Phase 1: Core Abstractions (High Priority)
-1. [ ] Move all C imports to bridge package
-2. [ ] Create automatic export generation
-3. [ ] Abstract CGO handle management
-4. [ ] Hide all C type conversions
-5. [ ] Wrap unsafe pointer operations
-
-### Phase 2: Enhanced Features (Medium Priority)
-1. [ ] Implement missing CLAP extensions (see below)
-2. [ ] Create GUI abstraction layer
-3. [ ] Add automatic memory management
-4. [ ] Improve state serialization
-
-### Phase 3: Developer Experience (Lower Priority)
-1. [ ] Plugin project generator
-2. [ ] Hot reload support
-3. [ ] Debugging tools
-4. [ ] Performance profiling integration
-
-## Missing CLAP Features
-
-Currently, only 3 of 33+ CLAP extensions are available to Go developers:
-
-### Core Extensions Not Available:
-- **gui** - GUI support
-- **note-ports** - MIDI/note input/output
-- **latency** - Plugin latency reporting
-- **tail** - Plugin tail length reporting
-- **log** - Logging support
-- **timer-support** - Timer/scheduling support
-- **thread-check** - Thread safety checking
-- **thread-pool** - Thread pool support
-- **voice-info** - Voice/polyphony information
-- **track-info** - DAW track information
-- **preset-load** - Preset loading support
-- **remote-controls** - Remote control pages
-- **render** - Offline rendering support
-- **posix-fd-support** - POSIX file descriptor support
-- **event-registry** - Custom event type registration
-- **param-indication** - Parameter automation indication
-- **note-name** - Note naming support
-- **context-menu** - Context menu support
-- **state-context** - State save/load context
-- **ambisonic** - Ambisonic audio support
-- **surround** - Surround sound support
-- **configurable-audio-ports** - Dynamic audio port configuration
-- **audio-ports-config** - Audio port configuration
-- **audio-ports-activation** - Audio port activation/deactivation
-
-### Draft Extensions Not Available:
-- **extensible-audio-ports** - Advanced audio port configuration
-- **undo** - Undo/redo support
-- **transport-control** - Transport control from plugin
-- **scratch-memory** - Scratch memory allocation
-- **triggers** - Trigger/articulation support
-- **resource-directory** - Resource file management
-- **tuning** - Microtuning support
-- **project-location** - Project location information
-- **mini-curve-display** - Mini automation curves
-- **gain-adjustment-metering** - Gain reduction metering
-
-## Success Criteria
-
-The goal is achieved when plugin developers can write plugins using only Go code:
-- No CGO imports in plugin code
-- No C type conversions
-- No unsafe pointer handling
-- No manual memory management
-- No exported C functions
-- Automatic handling of all CLAP lifecycle events
-- Full access to all CLAP features through Go APIs
+- Plugin code contains NO `import "C"`
+- Plugin code has NO `//export` functions  
+- Plugin code uses NO `unsafe` package
+- All C type conversions happen in library
+- Developers only work with Go types
+- 90%+ reduction in boilerplate code
