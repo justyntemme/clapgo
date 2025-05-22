@@ -238,16 +238,9 @@ bool clapgo_init(const char* plugin_path) {
     
     printf("Found manifest, using manifest-based loading\n");
     
-    // Initialize the descriptor directly from the manifest
-    manifest_plugins[0].descriptor = manifest_to_descriptor(&manifest_plugins[0].manifest);
-    
-    if (manifest_plugins[0].descriptor) {
-        printf("Created descriptor from manifest: %s (%s)\n", 
-               manifest_plugins[0].descriptor->name, manifest_plugins[0].descriptor->id);
-    } else {
-        fprintf(stderr, "Error: Failed to create descriptor from manifest\n");
-        return false;
-    }
+    // Mark as not loaded yet - descriptor will be created on demand
+    manifest_plugins[0].loaded = false;
+    manifest_plugins[0].descriptor = NULL;
     
     return true;
 }
