@@ -143,18 +143,10 @@ bool manifest_load_from_file(const char* path, plugin_manifest_t* manifest) {
         }
     }
     
-    // Parse build object
+    // Parse build object (optional, kept for future extensibility)
     struct json_object* build_obj;
     if (json_object_object_get_ex(root, "build", &build_obj)) {
-        // Parse Go shared library
-        struct json_object* lib_obj;
-        if (json_object_object_get_ex(build_obj, "goSharedLibrary", &lib_obj)) {
-            const char* lib = json_object_get_string(lib_obj);
-            if (lib) {
-                strncpy(manifest->build.go_shared_library, lib, sizeof(manifest->build.go_shared_library) - 1);
-            }
-        }
-        
+        // All plugins are self-contained by design - no fields to parse currently
         // We don't need the entry_point field anymore - we use standardized export functions
     }
     
@@ -247,8 +239,7 @@ bool manifest_load_from_file(const char* path, plugin_manifest_t* manifest) {
     if (manifest->plugin.id[0] == '\0' || 
         manifest->plugin.name[0] == '\0' || 
         manifest->plugin.vendor[0] == '\0' || 
-        manifest->plugin.version[0] == '\0' || 
-        manifest->build.go_shared_library[0] == '\0') {
+        manifest->plugin.version[0] == '\0') {
         fprintf(stderr, "Error: Missing required fields in manifest file: %s\n", path);
         return false;
     }

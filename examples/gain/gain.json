@@ -12,8 +12,6 @@
     "features": ["audio-effect", "stereo", "mono"]
   },
   "build": {
-    "goSharedLibrary": "libgain.so",
-    "entryPoint": "CreatePlugin",
     "dependencies": []
   },
   "extensions": [

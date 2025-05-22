@@ -1,5 +1,6 @@
 #include "bridge.h"
 #include "manifest.h"
+// Note: removed plugin.h include as it's legacy
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +18,11 @@ typedef struct {
 manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
 int manifest_plugin_count = 0;
 
+
+
+
+
+
 // Go functions are now statically linked - declare external functions
 extern void* ClapGo_CreatePlugin(void* host, char* plugin_id);
 extern bool ClapGo_PluginInit(void* plugin);
@@ -29,6 +35,21 @@ extern void ClapGo_PluginReset(void* plugin);
 extern int32_t ClapGo_PluginProcess(void* plugin, void* process);
 extern void* ClapGo_PluginGetExtension(void* plugin, char* id);
 extern void ClapGo_PluginOnMainThread(void* plugin);
+
+
+
+// Helper function to check if a file exists
+static bool file_exists(const char* path) {
+    if (!path) return false;
+    
+    FILE* file = fopen(path, "r");
+    if (file) {
+        fclose(file);
+        return true;
+    }
+    return false;
+}
+
 
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
@@ -72,14 +93,22 @@ int clapgo_find_manifests(const char* plugin_path) {
     if (access(manifest_path, R_OK) == 0) {
         manifest_found = true;
     } else {
-        // Second try: installed location ~/.clap/$PLUGIN/$PLUGIN.json
+        // Second try: installed location ~/.clap/plugins/$PLUGIN/$PLUGIN.json
         char* home = getenv("HOME");
         if (home) {
-            snprintf(manifest_path, sizeof(manifest_path), "%s/.clap/%s/%s.json", home, plugin_name, plugin_name);
+            snprintf(manifest_path, sizeof(manifest_path), "%s/.clap/plugins/%s/%s.json", home, plugin_name, plugin_name);
             printf("Looking for manifest at: %s\n", manifest_path);
             
             if (access(manifest_path, R_OK) == 0) {
                 manifest_found = true;
+            } else {
+                // Third try: legacy location ~/.clap/$PLUGIN.json
+                snprintf(manifest_path, sizeof(manifest_path), "%s/.clap/%s.json", home, plugin_name);
+                printf("Looking for manifest at: %s\n", manifest_path);
+                
+                if (access(manifest_path, R_OK) == 0) {
+                    manifest_found = true;
+                }
             }
         }
     }
@@ -89,6 +118,7 @@ int clapgo_find_manifests(const char* plugin_path) {
         if (manifest_load_from_file(manifest_path, &manifest_plugins[0].manifest)) {
             printf("Loaded manifest: %s\n", manifest_path);
             manifest_plugins[0].loaded = false;
+            manifest_plugins[0].library = NULL;
             manifest_plugins[0].descriptor = NULL;
             manifest_plugin_count = 1;
         } else {
@@ -96,6 +126,12 @@ int clapgo_find_manifests(const char* plugin_path) {
         }
     } else {
         fprintf(stderr, "Error: No manifest file found for plugin %s\n", plugin_name);
+        fprintf(stderr, "Searched locations:\n");
+        fprintf(stderr, "  - Development: %s/%s.json\n", plugin_dir, plugin_name);
+        if (getenv("HOME")) {
+            fprintf(stderr, "  - Installed: %s/.clap/plugins/%s/%s.json\n", getenv("HOME"), plugin_name, plugin_name);
+            fprintf(stderr, "  - Legacy: %s/.clap/%s.json\n", getenv("HOME"), plugin_name);
+        }
     }
     
     free(plugin_path_copy);
@@ -186,6 +222,8 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->go_instance = go_instance;
     data->manifest_index = index;
     
+    // We no longer need global function pointers - we use the ones in the manifest entry
+    
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
     if (!plugin) {
@@ -247,9 +285,9 @@ bool clapgo_init(const char* plugin_path) {
 void clapgo_deinit(void) {
     printf("Deinitializing ClapGo plugin\n");
     
-    // Clean up any manifest plugins
+    // First clean up any manifest plugins
     for (int i = 0; i < manifest_plugin_count; i++) {
-        if (manifest_plugins[i].loaded) {
+        if (manifest_plugins[i].loaded && manifest_plugins[i].library) {
             // Free the descriptor
             if (manifest_plugins[i].descriptor) {
                 // Free features array if allocated
@@ -276,6 +314,16 @@ void clapgo_deinit(void) {
                 manifest_plugins[i].descriptor = NULL;
             }
             
+            // Unload the library (only if it's not self-contained)
+            if (manifest_plugins[i].library != (void*)1) {
+                #if defined(CLAPGO_OS_WINDOWS)
+                    FreeLibrary(manifest_plugins[i].library);
+                #elif defined(CLAPGO_OS_MACOS) || defined(CLAPGO_OS_LINUX)
+                    dlclose(manifest_plugins[i].library);
+                #endif
+            }
+            
+            manifest_plugins[i].library = NULL;
             manifest_plugins[i].loaded = false;
             
             // Free manifest resources
@@ -288,43 +336,45 @@ void clapgo_deinit(void) {
     printf("ClapGo plugin deinitialized successfully\n");
 }
 
-// Get the plugin descriptor at the given index
-const clap_plugin_descriptor_t* clapgo_get_plugin_descriptor(uint32_t index) {
-    if (index >= manifest_plugin_count) return NULL;
-    
-    manifest_plugin_entry_t* entry = &manifest_plugins[index];
-    
-    if (!entry->loaded) {
-        if (!clapgo_load_manifest_plugin((int)index)) {
-            return NULL;
-        }
-    }
-    
-    return entry->descriptor;
-}
-
-// Get plugin count
-uint32_t clapgo_get_plugin_count(void) {
-    return (uint32_t)manifest_plugin_count;
-}
-
-// Create a plugin by ID (CLAP factory interface)
+// Create a plugin instance for the given ID
 const clap_plugin_t* clapgo_create_plugin(const clap_host_t* host, const char* plugin_id) {
-    if (!plugin_id) {
-        fprintf(stderr, "Error: Plugin ID is NULL\n");
-        return NULL;
-    }
+    printf("Creating plugin with ID: %s\n", plugin_id);
     
-    // Find the plugin by ID
-    int index = clapgo_find_manifest_plugin_by_id(plugin_id);
-    if (index < 0) {
+    // Check if we have this plugin in the manifest registry
+    int manifest_index = clapgo_find_manifest_plugin_by_id(plugin_id);
+    if (manifest_index < 0) {
         fprintf(stderr, "Error: Plugin ID not found in manifest registry: %s\n", plugin_id);
         return NULL;
     }
     
-    // Create the plugin using the manifest entry
-    return clapgo_create_plugin_from_manifest(host, index);
+    printf("Found plugin in manifest registry at index %d\n", manifest_index);
+    
+    // Load it from the manifest
+    const clap_plugin_t* plugin = clapgo_create_plugin_from_manifest(host, manifest_index);
+    if (plugin) {
+        printf("Successfully created plugin instance from manifest\n");
+        return plugin;
+    }
+    
+    fprintf(stderr, "Error: Failed to create plugin from manifest\n");
+    return NULL;
 }
+
+// Get the number of available plugins
+uint32_t clapgo_get_plugin_count(void) {
+    // Return the number of manifest plugins we've loaded
+    return manifest_plugin_count;
+}
+
+// Get the plugin descriptor at the given index
+const clap_plugin_descriptor_t* clapgo_get_plugin_descriptor(uint32_t index) {
+    if (index >= manifest_plugin_count) return NULL;
+    
+    // Return the descriptor from the manifest entry
+    return manifest_plugins[index].descriptor;
+}
+
+// Plugin callback implementations
 
 // Initialize a plugin instance
 bool clapgo_plugin_init(const clap_plugin_t* plugin) {
@@ -333,8 +383,20 @@ bool clapgo_plugin_init(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return false;
     
-    // Call into Go code to initialize the plugin instance
-    return ClapGo_PluginInit(data->go_instance);
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return false;
+    }
+    
+    // Call into Go code to initialize the plugin instance using the function pointer from the manifest
+    if (entry->plugin_init != NULL) {
+        return entry->plugin_init(data->go_instance);
+    }
+    
+    fprintf(stderr, "Error: Go plugin init function not available\n");
+    return false;
 }
 
 // Destroy a plugin instance
@@ -344,11 +406,19 @@ void clapgo_plugin_destroy(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data) return;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        goto cleanup;
+    }
+    
     // Call into Go code to clean up the plugin instance
     if (data->go_instance) {
         ClapGo_PluginDestroy(data->go_instance);
     }
     
+cleanup:
     // Free the plugin data
     free(data);
     
@@ -364,6 +434,13 @@ bool clapgo_plugin_activate(const clap_plugin_t* plugin, double sample_rate,
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return false;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return false;
+    }
+    
     // Call into Go code to activate the plugin instance
     return ClapGo_PluginActivate(data->go_instance, sample_rate, min_frames, max_frames);
 }
@@ -375,8 +452,17 @@ void clapgo_plugin_deactivate(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return;
+    }
+    
     // Call into Go code to deactivate the plugin instance
-    ClapGo_PluginDeactivate(data->go_instance);
+    if (entry->plugin_deactivate != NULL) {
+        entry->plugin_deactivate(data->go_instance);
+    }
 }
 
 // Start processing
@@ -386,8 +472,20 @@ bool clapgo_plugin_start_processing(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return false;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return false;
+    }
+    
     // Call into Go code to start processing
-    return ClapGo_PluginStartProcessing(data->go_instance);
+    if (entry->plugin_start_processing != NULL) {
+        return entry->plugin_start_processing(data->go_instance);
+    }
+    
+    fprintf(stderr, "Error: Go plugin start_processing function not available\n");
+    return false;
 }
 
 // Stop processing
@@ -397,8 +495,17 @@ void clapgo_plugin_stop_processing(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return;
+    }
+    
     // Call into Go code to stop processing
-    ClapGo_PluginStopProcessing(data->go_instance);
+    if (entry->plugin_stop_processing != NULL) {
+        entry->plugin_stop_processing(data->go_instance);
+    }
 }
 
 // Reset a plugin instance
@@ -408,68 +515,138 @@ void clapgo_plugin_reset(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return;
+    }
+    
     // Call into Go code to reset the plugin instance
-    ClapGo_PluginReset(data->go_instance);
+    if (entry->plugin_reset != NULL) {
+        entry->plugin_reset(data->go_instance);
+    }
 }
 
-// Process audio through a plugin instance
-clap_process_status clapgo_plugin_process(const clap_plugin_t* plugin, const clap_process_t* process) {
+// Process audio
+clap_process_status clapgo_plugin_process(const clap_plugin_t* plugin, 
+                                         const clap_process_t* process) {
     if (!plugin || !process) return CLAP_PROCESS_ERROR;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return CLAP_PROCESS_ERROR;
     
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return CLAP_PROCESS_ERROR;
+    }
+    
     // Call into Go code to process audio
-    return ClapGo_PluginProcess(data->go_instance, (void*)process);
+    if (entry->plugin_process != NULL) {
+        return entry->plugin_process(data->go_instance, process);
+    }
+    
+    return CLAP_PROCESS_ERROR;
 }
+
+// Audio Ports extension implementation
+static const clap_plugin_audio_ports_t clapgo_audio_ports_extension = {
+    .count = clapgo_audio_ports_count,
+    .get = clapgo_audio_ports_get
+};
 
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
-    (void)plugin; // Suppress unused parameter warning
-    (void)is_input; // Suppress unused parameter warning
+    if (!plugin) return 0;
     
-    // For now, always return 1 audio port (stereo in and out)
-    return 1;
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Call into Go code to get the audio ports count
+    // This would need a Go function to be exported, for now we'll hardcode stereo
+    return 1; // One stereo port
 }
 
-// Get audio port info
-bool clapgo_audio_ports_info(const clap_plugin_t* plugin, uint32_t index, bool is_input,
-                            clap_audio_port_info_t* info) {
-    (void)plugin; // Suppress unused parameter warning
+// Get info about an audio port
+bool clapgo_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info) {
+    if (!plugin || !info || index > 0) return false;
     
-    if (index != 0 || !info) {
-        return false;
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Fill in default stereo port info
+    memset(info, 0, sizeof(clap_audio_port_info_t));
+    
+    // Set port ID
+    info->id = 0;
+    
+    // Set port name
+    if (is_input) {
+        strcpy(info->name, "Stereo In");
+    } else {
+        strcpy(info->name, "Stereo Out");
     }
     
-    // Configure the default stereo port
-    info->id = 0;
-    strcpy(info->name, is_input ? "Audio Input" : "Audio Output");
+    // Set port flags - just main for now
     info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-    info->channel_count = 2;
+    
+    // Set channel count
+    info->channel_count = 2; // Stereo
+    
+    // Set port type (stereo)
     info->port_type = CLAP_PORT_STEREO;
-    info->in_place_pair = is_input ? 0 : CLAP_INVALID_ID;
+
+    // Set in-place processing capability
+    info->in_place_pair = CLAP_INVALID_ID; // Not using in-place processing for simplicity
     
     return true;
 }
 
-// Get an extension from a plugin instance
+// Get an extension
 const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char* id) {
     if (!plugin || !id) return NULL;
+    
+    // Handle audio ports extension directly
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
+        return &clapgo_audio_ports_extension;
+    }
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return NULL;
     
-    // Call into Go code to get the extension
-    return ClapGo_PluginGetExtension(data->go_instance, (char*)id);
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return NULL;
+    }
+    
+    // Call into Go code to get the extension interface
+    if (entry->plugin_get_extension != NULL) {
+        return entry->plugin_get_extension(data->go_instance, (char*)id);
+    }
+    
+    return NULL;
 }
 
-// Handle main thread tasks for a plugin instance
+// Execute on main thread
 void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin) {
     if (!plugin) return;
     
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return;
     
-    // Call into Go code to handle main thread tasks
-    ClapGo_PluginOnMainThread(data->go_instance);
+    // Get the manifest entry for this plugin
+    manifest_plugin_entry_t* entry = &manifest_plugins[data->manifest_index];
+    if (!entry->loaded) {
+        fprintf(stderr, "Error: Plugin entry not loaded\n");
+        return;
+    }
+    
+    // Call into Go code to execute on the main thread
+    if (entry->plugin_on_main_thread != NULL) {
+        entry->plugin_on_main_thread(data->go_instance);
+    }
 }

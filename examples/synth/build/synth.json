@@ -12,8 +12,6 @@
     "features": ["instrument", "synthesizer", "stereo"]
   },
   "build": {
-    "goSharedLibrary": "libsynth.so",
-    "entryPoint": "CreatePlugin",
     "dependencies": []
   },
   "extensions": [

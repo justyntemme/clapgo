@@ -32,8 +32,9 @@ typedef struct {
 
 // Plugin build information
 typedef struct {
-    char go_shared_library[256];
     // No entry_point field - we use standardized export functions
+    // No self_contained field - all plugins are self-contained by design
+    char reserved[1]; // Keep struct non-empty
 } plugin_build_t;
 
 // Plugin manifest representing the JSON structure
