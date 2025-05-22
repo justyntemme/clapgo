@@ -1,30 +1,10 @@
 package main
 
-// #cgo CFLAGS: -I../../include/clap/include
-// #include "../../include/clap/include/clap/clap.h"
-// #include <stdlib.h>
-//
-// // Helper functions for CLAP event handling
-// static inline uint32_t clap_input_events_size_helper(const clap_input_events_t* events) {
-//     if (events && events->size) {
-//         return events->size(events);
-//     }
-//     return 0;
-// }
-//
-// static inline const clap_event_header_t* clap_input_events_get_helper(const clap_input_events_t* events, uint32_t index) {
-//     if (events && events->get) {
-//         return events->get(events, index);
-//     }
-//     return NULL;
-// }
-import "C"
 import (
 	"fmt"
 	"math"
-	"runtime/cgo"
-	"unsafe"
-
+	"sync/atomic"
+	
 	"github.com/justyntemme/clapgo/pkg/api"
 )
 
@@ -46,521 +26,28 @@ const (
 	PluginDescription = "A gain plugin with GUI support using ClapGo"
 )
 
-// Global plugin instance
-var gainPlugin *GainPlugin
-
-func init() {
-	gainPlugin = NewGainPlugin()
-}
-
-// Standardized export functions for manifest system
-
-//export ClapGo_CreatePlugin
-func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		// Create a CGO handle to safely pass the Go object to C
-		handle := cgo.NewHandle(gainPlugin)
-		return unsafe.Pointer(handle)
-	}
-	
-	fmt.Printf("Error: Unknown plugin ID: %s\n", id)
-	return nil
-}
-
-//export ClapGo_GetVersion
-func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
-	if major != nil {
-		*major = C.uint32_t(1)
-	}
-	if minor != nil {
-		*minor = C.uint32_t(0)
-	}
-	if patch != nil {
-		*patch = C.uint32_t(0)
-	}
-	return C.bool(true)
-}
-
-//export ClapGo_GetPluginID
-func ClapGo_GetPluginID(pluginID *C.char) *C.char {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		return C.CString(PluginID)
-	}
-	
-	return C.CString("unknown")
-}
-
-//export ClapGo_GetPluginName
-func ClapGo_GetPluginName(pluginID *C.char) *C.char {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		return C.CString(PluginName)
-	}
-	
-	return C.CString("Unknown Plugin")
-}
-
-//export ClapGo_GetPluginVendor
-func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		return C.CString(PluginVendor)
-	}
-	
-	return C.CString("Unknown Vendor")
-}
-
-//export ClapGo_GetPluginVersion
-func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		return C.CString(PluginVersion)
-	}
-	
-	return C.CString("Unknown Version")
-}
-
-//export ClapGo_GetPluginDescription
-func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
-	id := C.GoString(pluginID)
-	
-	if id == PluginID {
-		return C.CString(PluginDescription)
-	}
-	
-	return C.CString("Unknown Description")
-}
-
-//export ClapGo_PluginInit
-func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	return C.bool(p.Init())
-}
-
-//export ClapGo_PluginDestroy
-func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	p.Destroy()
-	handle.Delete()
-}
-
-//export ClapGo_PluginActivate
-func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
-}
-
-//export ClapGo_PluginDeactivate
-func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	p.Deactivate()
-}
-
-//export ClapGo_PluginStartProcessing
-func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	return C.bool(p.StartProcessing())
-}
-
-//export ClapGo_PluginStopProcessing
-func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	p.StopProcessing()
-}
-
-//export ClapGo_PluginReset
-func ClapGo_PluginReset(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	p.Reset()
-}
-
-//export ClapGo_PluginProcess
-func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
-	if plugin == nil || process == nil {
-		return C.int32_t(api.ProcessError)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	
-	// Convert the C clap_process_t to Go parameters
-	cProcess := (*C.clap_process_t)(process)
-	
-	// Extract steady time and frame count
-	steadyTime := int64(cProcess.steady_time)
-	framesCount := uint32(cProcess.frames_count)
-	
-	// Convert audio buffers
-	audioIn := convertAudioBuffersToGo(cProcess.audio_inputs, cProcess.audio_inputs_count, framesCount)
-	audioOut := convertAudioBuffersToGo(cProcess.audio_outputs, cProcess.audio_outputs_count, framesCount)
-	
-	// Create event handler for input/output events
-	eventHandler := &ProcessEventHandler{
-		inputEvents:  cProcess.in_events,
-		outputEvents: cProcess.out_events,
-	}
-	
-	// Call the actual Go process method
-	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
-	
-	return C.int32_t(result)
-}
-
-//export ClapGo_PluginGetExtension
-func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
-	extID := C.GoString(id)
-	if plugin == nil {
-		return nil
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	return p.GetExtension(extID)
-}
-
-//export ClapGo_PluginOnMainThread
-func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	p.OnMainThread()
-}
-
-// Helper functions for audio buffer conversion
-
-// convertAudioBuffersToGo converts C audio buffers to Go slices
-func convertAudioBuffersToGo(cBuffers *C.clap_audio_buffer_t, bufferCount C.uint32_t, frameCount uint32) [][]float32 {
-	if cBuffers == nil || bufferCount == 0 {
-		return nil
-	}
-	
-	// Convert C array to Go slice using unsafe pointer arithmetic
-	buffers := (*[1024]C.clap_audio_buffer_t)(unsafe.Pointer(cBuffers))[:bufferCount:bufferCount]
-	
-	result := make([][]float32, 0)
-	
-	for i := uint32(0); i < uint32(bufferCount); i++ {
-		buffer := &buffers[i]
-		
-		// Handle 32-bit float buffers (most common)
-		if buffer.data32 != nil {
-			channelCount := uint32(buffer.channel_count)
-			
-			// Convert C channel pointers to Go slices
-			channels := (*[64]*C.float)(unsafe.Pointer(buffer.data32))[:channelCount:channelCount]
-			
-			for ch := uint32(0); ch < channelCount; ch++ {
-				if channels[ch] != nil {
-					// Convert C float array to Go slice
-					channelData := (*[1048576]float32)(unsafe.Pointer(channels[ch]))[:frameCount:frameCount]
-					result = append(result, channelData)
-				}
-			}
-		}
-		// Note: 64-bit double buffers could be handled here if needed
-	}
-	
-	return result
-}
-
-// ProcessEventHandler implements the EventHandler interface for CLAP events
-type ProcessEventHandler struct {
-	inputEvents  *C.clap_input_events_t
-	outputEvents *C.clap_output_events_t
-}
-
-// ProcessInputEvents processes all incoming events
-func (h *ProcessEventHandler) ProcessInputEvents() {
-	// For now, this is a simplified implementation
-	// In a full implementation, this would process all CLAP events
-}
-
-// AddOutputEvent adds an event to the output queue
-func (h *ProcessEventHandler) AddOutputEvent(eventType int, data interface{}) {
-	// For now, this is a simplified implementation
-	// In a full implementation, this would create and push CLAP events
-}
-
-// GetInputEventCount returns the number of input events
-func (h *ProcessEventHandler) GetInputEventCount() uint32 {
-	if h.inputEvents == nil {
-		return 0
-	}
-	
-	// Call the CLAP API to get event count
-	// Using the size function pointer from the input events structure
-	if h.inputEvents.size != nil {
-		return uint32(C.clap_input_events_size_helper(h.inputEvents))
-	}
-	
-	return 0
-}
-
-// GetInputEvent retrieves an input event by index
-func (h *ProcessEventHandler) GetInputEvent(index uint32) *api.Event {
-	if h.inputEvents == nil {
-		return nil
-	}
-	
-	// This would need proper implementation to convert CLAP events to Go events
-	// For now, return nil to prevent crashes
-	return nil
-}
-
-// GainPlugin implements a simple gain plugin with GUI support
-type GainPlugin struct {
-	// Plugin state
-	gain         float64
+// SimpleGainGUIPlugin implements the simplified Plugin interface with GUI support
+type SimpleGainGUIPlugin struct {
+	gain         int64 // Using int64 for atomic operations (stores float64 bits)
 	sampleRate   float64
-	isActivated  bool
-	isProcessing bool
-	paramInfo    api.ParamInfo
-	host         unsafe.Pointer
-	
-	// GUI-related fields
 	hasGUI       bool
 	guiVisible   bool
 	guiCreated   bool
 }
 
-// NewGainPlugin creates a new gain plugin
-func NewGainPlugin() *GainPlugin {
-	plugin := &GainPlugin{
-		gain:         1.0, // 0dB
-		sampleRate:   44100.0,
-		isActivated:  false,
-		isProcessing: false,
-		hasGUI:       true,
+// NewSimpleGainGUIPlugin creates a new simplified gain plugin with GUI
+func NewSimpleGainGUIPlugin() *SimpleGainGUIPlugin {
+	plugin := &SimpleGainGUIPlugin{
+		sampleRate: 44100.0,
+		hasGUI:     true,
 	}
-	
-	// Set up parameter info
-	plugin.paramInfo = api.ParamInfo{
-		ID:           1,
-		Name:         "Gain",
-		Module:       "",
-		MinValue:     0.0,  // -inf dB
-		MaxValue:     2.0,  // +6 dB
-		DefaultValue: 1.0,  // 0 dB
-		Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
-	}
-	
+	// Set default gain to 1.0 (0dB)
+	atomic.StoreInt64(&plugin.gain, int64(math.Float64bits(1.0)))
 	return plugin
 }
 
-// Init initializes the plugin
-func (p *GainPlugin) Init() bool {
-	return true
-}
-
-// Destroy cleans up plugin resources
-func (p *GainPlugin) Destroy() {
-	// Nothing to clean up
-}
-
-// Activate prepares the plugin for processing
-func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
-	p.sampleRate = sampleRate
-	p.isActivated = true
-	return true
-}
-
-// Deactivate stops the plugin from processing
-func (p *GainPlugin) Deactivate() {
-	p.isActivated = false
-}
-
-// StartProcessing begins audio processing
-func (p *GainPlugin) StartProcessing() bool {
-	if !p.isActivated {
-		return false
-	}
-	p.isProcessing = true
-	return true
-}
-
-// StopProcessing ends audio processing
-func (p *GainPlugin) StopProcessing() {
-	p.isProcessing = false
-}
-
-// Reset resets the plugin state
-func (p *GainPlugin) Reset() {
-	p.gain = 1.0
-}
-
-// Process processes audio data
-func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
-	// Check if we're in a valid state for processing
-	if !p.isActivated || !p.isProcessing {
-		return api.ProcessError
-	}
-	
-	// Process parameter changes from events
-	if events != nil {
-		eventCount := events.GetInputEventCount()
-		
-		for i := uint32(0); i < eventCount; i++ {
-			event := events.GetInputEvent(i)
-			if event == nil {
-				continue
-			}
-			
-			// Handle parameter changes
-			if event.Type == api.EventTypeParamValue {
-				paramEvent, ok := event.Data.(api.ParamEvent)
-				if ok && paramEvent.ParamID == 1 { // Gain parameter
-					p.gain = paramEvent.Value
-				}
-			}
-		}
-	}
-	
-	// If no audio inputs or outputs, nothing to do
-	if len(audioIn) == 0 || len(audioOut) == 0 {
-		return api.ProcessContinue
-	}
-	
-	// Get the number of channels (use min of input and output)
-	numChannels := len(audioIn)
-	if len(audioOut) < numChannels {
-		numChannels = len(audioOut)
-	}
-	
-	// Process audio - apply gain to each sample
-	for ch := 0; ch < numChannels; ch++ {
-		inChannel := audioIn[ch]
-		outChannel := audioOut[ch]
-		
-		// Make sure we have enough buffer space
-		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			return api.ProcessError
-		}
-		
-		// Apply gain to each sample
-		for i := uint32(0); i < framesCount; i++ {
-			outChannel[i] = inChannel[i] * float32(p.gain)
-		}
-	}
-	
-	// Check if the output is silent
-	isSilent := p.gain < 0.0001 // -80dB
-	
-	if isSilent {
-		return api.ProcessSleep
-	}
-	
-	return api.ProcessContinue
-}
-
-// GetExtension gets a plugin extension
-func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	// Check for parameter extension
-	if id == api.ExtParams {
-		return nil // Not implemented in this simplified version
-	}
-	
-	// Check for state extension
-	if id == api.ExtState {
-		return nil // Not implemented in this simplified version
-	}
-	
-	// GUI extensions are handled via the gui_bridge.cpp
-	return nil
-}
-
-// HasGUI returns true if the plugin has a GUI
-func (p *GainPlugin) HasGUI() bool {
-	return p.hasGUI
-}
-
-// GetPreferredGUIAPI returns the preferred GUI API
-func (p *GainPlugin) GetPreferredGUIAPI() (apiName string, isFloating bool) {
-	// Default to X11 on Linux, adjust based on OS
-	return api.WindowAPIX11, false
-}
-
-// OnGUICreated is called when the GUI is created
-func (p *GainPlugin) OnGUICreated() {
-	p.guiCreated = true
-	fmt.Println("Go: GUI created")
-}
-
-// OnGUIDestroyed is called when the GUI is destroyed
-func (p *GainPlugin) OnGUIDestroyed() {
-	p.guiCreated = false
-	p.guiVisible = false
-	fmt.Println("Go: GUI destroyed")
-}
-
-// OnGUIShown is called when the GUI is shown
-func (p *GainPlugin) OnGUIShown() {
-	p.guiVisible = true
-	fmt.Println("Go: GUI shown")
-}
-
-// OnGUIHidden is called when the GUI is hidden
-func (p *GainPlugin) OnGUIHidden() {
-	p.guiVisible = false
-	fmt.Println("Go: GUI hidden")
-}
-
-// GetGUISize returns the default GUI size
-func (p *GainPlugin) GetGUISize() (width, height uint32) {
-	return 400, 300
-}
-
-// OnMainThread is called on the main thread
-func (p *GainPlugin) OnMainThread() {
-	// Nothing to do
-}
-
-// GetPluginInfo returns information about the plugin
-func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
+// GetInfo returns plugin metadata
+func (p *SimpleGainGUIPlugin) GetInfo() api.PluginInfo {
 	return api.PluginInfo{
 		ID:          PluginID,
 		Name:        PluginName,
@@ -574,52 +61,149 @@ func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
 	}
 }
 
-// SaveState returns custom state data for the plugin
-func (p *GainPlugin) SaveState() map[string]interface{} {
-	// Save any additional state beyond parameters
-	return map[string]interface{}{
-		"plugin_version": "1.0.0",
-		"last_gain":      p.gain,
-		"gui_visible":    p.guiVisible,
-		"gui_created":    p.guiCreated,
-	}
-}
-
-// LoadState loads custom state data for the plugin
-func (p *GainPlugin) LoadState(data map[string]interface{}) {
-	// Load any additional state beyond parameters
-	if lastGain, ok := data["last_gain"].(float64); ok {
-		p.gain = lastGain
+// ProcessAudio processes audio with Go-native types
+func (p *SimpleGainGUIPlugin) ProcessAudio(input, output [][]float32, frameCount uint32) error {
+	// Get current gain value atomically
+	gainBits := atomic.LoadInt64(&p.gain)
+	gain := float32(math.Float64frombits(uint64(gainBits)))
+	
+	// If no audio inputs or outputs, nothing to do
+	if len(input) == 0 || len(output) == 0 {
+		return nil
 	}
 	
-	if guiVisible, ok := data["gui_visible"].(bool); ok {
-		p.guiVisible = guiVisible
+	// Get the number of channels (use min of input and output)
+	numChannels := len(input)
+	if len(output) < numChannels {
+		numChannels = len(output)
 	}
 	
-	if guiCreated, ok := data["gui_created"].(bool); ok {
-		p.guiCreated = guiCreated
+	// Process audio - apply gain to each sample
+	for ch := 0; ch < numChannels; ch++ {
+		inChannel := input[ch]
+		outChannel := output[ch]
+		
+		// Make sure we have enough buffer space
+		if len(inChannel) < int(frameCount) || len(outChannel) < int(frameCount) {
+			continue // Skip this channel if buffer is too small
+		}
+		
+		// Apply gain to each sample
+		for i := uint32(0); i < frameCount; i++ {
+			outChannel[i] = inChannel[i] * gain
+		}
 	}
+	
+	return nil
 }
 
-// GetPluginID returns the plugin ID
-func (p *GainPlugin) GetPluginID() string {
-	return PluginID
-}
-
-// Convert linear gain to dB
-func linearToDb(linear float64) float64 {
-	if linear <= 0.0 {
-		return -math.MaxFloat64
+// GetParameterInfo returns information about a parameter
+func (p *SimpleGainGUIPlugin) GetParameterInfo(paramID uint32) (api.ParamInfo, error) {
+	if paramID == 0 {
+		return api.ParamInfo{
+			ID:           0,
+			Name:         "Gain",
+			Module:       "",
+			MinValue:     0.0,  // -inf dB
+			MaxValue:     2.0,  // +6 dB
+			DefaultValue: 1.0,  // 0 dB
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		}, nil
 	}
-	return 20.0 * math.Log10(linear)
+	return api.ParamInfo{}, api.ErrInvalidParam
 }
 
-// Convert dB to linear gain
-func dbToLinear(db float64) float64 {
-	return math.Pow(10.0, db/20.0)
+// GetParameterValue returns the current value of a parameter
+func (p *SimpleGainGUIPlugin) GetParameterValue(paramID uint32) float64 {
+	if paramID == 0 {
+		gainBits := atomic.LoadInt64(&p.gain)
+		return math.Float64frombits(uint64(gainBits))
+	}
+	return 0.0
+}
+
+// SetParameterValue sets the value of a parameter
+func (p *SimpleGainGUIPlugin) SetParameterValue(paramID uint32, value float64) error {
+	if paramID == 0 {
+		// Clamp value to valid range
+		if value < 0.0 {
+			value = 0.0
+		}
+		if value > 2.0 {
+			value = 2.0
+		}
+		atomic.StoreInt64(&p.gain, int64(math.Float64bits(value)))
+		return nil
+	}
+	return api.ErrInvalidParam
+}
+
+// Initialize prepares the plugin for use
+func (p *SimpleGainGUIPlugin) Initialize(sampleRate float64) error {
+	p.sampleRate = sampleRate
+	return nil
+}
+
+// Activate prepares the plugin for processing
+func (p *SimpleGainGUIPlugin) Activate() error {
+	return nil
+}
+
+// Deactivate stops the plugin from processing
+func (p *SimpleGainGUIPlugin) Deactivate() {
+	// Nothing to do
+}
+
+// Destroy cleans up plugin resources
+func (p *SimpleGainGUIPlugin) Destroy() {
+	// Nothing to clean up
+}
+
+// GUI-related methods (these would need to be integrated with the wrapper system)
+
+// HasGUI returns true if the plugin has a GUI
+func (p *SimpleGainGUIPlugin) HasGUI() bool {
+	return p.hasGUI
+}
+
+// GetPreferredGUIAPI returns the preferred GUI API
+func (p *SimpleGainGUIPlugin) GetPreferredGUIAPI() (apiName string, isFloating bool) {
+	// Default to X11 on Linux, adjust based on OS
+	return api.WindowAPIX11, false
+}
+
+// OnGUICreated is called when the GUI is created
+func (p *SimpleGainGUIPlugin) OnGUICreated() {
+	p.guiCreated = true
+	fmt.Println("Go: GUI created")
+}
+
+// OnGUIDestroyed is called when the GUI is destroyed
+func (p *SimpleGainGUIPlugin) OnGUIDestroyed() {
+	p.guiCreated = false
+	p.guiVisible = false
+	fmt.Println("Go: GUI destroyed")
+}
+
+// OnGUIShown is called when the GUI is shown
+func (p *SimpleGainGUIPlugin) OnGUIShown() {
+	p.guiVisible = true
+	fmt.Println("Go: GUI shown")
+}
+
+// OnGUIHidden is called when the GUI is hidden
+func (p *SimpleGainGUIPlugin) OnGUIHidden() {
+	p.guiVisible = false
+	fmt.Println("Go: GUI hidden")
+}
+
+// GetGUISize returns the default GUI size
+func (p *SimpleGainGUIPlugin) GetGUISize() (width, height uint32) {
+	return 400, 300
 }
 
 func main() {
-	// This is not called when used as a plugin,
-	// but can be useful for testing
+	// Register the plugin using the new simplified API
+	plugin := NewSimpleGainGUIPlugin()
+	api.RegisterPlugin(plugin)
 }

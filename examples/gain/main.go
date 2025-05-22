@@ -215,9 +215,9 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 	steadyTime := int64(cProcess.steady_time)
 	framesCount := uint32(cProcess.frames_count)
 	
-	// Convert audio buffers
-	audioIn := convertAudioBuffersToGo(cProcess.audio_inputs, cProcess.audio_inputs_count, framesCount)
-	audioOut := convertAudioBuffersToGo(cProcess.audio_outputs, cProcess.audio_outputs_count, framesCount)
+	// Convert audio buffers using our abstraction
+	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
+	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
 	
 	// Create event handler for input/output events
 	eventHandler := &ProcessEventHandler{
@@ -252,43 +252,6 @@ func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*GainPlugin)
 	p.OnMainThread()
-}
-
-// Helper functions for audio buffer conversion
-
-// convertAudioBuffersToGo converts C audio buffers to Go slices
-func convertAudioBuffersToGo(cBuffers *C.clap_audio_buffer_t, bufferCount C.uint32_t, frameCount uint32) [][]float32 {
-	if cBuffers == nil || bufferCount == 0 {
-		return nil
-	}
-	
-	// Convert C array to Go slice using unsafe pointer arithmetic
-	buffers := (*[1024]C.clap_audio_buffer_t)(unsafe.Pointer(cBuffers))[:bufferCount:bufferCount]
-	
-	result := make([][]float32, 0)
-	
-	for i := uint32(0); i < uint32(bufferCount); i++ {
-		buffer := &buffers[i]
-		
-		// Handle 32-bit float buffers (most common)
-		if buffer.data32 != nil {
-			channelCount := uint32(buffer.channel_count)
-			
-			// Convert C channel pointers to Go slices
-			channels := (*[64]*C.float)(unsafe.Pointer(buffer.data32))[:channelCount:channelCount]
-			
-			for ch := uint32(0); ch < channelCount; ch++ {
-				if channels[ch] != nil {
-					// Convert C float array to Go slice
-					channelData := (*[1048576]float32)(unsafe.Pointer(channels[ch]))[:frameCount:frameCount]
-					result = append(result, channelData)
-				}
-			}
-		}
-		// Note: 64-bit double buffers could be handled here if needed
-	}
-	
-	return result
 }
 
 // ProcessEventHandler implements the EventHandler interface for CLAP events
@@ -410,7 +373,7 @@ func (p *GainPlugin) Reset() {
 	p.gain = 1.0
 }
 
-// Process processes audio data
+// Process processes audio data - now uses the abstracted audio buffers
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
 	// Check if we're in a valid state for processing
 	if !p.isActivated || !p.isProcessing {
@@ -449,6 +412,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	}
 	
 	// Process audio - apply gain to each sample
+	// This is now much simpler thanks to the audio abstraction
 	for ch := 0; ch < numChannels; ch++ {
 		inChannel := audioIn[ch]
 		outChannel := audioOut[ch]

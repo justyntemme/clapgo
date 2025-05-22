@@ -7,6 +7,7 @@ import (
 	"unsafe"
 )
 
+
 // Plugin represents the core interface that all CLAP plugins must implement.
 // It defines the lifecycle and processing functions required by the CLAP standard.
 type Plugin interface {
@@ -38,7 +39,8 @@ type Plugin interface {
 	Reset()
 
 	// Process handles audio processing.
-	// It receives input audio and writes output audio.
+	// It receives input audio and writes output audio using Go-native slices.
+	// The audio buffer conversion from C is handled automatically.
 	// It also processes events such as parameter changes.
 	// Returns a status code: 0-error, 1-continue, 2-continue_if_not_quiet, 3-tail, 4-sleep
 	Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events EventHandler) int
