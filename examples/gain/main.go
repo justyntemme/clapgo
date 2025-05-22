@@ -3,6 +3,21 @@ package main
 // #cgo CFLAGS: -I../../include/clap/include
 // #include "../../include/clap/include/clap/clap.h"
 // #include <stdlib.h>
+//
+// // Helper functions for CLAP event handling
+// static inline uint32_t clap_input_events_size_helper(const clap_input_events_t* events) {
+//     if (events && events->size) {
+//         return events->size(events);
+//     }
+//     return 0;
+// }
+//
+// static inline const clap_event_header_t* clap_input_events_get_helper(const clap_input_events_t* events, uint32_t index) {
+//     if (events && events->get) {
+//         return events->get(events, index);
+//     }
+//     return NULL;
+// }
 import "C"
 import (
 	"fmt"
@@ -16,9 +31,7 @@ import (
 var gainPlugin *GainPlugin
 
 func init() {
-	fmt.Println("Initializing gain plugin")
 	gainPlugin = NewGainPlugin()
-	fmt.Printf("Gain plugin initialized: %s (%s)\n", gainPlugin.GetPluginInfo().Name, gainPlugin.GetPluginInfo().ID)
 }
 
 // Standardized export functions for manifest system
@@ -26,12 +39,10 @@ func init() {
 //export ClapGo_CreatePlugin
 func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_CreatePlugin with ID: %s\n", id)
 	
 	if id == PluginID {
 		// Create a CGO handle to safely pass the Go object to C
 		handle := cgo.NewHandle(gainPlugin)
-		fmt.Printf("Created plugin instance: %s\n", id)
 		return unsafe.Pointer(handle)
 	}
 	
@@ -50,14 +61,12 @@ func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
 	if patch != nil {
 		*patch = C.uint32_t(0)
 	}
-	fmt.Printf("Gain plugin - ClapGo_GetVersion returning 1.0.0\n")
 	return C.bool(true)
 }
 
 //export ClapGo_GetPluginID
 func ClapGo_GetPluginID(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_GetPluginID for %s\n", id)
 	
 	if id == PluginID {
 		return C.CString(PluginID)
@@ -69,7 +78,6 @@ func ClapGo_GetPluginID(pluginID *C.char) *C.char {
 //export ClapGo_GetPluginName
 func ClapGo_GetPluginName(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_GetPluginName for %s\n", id)
 	
 	if id == PluginID {
 		return C.CString(PluginName)
@@ -81,7 +89,6 @@ func ClapGo_GetPluginName(pluginID *C.char) *C.char {
 //export ClapGo_GetPluginVendor
 func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_GetPluginVendor for %s\n", id)
 	
 	if id == PluginID {
 		return C.CString(PluginVendor)
@@ -93,7 +100,6 @@ func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
 //export ClapGo_GetPluginVersion
 func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_GetPluginVersion for %s\n", id)
 	
 	if id == PluginID {
 		return C.CString(PluginVersion)
@@ -105,7 +111,6 @@ func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
 //export ClapGo_GetPluginDescription
 func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_GetPluginDescription for %s\n", id)
 	
 	if id == PluginID {
 		return C.CString(PluginDescription)
@@ -118,7 +123,6 @@ func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 
 //export ClapGo_PluginInit
 func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	fmt.Printf("Gain plugin - ClapGo_PluginInit\n")
 	if plugin == nil {
 		return C.bool(false)
 	}
@@ -130,7 +134,6 @@ func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
 
 //export ClapGo_PluginDestroy
 func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
-	fmt.Printf("Gain plugin - ClapGo_PluginDestroy\n")
 	if plugin == nil {
 		return
 	}
@@ -143,7 +146,6 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginActivate
 func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	fmt.Printf("Gain plugin - ClapGo_PluginActivate with sample rate %f\n", sampleRate)
 	if plugin == nil {
 		return C.bool(false)
 	}
@@ -155,7 +157,6 @@ func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames
 
 //export ClapGo_PluginDeactivate
 func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
-	fmt.Printf("Gain plugin - ClapGo_PluginDeactivate\n")
 	if plugin == nil {
 		return
 	}
@@ -167,7 +168,6 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginStartProcessing
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	fmt.Printf("Gain plugin - ClapGo_PluginStartProcessing\n")
 	if plugin == nil {
 		return C.bool(false)
 	}
@@ -179,7 +179,6 @@ func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 
 //export ClapGo_PluginStopProcessing
 func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
-	fmt.Printf("Gain plugin - ClapGo_PluginStopProcessing\n")
 	if plugin == nil {
 		return
 	}
@@ -191,7 +190,6 @@ func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginReset
 func ClapGo_PluginReset(plugin unsafe.Pointer) {
-	fmt.Printf("Gain plugin - ClapGo_PluginReset\n")
 	if plugin == nil {
 		return
 	}
@@ -203,22 +201,39 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
-	fmt.Printf("Gain plugin - ClapGo_PluginProcess\n")
 	if plugin == nil || process == nil {
 		return C.int32_t(api.ProcessError)
 	}
 	
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*GainPlugin)
-	// For now, just return continue - proper processing would go here
-	_ = p // Prevent unused variable error
-	return C.int32_t(api.ProcessContinue)
+	
+	// Convert the C clap_process_t to Go parameters
+	cProcess := (*C.clap_process_t)(process)
+	
+	// Extract steady time and frame count
+	steadyTime := int64(cProcess.steady_time)
+	framesCount := uint32(cProcess.frames_count)
+	
+	// Convert audio buffers
+	audioIn := convertAudioBuffersToGo(cProcess.audio_inputs, cProcess.audio_inputs_count, framesCount)
+	audioOut := convertAudioBuffersToGo(cProcess.audio_outputs, cProcess.audio_outputs_count, framesCount)
+	
+	// Create event handler for input/output events
+	eventHandler := &ProcessEventHandler{
+		inputEvents:  cProcess.in_events,
+		outputEvents: cProcess.out_events,
+	}
+	
+	// Call the actual Go process method
+	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
+	
+	return C.int32_t(result)
 }
 
 //export ClapGo_PluginGetExtension
 func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
 	extID := C.GoString(id)
-	fmt.Printf("Gain plugin - ClapGo_PluginGetExtension for %s\n", extID)
 	if plugin == nil {
 		return nil
 	}
@@ -230,7 +245,6 @@ func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer
 
 //export ClapGo_PluginOnMainThread
 func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
-	fmt.Printf("Gain plugin - ClapGo_PluginOnMainThread\n")
 	if plugin == nil {
 		return
 	}
@@ -238,6 +252,87 @@ func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*GainPlugin)
 	p.OnMainThread()
+}
+
+// Helper functions for audio buffer conversion
+
+// convertAudioBuffersToGo converts C audio buffers to Go slices
+func convertAudioBuffersToGo(cBuffers *C.clap_audio_buffer_t, bufferCount C.uint32_t, frameCount uint32) [][]float32 {
+	if cBuffers == nil || bufferCount == 0 {
+		return nil
+	}
+	
+	// Convert C array to Go slice using unsafe pointer arithmetic
+	buffers := (*[1024]C.clap_audio_buffer_t)(unsafe.Pointer(cBuffers))[:bufferCount:bufferCount]
+	
+	result := make([][]float32, 0)
+	
+	for i := uint32(0); i < uint32(bufferCount); i++ {
+		buffer := &buffers[i]
+		
+		// Handle 32-bit float buffers (most common)
+		if buffer.data32 != nil {
+			channelCount := uint32(buffer.channel_count)
+			
+			// Convert C channel pointers to Go slices
+			channels := (*[64]*C.float)(unsafe.Pointer(buffer.data32))[:channelCount:channelCount]
+			
+			for ch := uint32(0); ch < channelCount; ch++ {
+				if channels[ch] != nil {
+					// Convert C float array to Go slice
+					channelData := (*[1048576]float32)(unsafe.Pointer(channels[ch]))[:frameCount:frameCount]
+					result = append(result, channelData)
+				}
+			}
+		}
+		// Note: 64-bit double buffers could be handled here if needed
+	}
+	
+	return result
+}
+
+// ProcessEventHandler implements the EventHandler interface for CLAP events
+type ProcessEventHandler struct {
+	inputEvents  *C.clap_input_events_t
+	outputEvents *C.clap_output_events_t
+}
+
+// ProcessInputEvents processes all incoming events
+func (h *ProcessEventHandler) ProcessInputEvents() {
+	// For now, this is a simplified implementation
+	// In a full implementation, this would process all CLAP events
+}
+
+// AddOutputEvent adds an event to the output queue
+func (h *ProcessEventHandler) AddOutputEvent(eventType int, data interface{}) {
+	// For now, this is a simplified implementation
+	// In a full implementation, this would create and push CLAP events
+}
+
+// GetInputEventCount returns the number of input events
+func (h *ProcessEventHandler) GetInputEventCount() uint32 {
+	if h.inputEvents == nil {
+		return 0
+	}
+	
+	// Call the CLAP API to get event count
+	// Using the size function pointer from the input events structure
+	if h.inputEvents.size != nil {
+		return uint32(C.clap_input_events_size_helper(h.inputEvents))
+	}
+	
+	return 0
+}
+
+// GetInputEvent retrieves an input event by index
+func (h *ProcessEventHandler) GetInputEvent(index uint32) *api.Event {
+	if h.inputEvents == nil {
+		return nil
+	}
+	
+	// This would need proper implementation to convert CLAP events to Go events
+	// For now, return nil to prevent crashes
+	return nil
 }
 
 // GainPlugin implements a simple gain plugin

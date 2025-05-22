@@ -1,0 +1,449 @@
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gainx1
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Creating plugin with ID: com.clapgo.gain
+Found plugin in manifest registry at index 0
+Loading shared library from manifest: /home/user/.clap/libgain.so
+Successfully loaded symbols for plugin: com.clapgo.gain
+Successfully loaded manifest plugin: Simple Gain (com.clapgo.gain)
+Successfully created plugin instance for: com.clapgo.gain
+Successfully created plugin instance from manifest
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully
+Plugin library tests:
+
+ - /home/user/.clap/gain.clap
+
+   - create-id-with-trailing-garbage: Attempts to create a plugin instance using
+       an existing plugin ID with some extra text appended to the end. This
+       should return a null pointer.
+     PASSED
+
+   - preset-discovery-crawl: If the plugin supports the preset discovery
+       mechanism, then this test ensures that all of the plugin's declared
+       locations can be indexed successfully.
+     SKIPPED: The plugin does not implement the 'clap.preset-discovery-factory/
+       draft-2' factory.
+
+   - preset-discovery-descriptor-consistency: Ensures that all preset provider
+       descriptors from a preset discovery factory match those stored in the
+       providers created by the factory.
+     SKIPPED: The plugin does not implement the 'clap.preset-discovery-factory/
+       draft-2' factory.
+
+   - preset-discovery-load: The same as 'preset-discovery-crawl', but also tries
+       to load all found presets for plugins supported the CLAP plugin library.
+       A single plugin instance is reused for loading multiple presets, and the
+       process function is called after loading each preset.
+     SKIPPED: The plugin does not implement the 'clap.preset-discovery-factory/
+       draft-2' factory.
+
+   - query-factory-nonexistent: Tries to query a factory from the plugin's entry
+       point with a non-existent ID. This should return a null pointer.
+     PASSED
+
+   - scan-rtld-now: Checks whether the plugin loads correctly when loaded using
+       'dlopen(..., RTLD_LOCAL | RTLD_NOW)'. Only run on Unix-like platforms.
+     PASSED
+
+   - scan-time: Checks whether the plugin can be scanned in under 100
+       milliseconds.
+     PASSED: The plugin can be scanned in 11 milliseconds.
+
+Plugin tests:
+
+ - com.clapgo.gain
+
+   - descriptor-consistency: The plugin descriptor returned from the plugin
+       factory and the plugin descriptor stored on the 'clap_plugin object
+       should be equivalent.
+     PASSED
+
+   - features-categories: The plugin needs to have at least one of the main CLAP
+       category features.
+     PASSED
+
+   - features-duplicates: The plugin's features array should not contain any
+       duplicates.
+     PASSED
+
+   - param-conversions: Asserts that value to string and string to value
+       conversions are supported for ether all or none of the plugin's
+       parameters, and that conversions between values and strings roundtrip
+       consistently.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - param-fuzz-basic: Generates 50 sets of random parameter values, sets those
+       on the plugin, and has the plugin process 5 buffers of random audio
+       and note events. The plugin passes the test if it doesn't produce any
+       infinite or NaN values, and doesn't crash.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - param-set-wrong-namespace: Sends events to the plugin with the
+       'CLAP_EVENT_PARAM_VALUE' event tyep but with a mismatching namespace ID.
+       Asserts that the plugin's parameter values don't change.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - process-audio-out-of-place-basic: Processes random audio through the plugin
+       with its default parameter values and tests whether the output does
+       not contain any non-finite or subnormal values. Uses out-of-place audio
+       processing.
+     PASSED
+
+   - process-note-inconsistent: Sends intentionally inconsistent and mismatching
+       note and MIDI events to the plugin with its default parameter values and
+       tests the output for consistency. Uses out-of-place audio processing.
+     SKIPPED: The plugin does not implement the 'clap.note-ports' extension.
+
+   - process-note-out-of-place-basic: Sends audio and random note and MIDI
+       events to the plugin with its default parameter values and tests the
+       output for consistency. Uses out-of-place audio processing.
+     SKIPPED: The plugin does not implement the 'clap.note-ports' extension.
+
+   - state-buffered-streams: Performs the same state and parameter
+       reproducibility check as in 'state-reproducibility-basic', but this time
+       the plugin is only allowed to read a small prime number of bytes at a
+       time when reloading and resaving the state.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - state-invalid: The plugin should return false when
+       'clap_plugin_state::load()' is called with an empty state.
+     SKIPPED: The plugin does not implement the 'clap.state' extension.
+
+   - state-reproducibility-basic: Randomizes a plugin's parameters, saves its
+       state, recreates the plugin instance, reloads the state, and then checks
+       whether the parameter values are the same and whether saving the state
+       once more results in the same state file as before. The parameter values
+       are updated using the process function.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - state-reproducibility-flush: Randomizes a plugin's parameters, saves
+       its state, recreates the plugin instance, sets the same parameters as
+       before, saves the state again, and then asserts that the two states
+       are identical. The parameter values are set updated using the process
+       function to create the first state, and using the flush function to
+       create the second state.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+   - state-reproducibility-null-cookies: The exact same test as state-
+       reproducibility-basic, but with all cookies in the parameter events set
+       to null pointers. The plugin should handle this in the same way as the
+       other test case.
+     SKIPPED: The plugin does not implement the 'clap.params' extension.
+
+21 tests run, 8 passed, 0 failed, 13 skipped, 0 warnings
+Initializing ClapGo plugin at path: /home/user/.clap/gain.clap
+Searching for manifest for plugin: /home/user/.clap/gain.clap
+Extracted plugin name: gain
+Looking for manifest at: /home/user/.clap/gain.json
+Loading manifest from file: /home/user/.clap/gain.json
+Successfully parsed JSON file: /home/user/.clap/gain.json
+Loaded manifest: /home/user/.clap/gain.json
+Found manifest, using manifest-based loading
+Created descriptor from manifest: Simple Gain (com.clapgo.gain)
+Deinitializing ClapGo plugin
+ClapGo plugin deinitialized successfully

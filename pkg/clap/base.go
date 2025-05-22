@@ -4,7 +4,6 @@
 package clap
 
 import (
-	"fmt"
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/api"
@@ -113,7 +112,6 @@ func (p *BasePlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 // Plugin implementations should override this for supported extensions.
 func (p *BasePlugin) GetExtension(id string) unsafe.Pointer {
 	// Base implementation doesn't support any extensions
-	fmt.Printf("Extension %s requested but not supported\n", id)
 	return nil
 }
 

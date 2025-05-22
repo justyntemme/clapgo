@@ -24,6 +24,21 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
  #include "../../include/clap/include/clap/clap.h"
  #include <stdlib.h>
 
+ // Helper functions for CLAP event handling
+ static inline uint32_t clap_input_events_size_helper(const clap_input_events_t* events) {
+     if (events && events->size) {
+         return events->size(events);
+     }
+     return 0;
+ }
+
+ static inline const clap_event_header_t* clap_input_events_get_helper(const clap_input_events_t* events, uint32_t index) {
+     if (events && events->get) {
+         return events->get(events, index);
+     }
+     return NULL;
+ }
+
 #line 1 "cgo-generated-wrapper"
 
 

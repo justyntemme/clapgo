@@ -60,9 +60,6 @@ package main
 //     return false;
 // }
 import "C"
-import (
-	"fmt"
-)
 
 
 
@@ -74,8 +71,13 @@ import (
 
 // init initializes the bridge
 func init() {
-	fmt.Println("Initializing ClapGo bridge")
-	fmt.Println("Bridge package initialized, plugins now loaded via manifest system")
+	// Bridge package initialized, plugins now loaded via manifest system
+}
+
+// main function is required when this package is built as a main package
+// When built as a shared library with buildmode=c-shared, this won't be called directly
+func main() {
+	// This function is not called when used as a shared library
 }
 
 

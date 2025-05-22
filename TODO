@@ -1,0 +1,4 @@
+ Let's review areas where the example application has to do the heavy lifting that should be done via the library. We want to    │
+│   provide a nice developer experience that abstracts the complicated C translations and allow the plugin. Create a markdown file  │
+│   called DEVEXP.md and create a strategy for all the required changes, ensuring a detailed implementation guide we can then use   │
+│   to implement in the code base. don't start implementing the changes just yet util i review your implementation strategy

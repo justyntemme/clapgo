@@ -32,8 +32,8 @@ var (
 )
 
 func detectPlatform() string {
-	os := strings.ToLower(os.Getenv("GOOS"))
-	if os == "" {
+	goos := strings.ToLower(os.Getenv("GOOS"))
+	if goos == "" {
 		// Default to current OS
 		if _, err := os.Stat("/proc"); err == nil {
 			return "linux"
@@ -45,10 +45,10 @@ func detectPlatform() string {
 		return "linux" // Default fallback
 	}
 	
-	if os == "darwin" {
+	if goos == "darwin" {
 		return "macos"
 	}
-	return os
+	return goos
 }
 
 func getSharedLibExtension() string {
