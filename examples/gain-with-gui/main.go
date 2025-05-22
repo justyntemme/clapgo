@@ -203,7 +203,6 @@ func (p *SimpleGainGUIPlugin) GetGUISize() (width, height uint32) {
 }
 
 func main() {
-	// Register the plugin using the new simplified API
-	plugin := NewSimpleGainGUIPlugin()
-	api.RegisterPlugin(plugin)
+	// This is not called when used as a plugin,
+	// but can be useful for testing
 }

@@ -172,53 +172,5 @@ type NoteEvent struct {
 
 // Process status codes and event types are defined in constants.go
 
-// Factory creates plugin instances.
-type Factory interface {
-	// GetPluginCount returns the number of available plugins.
-	GetPluginCount() uint32
-
-	// GetPluginInfo returns information about a plugin by index.
-	GetPluginInfo(index uint32) PluginInfo
-
-	// CreatePlugin creates a new plugin instance with the given ID.
-	CreatePlugin(id string) Plugin
-}
-
-// Creator creates a specific plugin type.
-type Creator interface {
-	// Create returns a new instance of the plugin.
-	Create() Plugin
-
-	// GetPluginInfo returns information about the plugin.
-	GetPluginInfo() PluginInfo
-}
-
-// PluginRegistrar defines the interface for registering plugins with the system.
-// Implementations of this interface provide the functionality to add plugins
-// to the registry and make them available to CLAP hosts.
-type PluginRegistrar interface {
-	// Register adds a plugin to the registry with the given info and creator function.
-	// The creator function should return a new instance of the plugin when called.
-	Register(info PluginInfo, creator func() Plugin)
-	
-	// GetPluginCount returns the number of registered plugins.
-	GetPluginCount() uint32
-	
-	// GetPluginInfo returns information about a plugin by index.
-	GetPluginInfo(index uint32) PluginInfo
-	
-	// CreatePlugin creates a new plugin instance with the given ID.
-	CreatePlugin(id string) Plugin
-}
-
-// PluginProvider defines the interface that plugin implementations should implement
-// to register themselves with the system.
-type PluginProvider interface {
-	// GetPluginInfo returns information about the plugin.
-	GetPluginInfo() PluginInfo
-	
-	// CreatePlugin returns a new instance of the plugin.
-	CreatePlugin() Plugin
-}
 
 // Extension IDs are defined in constants.go

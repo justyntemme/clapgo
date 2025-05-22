@@ -1,27 +1,211 @@
 package main
 
+// #cgo CFLAGS: -I../../include/clap/include
+// #include "../../include/clap/include/clap/clap.h"
+// #include <stdlib.h>
+//
+// // Helper functions for CLAP event handling
+// static inline uint32_t clap_input_events_size_helper(const clap_input_events_t* events) {
+//     if (events && events->size) {
+//         return events->size(events);
+//     }
+//     return 0;
+// }
+//
+// static inline const clap_event_header_t* clap_input_events_get_helper(const clap_input_events_t* events, uint32_t index) {
+//     if (events && events->get) {
+//         return events->get(events, index);
+//     }
+//     return NULL;
+// }
+import "C"
 import (
 	"encoding/json"
+	"github.com/justyntemme/clapgo/pkg/api"
 	"math"
 	"os"
+	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
-	
-	"github.com/justyntemme/clapgo/pkg/api"
 )
 
-// SynthPlugin implements the SimplePluginInterface
-// NO CGO required - all complexity handled by pkg/api
-type SynthPlugin struct {
-	// Plugin state (using atomic values for thread safety)
-	voices       [16]*Voice  // Maximum 16 voices
-	sampleRate   int64       // atomic storage
-	volume       int64       // atomic storage for volume (0.0-1.0)
-	waveform     int64       // atomic storage for waveform (0-2)
-	attack       int64       // atomic storage for attack time
-	decay        int64       // atomic storage for decay time  
-	sustain      int64       // atomic storage for sustain level
-	release      int64       // atomic storage for release time
+// This example demonstrates a simple synthesizer plugin using the new API abstractions.
+
+// Export Go plugin functionality
+var (
+	synthPlugin *SynthPlugin
+)
+
+func init() {
+	// Create our synth plugin
+	synthPlugin = NewSynthPlugin()
+}
+
+// Standardized exports for manifest system
+
+//export ClapGo_CreatePlugin
+func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
+	id := C.GoString(pluginID)
+	if id == PluginID {
+		handle := cgo.NewHandle(synthPlugin)
+		return unsafe.Pointer(handle)
+	}
+	return nil
+}
+
+//export ClapGo_GetVersion
+func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
+	if major != nil {
+		*major = C.uint32_t(1)
+	}
+	if minor != nil {
+		*minor = C.uint32_t(0)
+	}
+	if patch != nil {
+		*patch = C.uint32_t(0)
+	}
+	return C.bool(true)
+}
+
+//export ClapGo_GetPluginID
+func ClapGo_GetPluginID(pluginID *C.char) *C.char {
+	return C.CString(synthPlugin.GetPluginID())
+}
+
+//export ClapGo_GetPluginName
+func ClapGo_GetPluginName(pluginID *C.char) *C.char {
+	return C.CString(synthPlugin.GetPluginInfo().Name)
+}
+
+//export ClapGo_GetPluginVendor
+func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
+	return C.CString(synthPlugin.GetPluginInfo().Vendor)
+}
+
+//export ClapGo_GetPluginVersion
+func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
+	return C.CString(synthPlugin.GetPluginInfo().Version)
+}
+
+//export ClapGo_GetPluginDescription
+func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
+	return C.CString(synthPlugin.GetPluginInfo().Description)
+}
+
+//export ClapGo_PluginInit
+func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.Init())
+}
+
+//export ClapGo_PluginDestroy
+func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	handle := cgo.Handle(plugin)
+	p := handle.Value().(*SynthPlugin)
+	p.Destroy()
+	handle.Delete()
+}
+
+//export ClapGo_PluginActivate
+func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+}
+
+//export ClapGo_PluginDeactivate
+func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.Deactivate()
+}
+
+//export ClapGo_PluginStartProcessing
+func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.StartProcessing())
+}
+
+//export ClapGo_PluginStopProcessing
+func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.StopProcessing()
+}
+
+//export ClapGo_PluginReset
+func ClapGo_PluginReset(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.Reset()
+}
+
+//export ClapGo_PluginProcess
+func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
+	if plugin == nil || process == nil {
+		return C.int32_t(api.ProcessError)
+	}
+	
+	handle := cgo.Handle(plugin)
+	p := handle.Value().(*SynthPlugin)
+	
+	// Convert the C clap_process_t to Go parameters
+	cProcess := (*C.clap_process_t)(process)
+	
+	// Extract steady time and frame count
+	steadyTime := int64(cProcess.steady_time)
+	framesCount := uint32(cProcess.frames_count)
+	
+	// Convert audio buffers using our abstraction - NO MORE MANUAL CONVERSION!
+	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
+	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
+	
+	// Create event handler using the new abstraction - NO MORE MANUAL EVENT HANDLING!
+	eventHandler := api.NewEventProcessor(
+		unsafe.Pointer(cProcess.in_events),
+		unsafe.Pointer(cProcess.out_events),
+	)
+	
+	// Call the actual Go process method
+	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
+	
+	return C.int32_t(result)
+}
+
+//export ClapGo_PluginGetExtension
+func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
+	if plugin == nil {
+		return nil
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	extID := C.GoString(id)
+	return p.GetExtension(extID)
+}
+
+//export ClapGo_PluginOnMainThread
+func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.OnMainThread()
 }
 
 // Voice represents a single active note
@@ -35,44 +219,143 @@ type Voice struct {
 	ReleasePhase float64
 }
 
-// GetInfo returns plugin metadata
-func (p *SynthPlugin) GetInfo() api.PluginInfo {
-	return api.PluginInfo{
-		ID:          PluginID,
-		Name:        PluginName,
-		Vendor:      PluginVendor,
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     PluginVersion,
-		Description: PluginDescription,
-		Features:    []string{"instrument", "synthesizer", "stereo"},
-	}
+// SynthPlugin implements a simple synthesizer with atomic parameter storage
+type SynthPlugin struct {
+	// Plugin state
+	voices       [16]*Voice  // Maximum 16 voices
+	sampleRate   float64
+	isActivated  bool
+	isProcessing bool
+	host         unsafe.Pointer
+	
+	// Parameters with atomic storage for thread safety
+	volume       int64  // atomic storage for volume (0.0-1.0)
+	waveform     int64  // atomic storage for waveform (0-2)
+	attack       int64  // atomic storage for attack time
+	decay        int64  // atomic storage for decay time  
+	sustain      int64  // atomic storage for sustain level
+	release      int64  // atomic storage for release time
+	
+	// Transport state
+	transportInfo TransportInfo
+	
+	// Parameter management using our new abstraction
+	paramManager *api.ParameterManager
 }
 
-// Initialize sets up the plugin with sample rate
-func (p *SynthPlugin) Initialize(sampleRate float64) error {
+// TransportInfo holds host transport information
+type TransportInfo struct {
+	IsPlaying     bool
+	Tempo         float64
+	TimeSignature struct {
+		Numerator   int
+		Denominator int
+	}
+	BarNumber     int
+	BeatPosition  float64
+	SecondsPosition float64
+	IsLooping     bool
+}
+
+// NewSynthPlugin creates a new synth plugin
+func NewSynthPlugin() *SynthPlugin {
+	plugin := &SynthPlugin{
+		sampleRate:   44100.0,
+		isActivated:  false,
+		isProcessing: false,
+		transportInfo: TransportInfo{
+			Tempo: 120.0,
+		},
+		paramManager: api.NewParameterManager(),
+	}
+	
 	// Set default values atomically
-	atomic.StoreInt64(&p.sampleRate, int64(floatToBits(sampleRate)))
-	atomic.StoreInt64(&p.volume, int64(floatToBits(0.7)))      // -3dB
-	atomic.StoreInt64(&p.waveform, 0)                          // sine
-	atomic.StoreInt64(&p.attack, int64(floatToBits(0.01)))     // 10ms
-	atomic.StoreInt64(&p.decay, int64(floatToBits(0.1)))       // 100ms
-	atomic.StoreInt64(&p.sustain, int64(floatToBits(0.7)))     // 70%
-	atomic.StoreInt64(&p.release, int64(floatToBits(0.3)))     // 300ms
+	atomic.StoreInt64(&plugin.volume, int64(floatToBits(0.7)))      // -3dB
+	atomic.StoreInt64(&plugin.waveform, 0)                          // sine
+	atomic.StoreInt64(&plugin.attack, int64(floatToBits(0.01)))     // 10ms
+	atomic.StoreInt64(&plugin.decay, int64(floatToBits(0.1)))       // 100ms
+	atomic.StoreInt64(&plugin.sustain, int64(floatToBits(0.7)))     // 70%
+	atomic.StoreInt64(&plugin.release, int64(floatToBits(0.3)))     // 300ms
+	
+	// Register parameters using our new abstraction
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(1, "Volume", 0.0, 1.0, 0.7))
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(2, "Waveform", 0.0, 2.0, 0.0))
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(3, "Attack", 0.001, 2.0, 0.01))
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(4, "Decay", 0.001, 2.0, 0.1))
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(5, "Sustain", 0.0, 1.0, 0.7))
+	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(6, "Release", 0.001, 5.0, 0.3))
+	
+	return plugin
+}
+
+// Init initializes the plugin
+func (p *SynthPlugin) Init() bool {
+	return true
+}
+
+// Destroy cleans up plugin resources
+func (p *SynthPlugin) Destroy() {
+	// Nothing to clean up
+}
+
+// Activate prepares the plugin for processing
+func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+	p.sampleRate = sampleRate
+	p.isActivated = true
 	
 	// Clear all voices
 	for i := range p.voices {
 		p.voices[i] = nil
 	}
 	
-	return nil
+	return true
 }
 
-// ProcessAudio processes audio using Go-native types
-func (p *SynthPlugin) ProcessAudio(input, output [][]float32, frameCount uint32) error {
+// Deactivate stops the plugin from processing
+func (p *SynthPlugin) Deactivate() {
+	p.isActivated = false
+}
+
+// StartProcessing begins audio processing
+func (p *SynthPlugin) StartProcessing() bool {
+	if !p.isActivated {
+		return false
+	}
+	p.isProcessing = true
+	return true
+}
+
+// StopProcessing ends audio processing
+func (p *SynthPlugin) StopProcessing() {
+	p.isProcessing = false
+}
+
+// Reset resets the plugin state
+func (p *SynthPlugin) Reset() {
+	// Reset all voices
+	for i := range p.voices {
+		p.voices[i] = nil
+	}
+}
+
+// Process processes audio data using the new abstractions
+func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+	// Check if we're in a valid state for processing
+	if !p.isActivated || !p.isProcessing {
+		return api.ProcessError
+	}
+	
+	// Process events using our new abstraction - NO MORE MANUAL EVENT PARSING!
+	if events != nil {
+		p.processEventHandler(events, framesCount)
+	}
+	
+	// If no outputs, nothing to do
+	if len(audioOut) == 0 {
+		return api.ProcessContinue
+	}
+	
 	// Get current parameter values atomically
-	sampleRate := floatFromBits(uint64(atomic.LoadInt64(&p.sampleRate)))
 	volume := floatFromBits(uint64(atomic.LoadInt64(&p.volume)))
 	waveform := int(atomic.LoadInt64(&p.waveform))
 	attack := floatFromBits(uint64(atomic.LoadInt64(&p.attack)))
@@ -80,36 +363,34 @@ func (p *SynthPlugin) ProcessAudio(input, output [][]float32, frameCount uint32)
 	sustain := floatFromBits(uint64(atomic.LoadInt64(&p.sustain)))
 	release := floatFromBits(uint64(atomic.LoadInt64(&p.release)))
 	
-	// If no outputs, nothing to do
-	if len(output) == 0 {
-		return nil
-	}
-	
 	// Get the number of output channels
-	numChannels := len(output)
+	numChannels := len(audioOut)
 	
 	// Clear the output buffer
 	for ch := 0; ch < numChannels; ch++ {
-		outChannel := output[ch]
-		if len(outChannel) < int(frameCount) {
+		outChannel := audioOut[ch]
+		if len(outChannel) < int(framesCount) {
 			continue
 		}
 		
-		for i := uint32(0); i < frameCount; i++ {
+		for i := uint32(0); i < framesCount; i++ {
 			outChannel[i] = 0.0
 		}
 	}
 	
 	// Process each voice
+	var hasActiveVoices bool
 	for i, voice := range p.voices {
 		if voice != nil && voice.IsActive {
+			hasActiveVoices = true
+			
 			// Calculate frequency for this note
 			freq := noteToFrequency(int(voice.Key))
 			
 			// Generate audio for this voice
-			for j := uint32(0); j < frameCount; j++ {
+			for j := uint32(0); j < framesCount; j++ {
 				// Get envelope value
-				env := getEnvelopeValue(voice, j, frameCount, sampleRate, attack, decay, sustain, release)
+				env := p.getEnvelopeValue(voice, j, framesCount, attack, decay, sustain, release)
 				
 				// Generate sample
 				sample := generateSample(voice.Phase, freq, waveform) * env * voice.Velocity
@@ -119,13 +400,13 @@ func (p *SynthPlugin) ProcessAudio(input, output [][]float32, frameCount uint32)
 				
 				// Add to all output channels
 				for ch := 0; ch < numChannels; ch++ {
-					if len(output[ch]) > int(j) {
-						output[ch][j] += float32(sample)
+					if len(audioOut[ch]) > int(j) {
+						audioOut[ch][j] += float32(sample)
 					}
 				}
 				
 				// Advance oscillator phase
-				voice.Phase += freq / sampleRate
+				voice.Phase += freq / p.sampleRate
 				if voice.Phase >= 1.0 {
 					voice.Phase -= 1.0
 				}
@@ -138,81 +419,80 @@ func (p *SynthPlugin) ProcessAudio(input, output [][]float32, frameCount uint32)
 		}
 	}
 	
-	return nil
+	// Check if we have any active voices
+	if !hasActiveVoices {
+		return api.ProcessSleep
+	}
+	
+	return api.ProcessContinue
 }
 
-// GetParameters returns all parameter definitions
-func (p *SynthPlugin) GetParameters() []api.ParamInfo {
-	return []api.ParamInfo{
-		api.CreateFloatParameter(1, "Volume", 0.0, 1.0, 0.7),
-		api.CreateFloatParameter(2, "Waveform", 0.0, 2.0, 0.0),
-		api.CreateFloatParameter(3, "Attack", 0.001, 2.0, 0.01),
-		api.CreateFloatParameter(4, "Decay", 0.001, 2.0, 0.1),
-		api.CreateFloatParameter(5, "Sustain", 0.0, 1.0, 0.7),
-		api.CreateFloatParameter(6, "Release", 0.001, 5.0, 0.3),
+// processEventHandler handles all incoming events using our new EventHandler abstraction
+func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount uint32) {
+	if events == nil {
+		return
+	}
+	
+	// Process each event using our abstraction - NO MORE MANUAL C STRUCT PARSING!
+	eventCount := events.GetInputEventCount()
+	for i := uint32(0); i < eventCount; i++ {
+		event := events.GetInputEvent(i)
+		if event == nil {
+			continue
+		}
+		
+		// Handle each event type safely using our abstraction
+		switch event.Type {
+		case api.EventTypeParamValue:
+			if paramEvent, ok := event.Data.(api.ParamEvent); ok {
+				p.handleParameterChange(paramEvent)
+			}
+		case api.EventTypeNoteOn:
+			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
+				p.handleNoteOn(noteEvent)
+			}
+		case api.EventTypeNoteOff:
+			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
+				p.handleNoteOff(noteEvent)
+			}
+		}
 	}
 }
 
-// SetParameterValue sets a parameter value
-func (p *SynthPlugin) SetParameterValue(paramID uint32, value float64) error {
-	switch paramID {
+// handleParameterChange processes a parameter change event
+func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamEvent) {
+	// Handle the parameter change based on its ID
+	switch paramEvent.ParamID {
 	case 1: // Volume
-		if value < 0.0 { value = 0.0 }
-		if value > 1.0 { value = 1.0 }
-		atomic.StoreInt64(&p.volume, int64(floatToBits(value)))
+		atomic.StoreInt64(&p.volume, int64(floatToBits(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 2: // Waveform
-		if value < 0.0 { value = 0.0 }
-		if value > 2.0 { value = 2.0 }
-		atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
+		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
-		if value < 0.001 { value = 0.001 }
-		if value > 2.0 { value = 2.0 }
-		atomic.StoreInt64(&p.attack, int64(floatToBits(value)))
+		atomic.StoreInt64(&p.attack, int64(floatToBits(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 4: // Decay
-		if value < 0.001 { value = 0.001 }
-		if value > 2.0 { value = 2.0 }
-		atomic.StoreInt64(&p.decay, int64(floatToBits(value)))
+		atomic.StoreInt64(&p.decay, int64(floatToBits(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 5: // Sustain
-		if value < 0.0 { value = 0.0 }
-		if value > 1.0 { value = 1.0 }
-		atomic.StoreInt64(&p.sustain, int64(floatToBits(value)))
+		atomic.StoreInt64(&p.sustain, int64(floatToBits(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 6: // Release
-		if value < 0.001 { value = 0.001 }
-		if value > 5.0 { value = 5.0 }
-		atomic.StoreInt64(&p.release, int64(floatToBits(value)))
-	default:
-		return api.ErrInvalidParam
+		atomic.StoreInt64(&p.release, int64(floatToBits(paramEvent.Value)))
+		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	}
-	return nil
 }
 
-// GetParameterValue gets a parameter value
-func (p *SynthPlugin) GetParameterValue(paramID uint32) float64 {
-	switch paramID {
-	case 1: // Volume
-		return floatFromBits(uint64(atomic.LoadInt64(&p.volume)))
-	case 2: // Waveform
-		return float64(atomic.LoadInt64(&p.waveform))
-	case 3: // Attack
-		return floatFromBits(uint64(atomic.LoadInt64(&p.attack)))
-	case 4: // Decay
-		return floatFromBits(uint64(atomic.LoadInt64(&p.decay)))
-	case 5: // Sustain
-		return floatFromBits(uint64(atomic.LoadInt64(&p.sustain)))
-	case 6: // Release
-		return floatFromBits(uint64(atomic.LoadInt64(&p.release)))
-	}
-	return 0.0
-}
-
-// OnNoteOn handles note on events
-func (p *SynthPlugin) OnNoteOn(noteID int32, channel, key int16, velocity float64) {
+// handleNoteOn processes a note on event
+func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
-	if key < 0 || key > 127 {
+	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
 	}
 	
 	// Ensure velocity is positive
+	velocity := noteEvent.Value
 	if velocity <= 0 {
 		velocity = 0.01 // Very quiet but not silent
 	}
@@ -222,18 +502,18 @@ func (p *SynthPlugin) OnNoteOn(noteID int32, channel, key int16, velocity float6
 	
 	// Create a new voice with validated data
 	p.voices[voiceIndex] = &Voice{
-		NoteID:       noteID,
-		Channel:      channel,
-		Key:          key,
-		Velocity:     velocity,
-		Phase:        0.0,
-		IsActive:     true,
+		NoteID:      noteEvent.NoteID,
+		Channel:     noteEvent.Channel,
+		Key:         noteEvent.Key,
+		Velocity:    velocity,
+		Phase:       0.0,
+		IsActive:    true,
 		ReleasePhase: -1.0, // Not in release phase
 	}
 }
 
-// OnNoteOff handles note off events
-func (p *SynthPlugin) OnNoteOff(noteID int32, channel, key int16) {
+// handleNoteOff processes a note off event
+func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent) {
 	// Find the voice with this note ID or key/channel combination
 	for _, voice := range p.voices {
 		// Safety check
@@ -242,30 +522,12 @@ func (p *SynthPlugin) OnNoteOff(noteID int32, channel, key int16) {
 		}
 		
 		// Match on note ID if provided (non-negative), otherwise match on key and channel
-		if (noteID >= 0 && voice.NoteID == noteID) ||
-		   (noteID < 0 && voice.Key == key && 
-		    (channel < 0 || voice.Channel == channel)) {
+		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
+		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
+		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Start the release phase (0.0 = start of release)
 			voice.ReleasePhase = 0.0
 		}
-	}
-}
-
-// OnActivate is called when plugin is activated
-func (p *SynthPlugin) OnActivate() error {
-	return nil
-}
-
-// OnDeactivate is called when plugin is deactivated
-func (p *SynthPlugin) OnDeactivate() {
-	// Nothing to do
-}
-
-// Cleanup releases any resources
-func (p *SynthPlugin) Cleanup() {
-	// Clear all voices
-	for i := range p.voices {
-		p.voices[i] = nil
 	}
 }
 
@@ -299,11 +561,11 @@ func (p *SynthPlugin) findFreeVoice() int {
 }
 
 // getEnvelopeValue calculates the ADSR envelope value for a voice
-func getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, sampleRate, attack, decay, sustain, release float64) float64 {
+func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
 	// If in release phase
 	if voice.ReleasePhase >= 0.0 {
 		// Update release phase
-		releaseSamples := release * sampleRate
+		releaseSamples := release * p.sampleRate
 		voice.ReleasePhase += 1.0 / releaseSamples
 		
 		// Calculate release envelope (exponential decay)
@@ -311,13 +573,13 @@ func getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, sampleRate, 
 	}
 	
 	// Attack phase
-	attackSamples := attack * sampleRate
+	attackSamples := attack * p.sampleRate
 	if attackSamples <= 0 {
 		attackSamples = 1 // Prevent division by zero
 	}
 	
 	// Decay phase
-	decaySamples := decay * sampleRate
+	decaySamples := decay * p.sampleRate
 	if decaySamples <= 0 {
 		decaySamples = 1 // Prevent division by zero
 	}
@@ -365,10 +627,71 @@ func noteToFrequency(note int) float64 {
 	return 440.0 * math.Pow(2.0, (float64(note)-69.0)/12.0)
 }
 
+// GetExtension gets a plugin extension
+func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
+	// Check for parameter extension
+	if id == api.ExtParams {
+		// TODO: Implement proper parameter extension
+		return nil
+	}
+	
+	// Check for state extension
+	if id == api.ExtState {
+		// TODO: Implement proper state extension
+		return nil
+	}
+	
+	// Check for note ports extension
+	if id == api.ExtNotePorts {
+		// TODO: Implement proper note ports extension
+		return nil
+	}
+	
+	// Check for audio ports extension
+	if id == api.ExtAudioPorts {
+		// TODO: Implement proper audio ports extension
+		return nil
+	}
+	
+	// Check for preset load extension
+	if id == api.ExtPresetLoad {
+		// TODO: Implement proper preset load extension
+		return nil
+	}
+	
+	// No other extensions supported
+	return nil
+}
+
+// GetPluginInfo returns information about the plugin
+func (p *SynthPlugin) GetPluginInfo() api.PluginInfo {
+	return api.PluginInfo{
+		ID:          PluginID,
+		Name:        PluginName,
+		Vendor:      PluginVendor, 
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     PluginVersion,
+		Description: PluginDescription,
+		Features:    []string{"instrument", "synthesizer", "stereo"},
+	}
+}
+
+// OnMainThread is called on the main thread
+func (p *SynthPlugin) OnMainThread() {
+	// Nothing to do
+}
+
+// GetPluginID returns the plugin ID
+func (p *SynthPlugin) GetPluginID() string {
+	return PluginID
+}
+
 // SaveState returns custom state data for the plugin
-func (p *SynthPlugin) SaveState() ([]byte, error) {
+func (p *SynthPlugin) SaveState() map[string]interface{} {
 	// Save any additional state beyond parameters
-	state := map[string]interface{}{
+	return map[string]interface{}{
 		"plugin_version": "1.0.0",
 		"waveform":      atomic.LoadInt64(&p.waveform),
 		"attack":        floatFromBits(uint64(atomic.LoadInt64(&p.attack))),
@@ -376,45 +699,36 @@ func (p *SynthPlugin) SaveState() ([]byte, error) {
 		"sustain":       floatFromBits(uint64(atomic.LoadInt64(&p.sustain))),
 		"release":       floatFromBits(uint64(atomic.LoadInt64(&p.release))),
 	}
-	
-	return json.Marshal(state)
 }
 
 // LoadState loads custom state data for the plugin
-func (p *SynthPlugin) LoadState(data []byte) error {
-	var state map[string]interface{}
-	if err := json.Unmarshal(data, &state); err != nil {
-		return err
-	}
-	
+func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	// Load waveform
-	if waveform, ok := state["waveform"].(float64); ok {
+	if waveform, ok := data["waveform"].(float64); ok {
 		atomic.StoreInt64(&p.waveform, int64(waveform))
 	}
 	
 	// Load ADSR
-	if attack, ok := state["attack"].(float64); ok {
+	if attack, ok := data["attack"].(float64); ok {
 		atomic.StoreInt64(&p.attack, int64(floatToBits(attack)))
 	}
-	if decay, ok := state["decay"].(float64); ok {
+	if decay, ok := data["decay"].(float64); ok {
 		atomic.StoreInt64(&p.decay, int64(floatToBits(decay)))
 	}
-	if sustain, ok := state["sustain"].(float64); ok {
+	if sustain, ok := data["sustain"].(float64); ok {
 		atomic.StoreInt64(&p.sustain, int64(floatToBits(sustain)))
 	}
-	if release, ok := state["release"].(float64); ok {
+	if release, ok := data["release"].(float64); ok {
 		atomic.StoreInt64(&p.release, int64(floatToBits(release)))
 	}
-	
-	return nil
 }
 
-// LoadPreset loads a preset from a file
-func (p *SynthPlugin) LoadPreset(filePath string) error {
+// LoadPreset loads a preset from a location
+func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) bool {
 	// Open the preset file
-	file, err := os.Open(filePath)
+	file, err := os.Open(loadKey)
 	if err != nil {
-		return err
+		return false
 	}
 	defer file.Close()
 	
@@ -437,7 +751,7 @@ func (p *SynthPlugin) LoadPreset(filePath string) error {
 	
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&preset); err != nil {
-		return err
+		return false
 	}
 	
 	// Update synth parameters
@@ -447,7 +761,12 @@ func (p *SynthPlugin) LoadPreset(filePath string) error {
 	atomic.StoreInt64(&p.sustain, int64(floatToBits(preset.Sustain)))
 	atomic.StoreInt64(&p.release, int64(floatToBits(preset.Release)))
 	
-	return nil
+	// Load any additional state data
+	if preset.StateData != nil {
+		p.LoadState(preset.StateData)
+	}
+	
+	return true
 }
 
 // Helper functions for atomic float64 operations
@@ -459,13 +778,7 @@ func floatFromBits(b uint64) float64 {
 	return *(*float64)(unsafe.Pointer(&b))
 }
 
-func init() {
-	// Register the plugin during library initialization
-	plugin := &SynthPlugin{}
-	api.RegisterSimplePlugin(plugin)
-}
-
 func main() {
-	// This is only called when run as standalone executable
-	// Plugin registration happens in init() for shared library loading
+	// This is not called when used as a plugin,
+	// but can be useful for testing
 }
