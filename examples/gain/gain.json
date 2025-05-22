@@ -12,28 +12,16 @@
     "features": ["audio-effect", "stereo", "mono"]
   },
   "build": {
-    "goSharedLibrary": "libgain.so",
-    "entryPoint": "CreatePlugin",
     "dependencies": []
   },
   "extensions": [
     {
       "id": "clap.audio-ports",
-      "supported": true
+      "supported": false
     },
     {
       "id": "clap.state",
       "supported": false
-    }
-  ],
-  "parameters": [
-    {
-      "id": 1,
-      "name": "Gain",
-      "minValue": 0.0,
-      "maxValue": 2.0,
-      "defaultValue": 1.0,
-      "flags": ["automatable", "bounded-below", "bounded-above"]
     }
   ]
 }

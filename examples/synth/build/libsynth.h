@@ -24,6 +24,21 @@ typedef struct { const char *p; ptrdiff_t n; } _GoString_;
  #include "../../include/clap/include/clap/clap.h"
  #include <stdlib.h>
 
+ // Helper functions for CLAP event handling
+ static inline uint32_t clap_input_events_size_helper(const clap_input_events_t* events) {
+     if (events && events->size) {
+         return events->size(events);
+     }
+     return 0;
+ }
+
+ static inline const clap_event_header_t* clap_input_events_get_helper(const clap_input_events_t* events, uint32_t index) {
+     if (events && events->get) {
+         return events->get(events, index);
+     }
+     return NULL;
+ }
+
 #line 1 "cgo-generated-wrapper"
 
 
@@ -81,6 +96,12 @@ extern "C" {
 #endif
 
 extern void* ClapGo_CreatePlugin(void* host, char* pluginID);
+extern _Bool ClapGo_GetVersion(uint32_t* major, uint32_t* minor, uint32_t* patch);
+extern char* ClapGo_GetPluginID(char* pluginID);
+extern char* ClapGo_GetPluginName(char* pluginID);
+extern char* ClapGo_GetPluginVendor(char* pluginID);
+extern char* ClapGo_GetPluginVersion(char* pluginID);
+extern char* ClapGo_GetPluginDescription(char* pluginID);
 extern _Bool ClapGo_PluginInit(void* plugin);
 extern void ClapGo_PluginDestroy(void* plugin);
 extern _Bool ClapGo_PluginActivate(void* plugin, double sampleRate, uint32_t minFrames, uint32_t maxFrames);
@@ -88,7 +109,7 @@ extern void ClapGo_PluginDeactivate(void* plugin);
 extern _Bool ClapGo_PluginStartProcessing(void* plugin);
 extern void ClapGo_PluginStopProcessing(void* plugin);
 extern void ClapGo_PluginReset(void* plugin);
-extern int ClapGo_PluginProcess(void* plugin, int64_t steadyTime, uint32_t framesCount, void* audioIn, void* audioOut, void* events);
+extern int32_t ClapGo_PluginProcess(void* plugin, void* process);
 extern void* ClapGo_PluginGetExtension(void* plugin, char* id);
 extern void ClapGo_PluginOnMainThread(void* plugin);
 

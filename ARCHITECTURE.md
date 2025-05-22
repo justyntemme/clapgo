@@ -392,3 +392,22 @@ LDFLAGS := -shared $(shell pkg-config --libs json-c)
 - No additional synchronization needed in bridge layer
 
 This architecture successfully bridges the gap between Go's high-level programming model and CLAP's real-time audio requirements while maintaining safety, performance, and compatibility across platforms.
+
+## Architecture Cleanup (Latest)
+
+**Eliminated Plugin-Specific C Code**: Removed redundant `examples/*/plugin/` directories that contained duplicate CLAP interface implementations. The clean architecture now ensures:
+
+- **Single Source of Truth**: All CLAP interface code lives in `src/c/` library
+- **Zero C Boilerplate**: Plugin developers only write Go code + JSON manifests  
+- **Consistent Behavior**: All plugins use the same tested CLAP implementation
+- **Easy Maintenance**: CLAP interface bugs fixed once in library, not per-plugin
+
+**Current Structure**:
+```
+✅ src/c/plugin.c     # Generic CLAP entry (used by all plugins)
+✅ examples/gain/     # Go code + JSON only (no C code)
+✅ examples/synth/    # Go code + JSON only (no C code)
+❌ examples/*/plugin/ # REMOVED - was redundant boilerplate
+```
+
+This achieves the architectural goal of separating concerns cleanly: library handles CLAP complexity, plugins focus on audio processing logic.

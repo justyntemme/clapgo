@@ -7,6 +7,7 @@ import (
 	"unsafe"
 )
 
+
 // Plugin represents the core interface that all CLAP plugins must implement.
 // It defines the lifecycle and processing functions required by the CLAP standard.
 type Plugin interface {
@@ -38,7 +39,8 @@ type Plugin interface {
 	Reset()
 
 	// Process handles audio processing.
-	// It receives input audio and writes output audio.
+	// It receives input audio and writes output audio using Go-native slices.
+	// The audio buffer conversion from C is handled automatically.
 	// It also processes events such as parameter changes.
 	// Returns a status code: 0-error, 1-continue, 2-continue_if_not_quiet, 3-tail, 4-sleep
 	Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events EventHandler) int
@@ -89,12 +91,13 @@ type PluginInfo struct {
 }
 
 // EventHandler handles plugin events during processing.
+// All C event conversion is handled automatically by the implementation.
 type EventHandler interface {
 	// ProcessInputEvents processes all incoming events in the event queue.
 	// This should be called during the Process method to handle parameter changes, etc.
 	ProcessInputEvents()
 
-	// AddOutputEvent adds an event to the output event queue.
+	// AddOutputEvent adds an event to the output event queue (legacy interface).
 	// Events can include parameter changes, MIDI events, etc.
 	AddOutputEvent(eventType int, data interface{})
 
@@ -102,7 +105,12 @@ type EventHandler interface {
 	GetInputEventCount() uint32
 
 	// GetInputEvent retrieves an input event by index.
+	// C events are automatically converted to Go types.
 	GetInputEvent(index uint32) *Event
+
+	// PushOutputEvent pushes a typed output event to the host.
+	// This is the preferred method over AddOutputEvent.
+	PushOutputEvent(event *Event) bool
 }
 
 // Event represents an event in the CLAP processing context.
@@ -164,53 +172,5 @@ type NoteEvent struct {
 
 // Process status codes and event types are defined in constants.go
 
-// Factory creates plugin instances.
-type Factory interface {
-	// GetPluginCount returns the number of available plugins.
-	GetPluginCount() uint32
-
-	// GetPluginInfo returns information about a plugin by index.
-	GetPluginInfo(index uint32) PluginInfo
-
-	// CreatePlugin creates a new plugin instance with the given ID.
-	CreatePlugin(id string) Plugin
-}
-
-// Creator creates a specific plugin type.
-type Creator interface {
-	// Create returns a new instance of the plugin.
-	Create() Plugin
-
-	// GetPluginInfo returns information about the plugin.
-	GetPluginInfo() PluginInfo
-}
-
-// PluginRegistrar defines the interface for registering plugins with the system.
-// Implementations of this interface provide the functionality to add plugins
-// to the registry and make them available to CLAP hosts.
-type PluginRegistrar interface {
-	// Register adds a plugin to the registry with the given info and creator function.
-	// The creator function should return a new instance of the plugin when called.
-	Register(info PluginInfo, creator func() Plugin)
-	
-	// GetPluginCount returns the number of registered plugins.
-	GetPluginCount() uint32
-	
-	// GetPluginInfo returns information about a plugin by index.
-	GetPluginInfo(index uint32) PluginInfo
-	
-	// CreatePlugin creates a new plugin instance with the given ID.
-	CreatePlugin(id string) Plugin
-}
-
-// PluginProvider defines the interface that plugin implementations should implement
-// to register themselves with the system.
-type PluginProvider interface {
-	// GetPluginInfo returns information about the plugin.
-	GetPluginInfo() PluginInfo
-	
-	// CreatePlugin returns a new instance of the plugin.
-	CreatePlugin() Plugin
-}
 
 // Extension IDs are defined in constants.go

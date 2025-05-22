@@ -9,7 +9,11 @@
 *.o
 *.so
 *.dylib
-*.clap
+
+# Prevent stray Go executables in root
+/gain
+/synth
+/output
 
 # Test binary, built with `go test -c`
 *.test
@@ -24,8 +28,26 @@
 go.work
 go.work.sum
 
-# Build output directory
-/build/
+# Build output directories - all build artifacts
+build/
+examples/gain/build/
+examples/synth/build/
+examples/gain-with-gui/build/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile.cmake
+*.cmake
+!CMakeLists.txt
+!cmake/*.cmake
 
 # env file
 .env

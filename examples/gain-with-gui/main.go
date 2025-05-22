@@ -1,314 +1,205 @@
 package main
 
-// #cgo CFLAGS: -I../../include/clap/include
-// #include "../../include/clap/include/clap/clap.h"
-// #include <stdlib.h>
-import "C"
 import (
 	"fmt"
 	"math"
-	"unsafe"
-
+	"sync/atomic"
+	
 	"github.com/justyntemme/clapgo/pkg/api"
-	"github.com/justyntemme/clapgo/pkg/registry"
 )
 
-// TODO: This example needs to be updated to fully use the new API interfaces.
-// Currently, it's only partially updated to allow compilation.
-
-// Export Go plugin functionality
-var (
-	gainPlugin *GainPlugin
-)
-
-func init() {
-	// Register our gain plugin with GUI support
-	info := api.PluginInfo{
-		ID:          "com.clapgo.gain-gui",
-		Name:        "Gain with GUI",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A gain plugin with GUI support using ClapGo",
-		Features:    []string{"audio-effect", "stereo", "mono", "gui"},
-	}
+// Plugin constants for the gain with GUI plugin
+const (
+	// PluginID is the unique identifier for this plugin
+	PluginID = "com.clapgo.gain-gui"
 	
-	gainPlugin = NewGainPlugin()
-	registry.Register(info, func() api.Plugin { return gainPlugin })
-}
+	// PluginName is the human-readable name for this plugin
+	PluginName = "Gain with GUI"
+	
+	// PluginVendor is the name of the plugin vendor
+	PluginVendor = "ClapGo"
+	
+	// PluginVersion is the version of the plugin
+	PluginVersion = "1.0.0"
+	
+	// PluginDescription is a short description of the plugin
+	PluginDescription = "A gain plugin with GUI support using ClapGo"
+)
 
-//export GainGetPluginCount
-func GainGetPluginCount() C.uint32_t {
-	return 1
-}
-
-// GainPlugin implements a simple gain plugin with GUI support
-type GainPlugin struct {
-	// Plugin state
-	gain         float64
+// SimpleGainGUIPlugin implements the simplified Plugin interface with GUI support
+type SimpleGainGUIPlugin struct {
+	gain         int64 // Using int64 for atomic operations (stores float64 bits)
 	sampleRate   float64
-	isActivated  bool
-	isProcessing bool
-	paramInfo    api.ParamInfo
-	host         unsafe.Pointer
-	
-	// GUI-related fields
 	hasGUI       bool
 	guiVisible   bool
 	guiCreated   bool
 }
 
-// NewGainPlugin creates a new gain plugin
-func NewGainPlugin() *GainPlugin {
-	plugin := &GainPlugin{
-		gain:         1.0, // 0dB
-		sampleRate:   44100.0,
-		isActivated:  false,
-		isProcessing: false,
-		hasGUI:       true,
+// NewSimpleGainGUIPlugin creates a new simplified gain plugin with GUI
+func NewSimpleGainGUIPlugin() *SimpleGainGUIPlugin {
+	plugin := &SimpleGainGUIPlugin{
+		sampleRate: 44100.0,
+		hasGUI:     true,
 	}
-	
-	// Set up parameter info
-	plugin.paramInfo = api.ParamInfo{
-		ID:           1,
-		Name:         "Gain",
-		Module:       "",
-		MinValue:     0.0,  // -inf dB
-		MaxValue:     2.0,  // +6 dB
-		DefaultValue: 1.0,  // 0 dB
-		Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
-	}
-	
+	// Set default gain to 1.0 (0dB)
+	atomic.StoreInt64(&plugin.gain, int64(math.Float64bits(1.0)))
 	return plugin
 }
 
-// Init initializes the plugin
-func (p *GainPlugin) Init() bool {
-	return true
-}
-
-// Destroy cleans up plugin resources
-func (p *GainPlugin) Destroy() {
-	// Nothing to clean up
-}
-
-// Activate prepares the plugin for processing
-func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
-	p.sampleRate = sampleRate
-	p.isActivated = true
-	return true
-}
-
-// Deactivate stops the plugin from processing
-func (p *GainPlugin) Deactivate() {
-	p.isActivated = false
-}
-
-// StartProcessing begins audio processing
-func (p *GainPlugin) StartProcessing() bool {
-	if !p.isActivated {
-		return false
+// GetInfo returns plugin metadata
+func (p *SimpleGainGUIPlugin) GetInfo() api.PluginInfo {
+	return api.PluginInfo{
+		ID:          PluginID,
+		Name:        PluginName,
+		Vendor:      PluginVendor,
+		URL:         "https://github.com/justyntemme/clapgo",
+		ManualURL:   "https://github.com/justyntemme/clapgo",
+		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
+		Version:     PluginVersion,
+		Description: PluginDescription,
+		Features:    []string{"audio-effect", "stereo", "mono", "gui"},
 	}
-	p.isProcessing = true
-	return true
 }
 
-// StopProcessing ends audio processing
-func (p *GainPlugin) StopProcessing() {
-	p.isProcessing = false
-}
-
-// Reset resets the plugin state
-func (p *GainPlugin) Reset() {
-	p.gain = 1.0
-}
-
-// Process processes audio data
-func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
-	// Check if we're in a valid state for processing
-	if !p.isActivated || !p.isProcessing {
-		return api.ProcessError
-	}
-	
-	// Process parameter changes from events
-	if events != nil {
-		eventCount := events.GetInputEventCount()
-		
-		for i := uint32(0); i < eventCount; i++ {
-			event := events.GetInputEvent(i)
-			if event == nil {
-				continue
-			}
-			
-			// Handle parameter changes
-			if event.Type == api.EventTypeParamValue {
-				paramEvent, ok := event.Data.(api.ParamEvent)
-				if ok && paramEvent.ParamID == 1 { // Gain parameter
-					p.gain = paramEvent.Value
-				}
-			}
-		}
-	}
+// ProcessAudio processes audio with Go-native types
+func (p *SimpleGainGUIPlugin) ProcessAudio(input, output [][]float32, frameCount uint32) error {
+	// Get current gain value atomically
+	gainBits := atomic.LoadInt64(&p.gain)
+	gain := float32(math.Float64frombits(uint64(gainBits)))
 	
 	// If no audio inputs or outputs, nothing to do
-	if len(audioIn) == 0 || len(audioOut) == 0 {
-		return api.ProcessContinue
+	if len(input) == 0 || len(output) == 0 {
+		return nil
 	}
 	
 	// Get the number of channels (use min of input and output)
-	numChannels := len(audioIn)
-	if len(audioOut) < numChannels {
-		numChannels = len(audioOut)
+	numChannels := len(input)
+	if len(output) < numChannels {
+		numChannels = len(output)
 	}
 	
 	// Process audio - apply gain to each sample
 	for ch := 0; ch < numChannels; ch++ {
-		inChannel := audioIn[ch]
-		outChannel := audioOut[ch]
+		inChannel := input[ch]
+		outChannel := output[ch]
 		
 		// Make sure we have enough buffer space
-		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			return api.ProcessError
+		if len(inChannel) < int(frameCount) || len(outChannel) < int(frameCount) {
+			continue // Skip this channel if buffer is too small
 		}
 		
 		// Apply gain to each sample
-		for i := uint32(0); i < framesCount; i++ {
-			outChannel[i] = inChannel[i] * float32(p.gain)
+		for i := uint32(0); i < frameCount; i++ {
+			outChannel[i] = inChannel[i] * gain
 		}
 	}
 	
-	// Check if the output is silent
-	isSilent := p.gain < 0.0001 // -80dB
-	
-	if isSilent {
-		return api.ProcessSleep
-	}
-	
-	return api.ProcessContinue
-}
-
-// GetExtension gets a plugin extension
-func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	// Check for parameter extension
-	if id == api.ExtParams {
-		return nil // Not implemented in this simplified version
-	}
-	
-	// Check for state extension
-	if id == api.ExtState {
-		return nil // Not implemented in this simplified version
-	}
-	
-	// GUI extensions are handled via the gui_bridge.cpp
 	return nil
 }
 
+// GetParameterInfo returns information about a parameter
+func (p *SimpleGainGUIPlugin) GetParameterInfo(paramID uint32) (api.ParamInfo, error) {
+	if paramID == 0 {
+		return api.ParamInfo{
+			ID:           0,
+			Name:         "Gain",
+			Module:       "",
+			MinValue:     0.0,  // -inf dB
+			MaxValue:     2.0,  // +6 dB
+			DefaultValue: 1.0,  // 0 dB
+			Flags:        api.ParamIsAutomatable | api.ParamIsBoundedBelow | api.ParamIsBoundedAbove,
+		}, nil
+	}
+	return api.ParamInfo{}, api.ErrInvalidParam
+}
+
+// GetParameterValue returns the current value of a parameter
+func (p *SimpleGainGUIPlugin) GetParameterValue(paramID uint32) float64 {
+	if paramID == 0 {
+		gainBits := atomic.LoadInt64(&p.gain)
+		return math.Float64frombits(uint64(gainBits))
+	}
+	return 0.0
+}
+
+// SetParameterValue sets the value of a parameter
+func (p *SimpleGainGUIPlugin) SetParameterValue(paramID uint32, value float64) error {
+	if paramID == 0 {
+		// Clamp value to valid range
+		if value < 0.0 {
+			value = 0.0
+		}
+		if value > 2.0 {
+			value = 2.0
+		}
+		atomic.StoreInt64(&p.gain, int64(math.Float64bits(value)))
+		return nil
+	}
+	return api.ErrInvalidParam
+}
+
+// Initialize prepares the plugin for use
+func (p *SimpleGainGUIPlugin) Initialize(sampleRate float64) error {
+	p.sampleRate = sampleRate
+	return nil
+}
+
+// Activate prepares the plugin for processing
+func (p *SimpleGainGUIPlugin) Activate() error {
+	return nil
+}
+
+// Deactivate stops the plugin from processing
+func (p *SimpleGainGUIPlugin) Deactivate() {
+	// Nothing to do
+}
+
+// Destroy cleans up plugin resources
+func (p *SimpleGainGUIPlugin) Destroy() {
+	// Nothing to clean up
+}
+
+// GUI-related methods (these would need to be integrated with the wrapper system)
+
 // HasGUI returns true if the plugin has a GUI
-func (p *GainPlugin) HasGUI() bool {
+func (p *SimpleGainGUIPlugin) HasGUI() bool {
 	return p.hasGUI
 }
 
 // GetPreferredGUIAPI returns the preferred GUI API
-func (p *GainPlugin) GetPreferredGUIAPI() (api string, isFloating bool) {
+func (p *SimpleGainGUIPlugin) GetPreferredGUIAPI() (apiName string, isFloating bool) {
 	// Default to X11 on Linux, adjust based on OS
 	return api.WindowAPIX11, false
 }
 
 // OnGUICreated is called when the GUI is created
-func (p *GainPlugin) OnGUICreated() {
+func (p *SimpleGainGUIPlugin) OnGUICreated() {
 	p.guiCreated = true
 	fmt.Println("Go: GUI created")
 }
 
 // OnGUIDestroyed is called when the GUI is destroyed
-func (p *GainPlugin) OnGUIDestroyed() {
+func (p *SimpleGainGUIPlugin) OnGUIDestroyed() {
 	p.guiCreated = false
 	p.guiVisible = false
 	fmt.Println("Go: GUI destroyed")
 }
 
 // OnGUIShown is called when the GUI is shown
-func (p *GainPlugin) OnGUIShown() {
+func (p *SimpleGainGUIPlugin) OnGUIShown() {
 	p.guiVisible = true
 	fmt.Println("Go: GUI shown")
 }
 
 // OnGUIHidden is called when the GUI is hidden
-func (p *GainPlugin) OnGUIHidden() {
+func (p *SimpleGainGUIPlugin) OnGUIHidden() {
 	p.guiVisible = false
 	fmt.Println("Go: GUI hidden")
 }
 
 // GetGUISize returns the default GUI size
-func (p *GainPlugin) GetGUISize() (width, height uint32) {
+func (p *SimpleGainGUIPlugin) GetGUISize() (width, height uint32) {
 	return 400, 300
-}
-
-// OnMainThread is called on the main thread
-func (p *GainPlugin) OnMainThread() {
-	// Nothing to do
-}
-
-// GetPluginInfo returns information about the plugin
-func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
-	return api.PluginInfo{
-		ID:          "com.clapgo.gain-gui",
-		Name:        "Gain with GUI",
-		Vendor:      "ClapGo",
-		URL:         "https://github.com/justyntemme/clapgo",
-		ManualURL:   "https://github.com/justyntemme/clapgo",
-		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
-		Version:     "1.0.0",
-		Description: "A gain plugin with GUI support using ClapGo",
-		Features:    []string{"audio-effect", "stereo", "mono", "gui"},
-	}
-}
-
-// SaveState returns custom state data for the plugin
-func (p *GainPlugin) SaveState() map[string]interface{} {
-	// Save any additional state beyond parameters
-	return map[string]interface{}{
-		"plugin_version": "1.0.0",
-		"last_gain":      p.gain,
-		"gui_visible":    p.guiVisible,
-		"gui_created":    p.guiCreated,
-	}
-}
-
-// LoadState loads custom state data for the plugin
-func (p *GainPlugin) LoadState(data map[string]interface{}) {
-	// Load any additional state beyond parameters
-	if lastGain, ok := data["last_gain"].(float64); ok {
-		p.gain = lastGain
-	}
-	
-	if guiVisible, ok := data["gui_visible"].(bool); ok {
-		p.guiVisible = guiVisible
-	}
-	
-	if guiCreated, ok := data["gui_created"].(bool); ok {
-		p.guiCreated = guiCreated
-	}
-}
-
-// GetPluginID returns the plugin ID
-func (p *GainPlugin) GetPluginID() string {
-	return "com.clapgo.gain-gui"
-}
-
-// Convert linear gain to dB
-func linearToDb(linear float64) float64 {
-	if linear <= 0.0 {
-		return -math.MaxFloat64
-	}
-	return 20.0 * math.Log10(linear)
-}
-
-// Convert dB to linear gain
-func dbToLinear(db float64) float64 {
-	return math.Pow(10.0, db/20.0)
 }
 
 func main() {

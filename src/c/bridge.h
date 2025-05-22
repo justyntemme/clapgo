@@ -105,7 +105,7 @@ void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin);
 
 // Audio ports extension implementation
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input);
-bool clapgo_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info);
+bool clapgo_audio_ports_info(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info);
 
 // Function pointer types for other Go exports
 
