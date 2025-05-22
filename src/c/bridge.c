@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>    // For log10() and pow()
 #include <libgen.h>  // For dirname()
 #include <unistd.h>  // For access()
 
@@ -29,6 +30,14 @@ extern void ClapGo_PluginReset(void* plugin);
 extern int32_t ClapGo_PluginProcess(void* plugin, void* process);
 extern void* ClapGo_PluginGetExtension(void* plugin, char* id);
 extern void ClapGo_PluginOnMainThread(void* plugin);
+
+// Parameter-related Go functions
+extern uint32_t ClapGo_PluginParamsCount(void* plugin);
+extern bool ClapGo_PluginParamsGetInfo(void* plugin, uint32_t index, void* info);
+extern bool ClapGo_PluginParamsGetValue(void* plugin, uint32_t param_id, double* value);
+extern bool ClapGo_PluginParamsValueToText(void* plugin, uint32_t param_id, double value, char* buffer, uint32_t size);
+extern bool ClapGo_PluginParamsTextToValue(void* plugin, uint32_t param_id, char* text, double* value);
+extern void ClapGo_PluginParamsFlush(void* plugin, void* in_events, void* out_events);
 
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
@@ -429,6 +438,24 @@ static const clap_plugin_audio_ports_t s_audio_ports_extension = {
     .get = clapgo_audio_ports_info
 };
 
+// Forward declarations for params extension
+static uint32_t clapgo_params_count(const clap_plugin_t* plugin);
+static bool clapgo_params_get_info(const clap_plugin_t* plugin, uint32_t param_index, clap_param_info_t* param_info);
+static bool clapgo_params_get_value(const clap_plugin_t* plugin, clap_id param_id, double* out_value);
+static bool clapgo_params_value_to_text(const clap_plugin_t* plugin, clap_id param_id, double value, char* out_buffer, uint32_t out_buffer_capacity);
+static bool clapgo_params_text_to_value(const clap_plugin_t* plugin, clap_id param_id, const char* param_value_text, double* out_value);
+static void clapgo_params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in, const clap_output_events_t* out);
+
+// Params extension implementation - GUARDRAILS compliant (full implementation)
+static const clap_plugin_params_t s_params_extension = {
+    .count = clapgo_params_count,
+    .get_info = clapgo_params_get_info,
+    .get_value = clapgo_params_get_value,
+    .value_to_text = clapgo_params_value_to_text,
+    .text_to_value = clapgo_params_text_to_value,
+    .flush = clapgo_params_flush
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -470,8 +497,8 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     
     // Check if this is the params extension
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) {
-        printf("DEBUG: params extension requested - not yet supported\n");
-        return NULL;
+        printf("DEBUG: params extension requested, returning implementation\n");
+        return &s_params_extension;
     }
     
     // Check if this is the state extension
@@ -502,4 +529,72 @@ void clapgo_plugin_on_main_thread(const clap_plugin_t* plugin) {
     
     // Call into Go code to handle main thread tasks
     ClapGo_PluginOnMainThread(data->go_instance);
+}
+
+// Params extension implementation
+
+// Get the number of parameters
+static uint32_t clapgo_params_count(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Call into Go to get parameter count
+    return ClapGo_PluginParamsCount(data->go_instance);
+}
+
+// Get parameter info
+static bool clapgo_params_get_info(const clap_plugin_t* plugin, uint32_t param_index, clap_param_info_t* param_info) {
+    if (!plugin || !param_info) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to get parameter info
+    return ClapGo_PluginParamsGetInfo(data->go_instance, param_index, param_info);
+}
+
+// Get parameter value
+static bool clapgo_params_get_value(const clap_plugin_t* plugin, clap_id param_id, double* out_value) {
+    if (!plugin || !out_value) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to get parameter value
+    return ClapGo_PluginParamsGetValue(data->go_instance, param_id, out_value);
+}
+
+// Convert parameter value to text
+static bool clapgo_params_value_to_text(const clap_plugin_t* plugin, clap_id param_id, double value, char* out_buffer, uint32_t out_buffer_capacity) {
+    if (!plugin || !out_buffer || out_buffer_capacity == 0) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to convert value to text
+    return ClapGo_PluginParamsValueToText(data->go_instance, param_id, value, out_buffer, out_buffer_capacity);
+}
+
+// Convert text to parameter value
+static bool clapgo_params_text_to_value(const clap_plugin_t* plugin, clap_id param_id, const char* param_value_text, double* out_value) {
+    if (!plugin || !param_value_text || !out_value) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Call into Go to convert text to value
+    return ClapGo_PluginParamsTextToValue(data->go_instance, param_id, (char*)param_value_text, out_value);
+}
+
+// Flush parameter changes
+static void clapgo_params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in, const clap_output_events_t* out) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Call into Go to handle flush
+    ClapGo_PluginParamsFlush(data->go_instance, (void*)in, (void*)out);
 }

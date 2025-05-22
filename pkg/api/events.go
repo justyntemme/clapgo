@@ -111,6 +111,11 @@ func convertCEventToGo(cEventHeader *C.clap_event_header_t) *Event {
 		return nil
 	}
 	
+	// Only process events from the core namespace (0)
+	if cEventHeader.space_id != 0 {
+		return nil
+	}
+	
 	event := &Event{
 		Time: uint32(cEventHeader.time),
 		Type: int(cEventHeader._type),
@@ -200,6 +205,7 @@ func convertGoEventToC(event *Event) *C.clap_event_header_t {
 			
 			cEvent.header.size = C.sizeof_clap_event_param_value_t
 			cEvent.header.time = C.uint32_t(event.Time)
+			cEvent.header.space_id = 0 // CLAP_CORE_EVENT_SPACE_ID
 			cEvent.header._type = C.uint16_t(EventTypeParamValue)
 			cEvent.header.flags = 0
 			
@@ -223,6 +229,7 @@ func convertGoEventToC(event *Event) *C.clap_event_header_t {
 			
 			cEvent.header.size = C.sizeof_clap_event_note_t
 			cEvent.header.time = C.uint32_t(event.Time)
+			cEvent.header.space_id = 0 // CLAP_CORE_EVENT_SPACE_ID
 			cEvent.header._type = C.uint16_t(event.Type)
 			cEvent.header.flags = 0
 			

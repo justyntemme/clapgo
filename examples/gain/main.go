@@ -21,6 +21,7 @@ package main
 import "C"
 import (
 	"fmt"
+	"math"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"runtime/cgo"
 	"sync/atomic"
@@ -209,6 +210,146 @@ func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	p.OnMainThread()
 }
 
+//export ClapGo_PluginParamsCount
+func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.uint32_t(p.paramManager.GetParameterCount())
+}
+
+//export ClapGo_PluginParamsGetInfo
+func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info unsafe.Pointer) C.bool {
+	if plugin == nil || info == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Get parameter info from manager
+	paramInfo, err := p.paramManager.GetParameterInfoByIndex(uint32(index))
+	if err != nil {
+		return C.bool(false)
+	}
+	
+	// Convert to C struct
+	cInfo := (*C.clap_param_info_t)(info)
+	cInfo.id = C.clap_id(paramInfo.ID)
+	cInfo.flags = C.CLAP_PARAM_IS_AUTOMATABLE | C.CLAP_PARAM_IS_MODULATABLE
+	cInfo.cookie = nil
+	
+	// Copy name
+	nameBytes := []byte(paramInfo.Name)
+	if len(nameBytes) >= C.CLAP_NAME_SIZE {
+		nameBytes = nameBytes[:C.CLAP_NAME_SIZE-1]
+	}
+	for i, b := range nameBytes {
+		cInfo.name[i] = C.char(b)
+	}
+	cInfo.name[len(nameBytes)] = 0
+	
+	// Clear module path
+	cInfo.module[0] = 0
+	
+	// Set range
+	cInfo.min_value = C.double(paramInfo.MinValue)
+	cInfo.max_value = C.double(paramInfo.MaxValue)
+	cInfo.default_value = C.double(paramInfo.DefaultValue)
+	
+	return C.bool(true)
+}
+
+//export ClapGo_PluginParamsGetValue
+func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, value *C.double) C.bool {
+	if plugin == nil || value == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Get current value - read atomically from our gain storage
+	if uint32(paramID) == 0 {
+		gainBits := atomic.LoadInt64(&p.gain)
+		*value = C.double(floatFromBits(uint64(gainBits)))
+		return C.bool(true)
+	}
+	
+	return C.bool(false)
+}
+
+//export ClapGo_PluginParamsValueToText
+func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
+	if plugin == nil || buffer == nil || size == 0 {
+		return C.bool(false)
+	}
+	// For gain parameter, format as dB
+	if uint32(paramID) == 0 {
+		db := 20.0 * math.Log10(float64(value))
+		text := fmt.Sprintf("%.1f dB", db)
+		
+		// Copy to C buffer
+		textBytes := []byte(text)
+		maxLen := int(size) - 1
+		if len(textBytes) > maxLen {
+			textBytes = textBytes[:maxLen]
+		}
+		
+		cBuffer := (*[1 << 30]C.char)(unsafe.Pointer(buffer))
+		for i, b := range textBytes {
+			cBuffer[i] = C.char(b)
+		}
+		cBuffer[len(textBytes)] = 0
+		
+		return C.bool(true)
+	}
+	
+	return C.bool(false)
+}
+
+//export ClapGo_PluginParamsTextToValue
+func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, text *C.char, value *C.double) C.bool {
+	if plugin == nil || text == nil || value == nil {
+		return C.bool(false)
+	}
+	// Convert text to Go string
+	goText := C.GoString(text)
+	
+	// For gain parameter, parse dB value
+	if uint32(paramID) == 0 {
+		var db float64
+		if _, err := fmt.Sscanf(goText, "%f", &db); err == nil {
+			// Convert from dB to linear
+			linear := math.Pow(10.0, db/20.0)
+			
+			// Clamp to valid range
+			if linear < 0.0 {
+				linear = 0.0
+			}
+			if linear > 2.0 {
+				linear = 2.0
+			}
+			
+			*value = C.double(linear)
+			return C.bool(true)
+		}
+	}
+	
+	return C.bool(false)
+}
+
+//export ClapGo_PluginParamsFlush
+func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, outEvents unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Process events using our abstraction
+	if inEvents != nil {
+		eventHandler := api.NewEventProcessor(inEvents, outEvents)
+		p.processEvents(eventHandler, 0)
+	}
+}
+
 // GainPlugin represents the gain plugin with atomic parameter storage
 type GainPlugin struct {
 	// Plugin state
@@ -238,6 +379,7 @@ func NewGainPlugin() *GainPlugin {
 	
 	// Register parameters using our new abstraction
 	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(0, "Gain", 0.0, 2.0, 1.0))
+	plugin.paramManager.SetParameterValue(0, 1.0)
 	
 	return plugin
 }
