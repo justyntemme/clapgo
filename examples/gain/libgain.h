@@ -112,6 +112,14 @@ extern void ClapGo_PluginReset(void* plugin);
 extern int32_t ClapGo_PluginProcess(void* plugin, void* process);
 extern void* ClapGo_PluginGetExtension(void* plugin, char* id);
 extern void ClapGo_PluginOnMainThread(void* plugin);
+extern uint32_t ClapGo_PluginParamsCount(void* plugin);
+extern _Bool ClapGo_PluginParamsGetInfo(void* plugin, uint32_t index, void* info);
+extern _Bool ClapGo_PluginParamsGetValue(void* plugin, uint32_t paramID, double* value);
+extern _Bool ClapGo_PluginParamsValueToText(void* plugin, uint32_t paramID, double value, char* buffer, uint32_t size);
+extern _Bool ClapGo_PluginParamsTextToValue(void* plugin, uint32_t paramID, char* text, double* value);
+extern void ClapGo_PluginParamsFlush(void* plugin, void* inEvents, void* outEvents);
+extern _Bool ClapGo_PluginStateSave(void* plugin, void* stream);
+extern _Bool ClapGo_PluginStateLoad(void* plugin, void* stream);
 
 #ifdef __cplusplus
 }

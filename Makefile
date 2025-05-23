@@ -251,6 +251,72 @@ help:
 	@echo "  make test         - Test plugins"
 	@echo "  make help         - Display this help"
 	@echo ""
+	@echo "Code Generation:"
+	@echo "  make new-plugin                  - Interactive plugin creation wizard"
+	@echo "  make generate-plugin NAME=<name> ID=<id> [TYPE=<type>] - Generate new plugin (one-time)"
+	@echo "  make build-plugin NAME=<name>    - Build a generated plugin (preserves edits)"
+	@echo "  make validate-plugin NAME=<name> - Validate a plugin with clap-validator"
+	@echo ""
+	@echo "Note: Code generation only happens once during plugin creation."
+	@echo "      Subsequent builds preserve developer modifications."
+	@echo ""
 	@echo "Options:"
 	@echo "  DEBUG=1           - Build with debug symbols and no optimization"
 	@echo "  INSTALL_DIR=path  - Install to a custom directory"
+	@echo "  TYPE=<type>       - Plugin type (audio-effect, instrument, note-effect, etc.)"
+
+# Build clapgo-generate tool
+build-generator:
+	@echo "Building clapgo-generate tool..."
+	@$(GO) build -o bin/clapgo-generate ./cmd/generate-manifest/
+
+# Create a new plugin from template (interactive)
+new-plugin: build-generator
+	@./bin/clapgo-generate -interactive
+
+# Create a new plugin from template (command-line)
+generate-plugin: build-generator
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME is required. Usage: make generate-plugin NAME=my-plugin TYPE=audio-effect ID=com.example.myplugin"; \
+		exit 1; \
+	fi
+	@if [ -z "$(ID)" ]; then \
+		echo "Error: ID is required. Usage: make generate-plugin NAME=my-plugin TYPE=audio-effect ID=com.example.myplugin"; \
+		exit 1; \
+	fi
+	@TYPE=$${TYPE:-audio-effect}; \
+	mkdir -p plugins/$(NAME) && \
+	./bin/clapgo-generate -type=$$TYPE -id=$(ID) -name="$(NAME)" -output-dir=plugins/$(NAME) -generate=true && \
+	cd plugins/$(NAME) && go generate
+	@echo "Plugin created at plugins/$(NAME)"
+	@echo "Run 'make build-plugin NAME=$(NAME)' to build"
+
+# Build a specific plugin
+build-plugin:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME is required. Usage: make build-plugin NAME=my-plugin"; \
+		exit 1; \
+	fi
+	@echo "Building $(NAME) plugin..."
+	@cd plugins/$(NAME) && \
+	go build -buildmode=c-shared -ldflags="-s -w" -o lib$(NAME).so .
+	@echo "Linking with C bridge..."
+	@gcc -shared -o plugins/$(NAME)/$(NAME).clap \
+		-I./include/clap/include \
+		-fPIC \
+		plugins/$(NAME)/lib$(NAME).so \
+		src/c/bridge.c src/c/manifest.c src/c/plugin.c \
+		-lm -ldl -ljson-c
+	@echo "Plugin built: plugins/$(NAME)/$(NAME).clap"
+
+# Validate a plugin
+validate-plugin:
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME is required. Usage: make validate-plugin NAME=my-plugin"; \
+		exit 1; \
+	fi
+	@if command -v clap-validator >/dev/null 2>&1; then \
+		clap-validator validate plugins/$(NAME)/$(NAME).clap; \
+	else \
+		echo "Warning: clap-validator not found. Please install it to validate plugins."; \
+	fi

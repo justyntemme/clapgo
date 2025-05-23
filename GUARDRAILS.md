@@ -210,6 +210,26 @@ Before implementing any feature, verify:
 - [ ] **Thread-safe parameter management** - uses `ParameterManager`
 - [ ] **Complete error handling** - no silent failures or undefined behavior
 
+### 5. POC Development Practices
+**❌ FORBIDDEN:**
+```go
+// NEVER keep old code when making breaking changes
+func (p *Plugin) OldMethod() { /* old implementation */ }
+func (p *Plugin) NewMethod() { /* new implementation */ }
+
+// NEVER create simplified examples to demo new features
+// examples/simple-plugin/  // Wrong - modify existing examples
+// examples/gain/          // Existing example to update
+```
+
+**✅ CORRECT APPROACH:**
+- Delete old code entirely when refactoring
+- Update existing examples to demonstrate new features
+- Make breaking changes without hesitation
+- Modify production examples rather than creating demos
+
+**WHY:** This is a POC/prototype. Clean breaks reveal the right architecture faster than maintaining compatibility.
+
 ## 🎯 Architecture Goals Reinforcement
 
 ### Primary Goal: C Bridge + Manifest System

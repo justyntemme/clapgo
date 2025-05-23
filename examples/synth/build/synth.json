@@ -1,20 +1,37 @@
 {
   "schemaVersion": "1.0",
   "plugin": {
-    "id": "com.clapgo.synth",
-    "name": "Simple Synth",
+    "id": "com.justyntemme.ClapGo.synth",
+    "name": "ClapGo Simple Synth",
     "vendor": "ClapGo",
     "version": "1.0.0",
-    "description": "A simple synthesizer using ClapGo",
+    "description": "",
     "url": "https://github.com/justyntemme/clapgo",
     "manualUrl": "https://github.com/justyntemme/clapgo",
     "supportUrl": "https://github.com/justyntemme/clapgo/issues",
-    "features": ["instrument", "synthesizer", "stereo"]
+    "features": [
+      "instrument",
+      "stereo",
+      "mono"
+    ]
   },
   "build": {
-    "dependencies": []
+    "goSharedLibrary": "libsynth.so",
+    "entryPoint": "CreatePlugin"
   },
   "extensions": [
+    {
+      "id": "clap.params",
+      "supported": true
+    },
+    {
+      "id": "clap.state",
+      "supported": true
+    },
+    {
+      "id": "clap.log",
+      "supported": true
+    },
     {
       "id": "clap.audio-ports",
       "supported": true
@@ -24,26 +41,16 @@
       "supported": true
     },
     {
-      "id": "clap.state",
-      "supported": false
-    }
-  ],
-  "parameters": [
-    {
-      "id": 1,
-      "name": "Volume",
-      "minValue": 0.0,
-      "maxValue": 1.0,
-      "defaultValue": 0.7,
-      "flags": ["automatable", "bounded-below", "bounded-above"]
+      "id": "clap.voice-info",
+      "supported": true
     },
     {
-      "id": 2,
-      "name": "Waveform",
-      "minValue": 0.0,
-      "maxValue": 2.0,
-      "defaultValue": 0.0,
-      "flags": ["automatable", "bounded-below", "bounded-above", "steppable"]
+      "id": "clap.tuning",
+      "supported": false
+    },
+    {
+      "id": "clap.note-name",
+      "supported": false
     }
   ]
 }
