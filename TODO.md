@@ -2,17 +2,69 @@
 
 This document outlines the implementation strategy for completing ClapGo's CLAP feature support, organized by priority and dependencies.
 
-## Phase 1: Core Event System (High Priority)
+## Lessons Learned from Phase 1-2 Implementation
+
+### Architecture Principles (MUST FOLLOW)
+
+1. **C Bridge Owns All Extensions**
+   - NEVER ask Go plugins if they support extensions via GetExtension
+   - Extension support determined at plugin load time by checking for exported functions
+   - Use weak symbols (`__attribute__((weak))`) for optional exports
+   - Set support flags in `go_plugin_data_t` during plugin creation
+
+2. **No Wrapper APIs or Simplifications**
+   - NEVER create wrapper types (e.g., NotePortInfoWrapper)
+   - Use existing CLAP structures directly
+   - Provide full CLAP interface, not simplified versions
+
+3. **Clean CGO Patterns**
+   - NEVER return Go pointers from GetExtension (causes CGO violations)
+   - NEVER use dummy pointers or hacks
+   - Use C static variables if non-nil indicators are needed
+
+4. **Extension Implementation Pattern**
+   ```c
+   // In C bridge
+   if (data->supports_extension) {
+       return &s_extension_implementation;
+   }
+   return NULL;
+   ```
+
+5. **Manifest-Driven Architecture**
+   - Extensions declared in manifest should match actual implementation
+   - No Go-side registration or discovery
+   - Plugin features determine behavior (e.g., "instrument" → note ports)
+
+### Common Mistakes to Avoid
+
+1. **Don't Mix Responsibility**
+   - C bridge: CLAP interface and extension discovery
+   - Go plugins: Implementation only, not interface decisions
+
+2. **Don't Create Placeholders**
+   - No TODO comments
+   - No "will implement later" stubs
+   - Either fully implement or explicitly don't support
+
+3. **Don't Worry About Compatibility**
+   - Make breaking changes freely
+   - Update all examples immediately
+   - This is a prototype - find the right architecture
+
+## Phase 1: Core Event System (COMPLETED)
 
 ### 1.1 Complete Event Type Support
-**Current State**: Only parameter value events implemented
-**Required Implementation**:
-- [ ] Note events (NOTE_ON, NOTE_OFF, NOTE_CHOKE, NOTE_END)
-- [ ] Note expression events (volume, pan, tuning, etc.)
-- [ ] Parameter modulation events
-- [ ] Parameter gesture events (begin/end)
-- [ ] Transport events
-- [ ] MIDI events (MIDI 1.0, SysEx, MIDI 2.0)
+**Current State**: All event types implemented
+**Completed Implementation**:
+- [x] Note events (NOTE_ON, NOTE_OFF, NOTE_CHOKE, NOTE_END)
+- [x] Note expression events (volume, pan, tuning, etc.)
+- [x] Parameter modulation events
+- [x] Parameter gesture events (begin/end)
+- [x] Transport events
+- [x] MIDI events (MIDI 1.0, SysEx, MIDI 2.0)
+- [x] Event conversion functions (C to Go, Go to C)
+- [x] TypedEventHandler interface with routing
 
 **Implementation Strategy**:
 1. Extend `pkg/api/events.go` with all event type definitions
@@ -22,45 +74,73 @@ This document outlines the implementation strategy for completing ClapGo's CLAP 
 5. Add event filtering and routing capabilities
 
 ### 1.2 Event Input/Output Handling
-**Required Implementation**:
-- [ ] Separate input/output event queues
-- [ ] Event sorting by timestamp
-- [ ] Event validation
+**Current State**: Basic implementation via EventProcessor
+**Completed Implementation**:
+- [x] Input event processing via ProcessAllEvents
+- [x] Output event handling via PushBackEvent
+- [x] Event type detection and routing
+
+**Still Needed** (Lower Priority):
+- [ ] Event sorting by timestamp validation
 - [ ] Event pool for allocation-free processing
+- [ ] Advanced event filtering
 
-**Implementation Strategy**:
-1. Modify `Audio` struct to include event queues
-2. Implement event iterator for input processing
-3. Add event output methods with proper ordering
-4. Create event pool with pre-allocated events
-
-## Phase 2: MIDI/Note Support (High Priority)
+## Phase 2: MIDI/Note Support (PARTIALLY COMPLETE)
 
 ### 2.1 Note Ports Extension
-**Current State**: Interface defined but not implemented
-**Required Implementation**:
-- [ ] Note port configuration
-- [ ] Preferred channel/port assignment
-- [ ] Per-port dialect (CLAP, MIDI, MIDI-MPE, MIDI2)
+**Current State**: Fully implemented with clean architecture
+**Completed Implementation**:
+- [x] Note ports callbacks in C bridge (weak symbols)
+- [x] `NotePortManager` in Go API
+- [x] Port configuration structs (NotePortInfo)
+- [x] Extension support detection at load time
+- [x] Clean separation: C owns interface, Go owns implementation
 
-**Implementation Strategy**:
-1. Implement note ports callbacks in C bridge
-2. Add `NotePortManager` in Go API
-3. Create port configuration structs
-4. Link with event system for proper routing
+**Key Learning**: C bridge determines extension support based on exported functions, not Go GetExtension calls
 
 ### 2.2 Note Processing
-**Required Implementation**:
-- [ ] Note allocation/voice management
-- [ ] Note ID tracking
-- [ ] Polyphonic parameter support
-- [ ] Note expression handling
+**Current State**: Basic implementation in synth example
+**Completed Implementation**:
+- [x] Note allocation/voice management (in synth example)
+- [x] Note ID tracking (voice allocation by note ID)
+- [x] Basic voice lifecycle (attack, decay, sustain, release)
 
-**Implementation Strategy**:
-1. Create `NoteManager` for voice allocation
-2. Add per-note parameter storage
-3. Implement note-to-voice mapping
-4. Support MPE and per-note modulation
+**Still Needed**:
+- [ ] Polyphonic parameter support (per-note modulation)
+- [ ] Note expression handling (MPE support)
+- [ ] Voice stealing algorithms
+- [ ] Per-voice parameter automation
+
+## Implementation Guidelines for Remaining Phases
+
+### For Each New Extension:
+
+1. **Add Weak Symbol Declarations in C Bridge**
+   ```c
+   __attribute__((weak)) return_type ClapGo_ExtensionFunction(params);
+   ```
+
+2. **Add Support Flag to go_plugin_data_t**
+   ```c
+   bool supports_extension_name;
+   ```
+
+3. **Check for Exports During Plugin Creation**
+   ```c
+   data->supports_extension = (ClapGo_ExtensionFunction != NULL);
+   ```
+
+4. **Return Extension from C Bridge Based on Flag**
+   ```c
+   if (data->supports_extension) {
+       return &s_extension_implementation;
+   }
+   return NULL;
+   ```
+
+5. **Go Plugin Only Exports Functions, Never Returns from GetExtension**
+   - GetExtension should always return nil
+   - C bridge handles all extension discovery
 
 ## Phase 3: Essential Extensions (High Priority)
 
@@ -311,11 +391,27 @@ This document outlines the implementation strategy for completing ClapGo's CLAP 
 - Zero allocations in audio path where possible
 - Clear documentation for each feature
 
-## Next Steps
+## Progress Summary
 
-1. Begin with Phase 1 (Event System) as it's foundational
-2. Implement Phase 2 (MIDI/Note) to enable instrument plugins  
-3. Continue with phases based on user feedback and needs
-4. Regularly test with real-world plugins and hosts
+### Completed
+- ✅ Phase 1: Core Event System (all event types, conversion, routing)
+- ✅ Phase 2.1: Note Ports Extension (clean architecture, proper separation)
+- ✅ Basic voice management and note processing in examples
+
+### In Progress
+- 🔄 Phase 2.2: Advanced note processing (MPE, per-voice parameters)
+
+### Key Architecture Decisions Made
+1. **C Bridge owns all extensions** - no Go-side discovery
+2. **Weak symbols for optional features** - graceful degradation
+3. **Extension support flags** - determined at load time
+4. **No wrapper types** - use CLAP structures directly
+5. **Clean CGO patterns** - no pointer violations
+
+### Next Steps
+1. Complete polyphonic parameter support for instruments
+2. Begin Phase 3: Essential Extensions (latency, tail, log, timer)
+3. Update all examples to demonstrate new features
+4. Continue following GUARDRAILS principles strictly
 
 This implementation strategy ensures ClapGo evolves from its current foundation into a complete CLAP plugin development solution while maintaining the architectural principles defined in GUARDRAILS.md.
