@@ -549,6 +549,18 @@ type Voice struct {
 	Phase        float64
 	IsActive     bool
 	ReleasePhase float64
+	
+	// Per-voice parameter values (for polyphonic modulation)
+	// These override the global values when non-zero
+	VolumeModulation   float64  // Additional volume modulation (0.0 = no change)
+	PitchBend         float64  // Pitch bend in semitones
+	Brightness        float64  // Filter/brightness modulation (0.0-1.0)
+	Pressure          float64  // Aftertouch/pressure value (0.0-1.0)
+	
+	// ADSR envelope state
+	EnvelopePhase     int      // 0=attack, 1=decay, 2=sustain, 3=release
+	EnvelopeValue     float64  // Current envelope value
+	EnvelopeTime      float64  // Time in current phase
 }
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
@@ -723,16 +735,40 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 		if voice != nil && voice.IsActive {
 			hasActiveVoices = true
 			
-			// Calculate frequency for this note
-			freq := noteToFrequency(int(voice.Key))
+			// Calculate frequency for this note with pitch bend
+			baseFreq := noteToFrequency(int(voice.Key))
+			// Apply pitch bend (in semitones)
+			freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
 			
 			// Generate audio for this voice
 			for j := uint32(0); j < framesCount; j++ {
 				// Get envelope value
 				env := p.getEnvelopeValue(voice, j, framesCount, attack, decay, sustain, release)
 				
-				// Generate sample
-				sample := generateSample(voice.Phase, freq, waveform) * env * voice.Velocity
+				// Generate sample with optional brightness filtering
+				sample := generateSample(voice.Phase, freq, waveform)
+				
+				// Apply brightness as a simple low-pass filter simulation
+				if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
+					// Simple brightness simulation (in real implementation, use proper filter)
+					sample *= (voice.Brightness * 0.7 + 0.3)
+				}
+				
+				// Apply envelope and velocity
+				sample *= env * voice.Velocity
+				
+				// Apply per-voice volume modulation
+				voiceVolume := 1.0 + voice.VolumeModulation
+				if voiceVolume < 0.0 {
+					voiceVolume = 0.0
+				}
+				sample *= voiceVolume
+				
+				// Apply pressure (aftertouch) as additional volume modulation
+				if voice.Pressure > 0.0 {
+					// Pressure affects volume (could also affect other parameters)
+					sample *= (1.0 + voice.Pressure * 0.3)
+				}
 				
 				// Apply master volume
 				sample *= volume
@@ -799,13 +835,28 @@ func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount ui
 			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
 				p.handleNoteOff(noteEvent, event.Time)
 			}
+		case api.EventTypeNoteChoke:
+			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
+				p.handleNoteChoke(noteEvent, event.Time)
+			}
+		case api.EventTypeNoteExpression:
+			if noteExprEvent, ok := event.Data.(api.NoteExpressionEvent); ok {
+				p.handleNoteExpression(noteExprEvent, event.Time)
+			}
 		}
 	}
 }
 
 // handleParameterChange processes a parameter change event
 func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
-	// Handle the parameter change based on its ID
+	// Check if this is a polyphonic parameter event (targets specific note)
+	if paramEvent.NoteID >= 0 || paramEvent.Key >= 0 {
+		// This is a polyphonic parameter change - apply to specific voice(s)
+		p.handlePolyphonicParameter(paramEvent)
+		return
+	}
+	
+	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
 		atomic.StoreInt64(&p.volume, int64(floatToBits(paramEvent.Value)))
@@ -825,6 +876,41 @@ func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 	case 6: // Release
 		atomic.StoreInt64(&p.release, int64(floatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+	}
+}
+
+// handlePolyphonicParameter processes polyphonic parameter changes
+func (p *SynthPlugin) handlePolyphonicParameter(paramEvent api.ParamValueEvent) {
+	// Find matching voices
+	for _, voice := range p.voices {
+		if voice == nil || !voice.IsActive {
+			continue
+		}
+		
+		// Match by note ID if specified
+		if paramEvent.NoteID >= 0 && voice.NoteID != paramEvent.NoteID {
+			continue
+		}
+		
+		// Match by key/channel if specified
+		if paramEvent.Key >= 0 && voice.Key != paramEvent.Key {
+			continue
+		}
+		if paramEvent.Channel >= 0 && voice.Channel != paramEvent.Channel {
+			continue
+		}
+		
+		// Apply parameter to this voice
+		switch paramEvent.ParamID {
+		case 1: // Volume modulation
+			voice.VolumeModulation = paramEvent.Value - 1.0 // Store as offset from 1.0
+		case 7: // Pitch bend (new parameter we'll add)
+			voice.PitchBend = paramEvent.Value * 2.0 - 1.0 // Convert 0-1 to -1 to +1 semitones
+		case 8: // Brightness (new parameter)
+			voice.Brightness = paramEvent.Value
+		case 9: // Pressure (new parameter)
+			voice.Pressure = paramEvent.Value
+		}
 	}
 }
 
@@ -890,6 +976,45 @@ func (p *SynthPlugin) handleNoteChoke(noteEvent api.NoteEvent, time uint32) {
 		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Immediately deactivate the voice
 			p.voices[i] = nil
+		}
+	}
+}
+
+// handleNoteExpression processes note expression events (MPE)
+func (p *SynthPlugin) handleNoteExpression(noteExprEvent api.NoteExpressionEvent, time uint32) {
+	// Find matching voices
+	for _, voice := range p.voices {
+		if voice == nil || !voice.IsActive {
+			continue
+		}
+		
+		// Match by note ID if specified
+		if noteExprEvent.NoteID >= 0 && voice.NoteID != noteExprEvent.NoteID {
+			continue
+		}
+		
+		// Match by key/channel if specified
+		if noteExprEvent.Key >= 0 && voice.Key != noteExprEvent.Key {
+			continue
+		}
+		if noteExprEvent.Channel >= 0 && voice.Channel != noteExprEvent.Channel {
+			continue
+		}
+		
+		// Apply expression to this voice
+		switch noteExprEvent.ExpressionID {
+		case api.NoteExpressionVolume:
+			voice.VolumeModulation = noteExprEvent.Value - 1.0 // Store as offset
+		case api.NoteExpressionPan:
+			// Could implement stereo panning here
+		case api.NoteExpressionTuning:
+			voice.PitchBend = noteExprEvent.Value // In semitones
+		case api.NoteExpressionVibrato:
+			// Could implement vibrato depth here
+		case api.NoteExpressionBrightness:
+			voice.Brightness = noteExprEvent.Value
+		case api.NoteExpressionPressure:
+			voice.Pressure = noteExprEvent.Value
 		}
 	}
 }
@@ -974,50 +1099,85 @@ func (p *SynthPlugin) findFreeVoice() int {
 		return bestIndex
 	}
 	
-	// Otherwise, just take the first slot (could implement smarter voice stealing)
-	return 0
+	// No voices in release, steal the quietest voice
+	quietestIdx := 0
+	quietestLevel := 1.0
+	
+	for i, voice := range p.voices {
+		if voice != nil && voice.IsActive {
+			// Consider envelope value and velocity
+			level := voice.EnvelopeValue * voice.Velocity
+			if level < quietestLevel {
+				quietestLevel = level
+				quietestIdx = i
+			}
+		}
+	}
+	
+	return quietestIdx
 }
 
 // getEnvelopeValue calculates the ADSR envelope value for a voice
 func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
+	// Time increment per sample
+	timeInc := 1.0 / p.sampleRate
+	
 	// If in release phase
 	if voice.ReleasePhase >= 0.0 {
 		// Update release phase
 		releaseSamples := release * p.sampleRate
+		if releaseSamples <= 0 {
+			releaseSamples = 1
+		}
 		voice.ReleasePhase += 1.0 / releaseSamples
 		
-		// Calculate release envelope (exponential decay)
-		return math.Pow(1.0 - voice.ReleasePhase, 2.0) * sustain
+		// Calculate release envelope (exponential decay from last envelope value)
+		if voice.ReleasePhase >= 1.0 {
+			voice.EnvelopeValue = 0.0
+		} else {
+			voice.EnvelopeValue = voice.EnvelopeValue * math.Pow(0.99, 1.0/releaseSamples)
+		}
+		return voice.EnvelopeValue
 	}
 	
+	// Update envelope time
+	voice.EnvelopeTime += timeInc
+	
 	// Attack phase
-	attackSamples := attack * p.sampleRate
-	if attackSamples <= 0 {
-		attackSamples = 1 // Prevent division by zero
+	if voice.EnvelopePhase == 0 {
+		if attack <= 0 {
+			voice.EnvelopeValue = 1.0
+			voice.EnvelopePhase = 1
+			voice.EnvelopeTime = 0
+		} else if voice.EnvelopeTime >= attack {
+			voice.EnvelopeValue = 1.0
+			voice.EnvelopePhase = 1
+			voice.EnvelopeTime = 0
+		} else {
+			voice.EnvelopeValue = voice.EnvelopeTime / attack
+		}
 	}
 	
 	// Decay phase
-	decaySamples := decay * p.sampleRate
-	if decaySamples <= 0 {
-		decaySamples = 1 // Prevent division by zero
-	}
-	
-	// Calculate elapsed time for this voice
-	elapsedSamples := sampleIndex // Simplified version
-	
-	// Attack phase
-	if elapsedSamples < uint32(attackSamples) {
-		return float64(elapsedSamples) / attackSamples
-	}
-	
-	// Decay phase
-	if elapsedSamples < uint32(attackSamples+decaySamples) {
-		decayProgress := float64(elapsedSamples-uint32(attackSamples)) / decaySamples
-		return 1.0 - decayProgress*(1.0-sustain)
+	if voice.EnvelopePhase == 1 {
+		if decay <= 0 {
+			voice.EnvelopeValue = sustain
+			voice.EnvelopePhase = 2
+		} else if voice.EnvelopeTime >= decay {
+			voice.EnvelopeValue = sustain
+			voice.EnvelopePhase = 2
+		} else {
+			decayProgress := voice.EnvelopeTime / decay
+			voice.EnvelopeValue = 1.0 - decayProgress*(1.0-sustain)
+		}
 	}
 	
 	// Sustain phase
-	return sustain
+	if voice.EnvelopePhase == 2 {
+		voice.EnvelopeValue = sustain
+	}
+	
+	return voice.EnvelopeValue
 }
 
 // generateSample generates a single sample based on the current waveform
