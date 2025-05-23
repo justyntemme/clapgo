@@ -64,17 +64,22 @@ const (
 	NoteExpressionPressure    = 6
 )
 
+// Event flags
+const (
+	EventIsLive      = 1 << 0  // Indicates a live user event (e.g., user turning a knob)
+	EventDontRecord  = 1 << 1  // Event should not be recorded (e.g., to avoid conflicts)
+)
+
 // Transport flags
 const (
-	TransportHasTransport     = 1 << 0
-	TransportHasTempo         = 1 << 1
-	TransportHasBeatsTime     = 1 << 2
-	TransportHasSecondsTime   = 1 << 3
-	TransportHasTimeSignature = 1 << 4
-	TransportIsPlaying        = 1 << 5
-	TransportIsRecording      = 1 << 6
-	TransportIsLooping        = 1 << 7
-	TransportIsWithinPreRoll  = 1 << 8
+	TransportHasTempo            = 1 << 0
+	TransportHasBeatsTimeline    = 1 << 1
+	TransportHasSecondsTimeline  = 1 << 2
+	TransportHasTimeSignature    = 1 << 3
+	TransportIsPlaying           = 1 << 4
+	TransportIsRecording         = 1 << 5
+	TransportIsLoopActive        = 1 << 6
+	TransportIsWithinPreRoll     = 1 << 7
 )
 
 // Note dialects

@@ -489,7 +489,7 @@ func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
 		// Handle parameter events using our abstraction
 		switch event.Type {
 		case api.EventTypeParamValue:
-			if paramEvent, ok := event.Data.(api.ParamEvent); ok {
+			if paramEvent, ok := event.Data.(api.ParamValueEvent); ok {
 				p.handleParameterChange(paramEvent)
 			}
 		}
@@ -497,7 +497,7 @@ func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
 }
 
 // handleParameterChange processes a parameter change event
-func (p *GainPlugin) handleParameterChange(paramEvent api.ParamEvent) {
+func (p *GainPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 	// Handle the parameter change based on its ID
 	switch paramEvent.ParamID {
 	case 0: // Gain parameter

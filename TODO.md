@@ -62,33 +62,9 @@ This document outlines the implementation strategy for completing ClapGo's CLAP 
 3. Implement note-to-voice mapping
 4. Support MPE and per-note modulation
 
-## Phase 3: GUI Support (High Priority)
+## Phase 3: Essential Extensions (High Priority)
 
-### 3.1 GUI Extension Implementation
-**Current State**: Interface defined, no implementation
-**Required Implementation**:
-- [ ] Window creation (embedded/floating)
-- [ ] Parent window handling
-- [ ] Resize negotiation
-- [ ] Platform-specific window integration
-
-**Implementation Strategy**:
-1. Implement GUI callbacks in C bridge
-2. Create platform abstraction layer
-3. Add Go-side GUI interface for plugins
-4. Integrate with common Go GUI libraries (optional)
-5. Handle thread safety for GUI operations
-
-### 3.2 Platform-Specific GUI
-**Required Implementation**:
-- [ ] Windows HWND handling
-- [ ] macOS NSView handling
-- [ ] Linux X11/Wayland handling
-- [ ] GUI scaling/HiDPI support
-
-## Phase 4: Essential Extensions (Medium Priority)
-
-### 4.1 Latency Extension
+### 3.1 Latency Extension
 **Required Implementation**:
 - [ ] Latency reporting callback
 - [ ] Dynamic latency changes
@@ -339,8 +315,7 @@ This document outlines the implementation strategy for completing ClapGo's CLAP 
 
 1. Begin with Phase 1 (Event System) as it's foundational
 2. Implement Phase 2 (MIDI/Note) to enable instrument plugins  
-3. Add Phase 3 (GUI) for user interaction
-4. Continue with phases based on user feedback and needs
-5. Regularly test with real-world plugins and hosts
+3. Continue with phases based on user feedback and needs
+4. Regularly test with real-world plugins and hosts
 
 This implementation strategy ensures ClapGo evolves from its current foundation into a complete CLAP plugin development solution while maintaining the architectural principles defined in GUARDRAILS.md.

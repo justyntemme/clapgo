@@ -3,7 +3,7 @@ package main
 // Plugin constants for the synth plugin
 const (
 	// PluginID is the unique identifier for this plugin
-	PluginID = "com.clapgo.synth"
+	PluginID = "com.justyntemme.ClapGo.synth"
 	
 	// PluginName is the human-readable name for this plugin
 	PluginName = "Simple Synth"

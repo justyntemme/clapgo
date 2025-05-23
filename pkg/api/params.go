@@ -184,7 +184,7 @@ func (pm *ParameterManager) notifyListeners(paramID uint32, oldValue, newValue f
 func (pm *ParameterManager) ProcessParameterEvents(events []Event) {
 	for _, event := range events {
 		if event.Type == EventTypeParamValue {
-			if paramEvent, ok := event.Data.(ParamEvent); ok {
+			if paramEvent, ok := event.Data.(ParamValueEvent); ok {
 				pm.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 			}
 		}

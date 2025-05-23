@@ -21,6 +21,7 @@ package main
 import "C"
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"math"
 	"os"
@@ -208,6 +209,337 @@ func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
 	p.OnMainThread()
 }
 
+//export ClapGo_PluginParamsCount
+func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.uint32_t(p.paramManager.GetParameterCount())
+}
+
+//export ClapGo_PluginParamsGetInfo
+func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info unsafe.Pointer) C.bool {
+	if plugin == nil || info == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Get parameter info from manager
+	paramInfo, err := p.paramManager.GetParameterInfoByIndex(uint32(index))
+	if err != nil {
+		return C.bool(false)
+	}
+	
+	// Convert to C struct
+	cInfo := (*C.clap_param_info_t)(info)
+	cInfo.id = C.clap_id(paramInfo.ID)
+	cInfo.flags = C.CLAP_PARAM_IS_AUTOMATABLE | C.CLAP_PARAM_IS_MODULATABLE
+	cInfo.cookie = nil
+	
+	// Copy name
+	nameBytes := []byte(paramInfo.Name)
+	if len(nameBytes) >= C.CLAP_NAME_SIZE {
+		nameBytes = nameBytes[:C.CLAP_NAME_SIZE-1]
+	}
+	for i, b := range nameBytes {
+		cInfo.name[i] = C.char(b)
+	}
+	cInfo.name[len(nameBytes)] = 0
+	
+	// Clear module path
+	cInfo.module[0] = 0
+	
+	// Set range
+	cInfo.min_value = C.double(paramInfo.MinValue)
+	cInfo.max_value = C.double(paramInfo.MaxValue)
+	cInfo.default_value = C.double(paramInfo.DefaultValue)
+	
+	return C.bool(true)
+}
+
+//export ClapGo_PluginParamsGetValue
+func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, value *C.double) C.bool {
+	if plugin == nil || value == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Get current value from parameter manager
+	val := p.paramManager.GetParameterValue(uint32(paramID))
+	*value = C.double(val)
+	
+	return C.bool(true)
+}
+
+//export ClapGo_PluginParamsValueToText
+func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
+	if plugin == nil || buffer == nil || size == 0 {
+		return C.bool(false)
+	}
+	// Format based on parameter type
+	var text string
+	switch uint32(paramID) {
+	case 1: // Volume
+		text = fmt.Sprintf("%.1f %%", float64(value) * 100.0)
+	case 2: // Waveform
+		switch int(math.Round(float64(value))) {
+		case 0:
+			text = "Sine"
+		case 1:
+			text = "Saw"
+		case 2:
+			text = "Square"
+		default:
+			text = "Unknown"
+		}
+	case 3, 4, 6: // Attack, Decay, Release
+		text = fmt.Sprintf("%.0f ms", float64(value) * 1000.0)
+	case 5: // Sustain
+		text = fmt.Sprintf("%.1f %%", float64(value) * 100.0)
+	default:
+		text = fmt.Sprintf("%.3f", float64(value))
+	}
+	
+	// Copy to C buffer
+	textBytes := []byte(text)
+	maxLen := int(size) - 1
+	if len(textBytes) > maxLen {
+		textBytes = textBytes[:maxLen]
+	}
+	
+	cBuffer := (*[1 << 30]C.char)(unsafe.Pointer(buffer))
+	for i, b := range textBytes {
+		cBuffer[i] = C.char(b)
+	}
+	cBuffer[len(textBytes)] = 0
+	
+	return C.bool(true)
+}
+
+//export ClapGo_PluginParamsTextToValue
+func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, text *C.char, value *C.double) C.bool {
+	if plugin == nil || text == nil || value == nil {
+		return C.bool(false)
+	}
+	// For now, just return false - proper implementation would parse the text
+	return C.bool(false)
+}
+
+//export ClapGo_PluginParamsFlush
+func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, outEvents unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Process events using our abstraction
+	if inEvents != nil {
+		eventHandler := api.NewEventProcessor(inEvents, outEvents)
+		p.processEventHandler(eventHandler, 0)
+	}
+}
+
+//export ClapGo_PluginStateSave
+func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	out := api.NewOutputStream(stream)
+	
+	// Write state version
+	if err := out.WriteUint32(1); err != nil {
+		return false
+	}
+	
+	// Write parameter count
+	paramCount := p.paramManager.GetParameterCount()
+	if err := out.WriteUint32(paramCount); err != nil {
+		return false
+	}
+	
+	// Write each parameter ID and value
+	for i := uint32(0); i < paramCount; i++ {
+		info, err := p.paramManager.GetParameterInfoByIndex(i)
+		if err != nil {
+			return false
+		}
+		
+		// Write parameter ID
+		if err := out.WriteUint32(info.ID); err != nil {
+			return false
+		}
+		
+		// Write parameter value
+		value := p.paramManager.GetParameterValue(info.ID)
+		if err := out.WriteFloat64(value); err != nil {
+			return false
+		}
+	}
+	
+	// Save custom state data
+	stateData := p.SaveState()
+	jsonData, err := json.Marshal(stateData)
+	if err != nil {
+		return false
+	}
+	
+	// Write JSON length and data
+	if err := out.WriteUint32(uint32(len(jsonData))); err != nil {
+		return false
+	}
+	if _, err := out.Write(jsonData); err != nil {
+		return false
+	}
+	
+	return C.bool(true)
+}
+
+//export ClapGo_PluginNotePortsCount
+func ClapGo_PluginNotePortsCount(plugin unsafe.Pointer, isInput C.bool) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Plugin implements note ports extension directly
+	npm := p.GetNotePortManager()
+	if npm == nil {
+		return 0
+	}
+	
+	if isInput {
+		return C.uint32_t(npm.GetInputPortCount())
+	}
+	return C.uint32_t(npm.GetOutputPortCount())
+}
+
+//export ClapGo_PluginNotePortsGet
+func ClapGo_PluginNotePortsGet(plugin unsafe.Pointer, index C.uint32_t, isInput C.bool, info unsafe.Pointer) C.bool {
+	if plugin == nil || info == nil {
+		return false
+	}
+	
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Plugin implements note ports extension directly
+	npm := p.GetNotePortManager()
+	
+	if npm == nil {
+		return false
+	}
+	
+	var portInfo *api.NotePortInfo
+	if isInput {
+		portInfo = npm.GetInputPort(uint32(index))
+	} else {
+		portInfo = npm.GetOutputPort(uint32(index))
+	}
+	
+	if portInfo == nil {
+		return false
+	}
+	
+	// Cast to C structure
+	cInfo := (*C.clap_note_port_info_t)(info)
+	
+	// Convert Go NotePortInfo to C structure
+	cInfo.id = C.uint32_t(portInfo.ID)
+	cInfo.supported_dialects = C.uint32_t(portInfo.SupportedDialects)
+	cInfo.preferred_dialect = C.uint32_t(portInfo.PreferredDialect)
+	
+	// Copy name with null termination
+	nameBytes := []byte(portInfo.Name)
+	if len(nameBytes) > 255 {
+		nameBytes = nameBytes[:255]
+	}
+	for i, b := range nameBytes {
+		cInfo.name[i] = C.char(b)
+	}
+	cInfo.name[len(nameBytes)] = 0
+	
+	return true
+}
+
+
+//export ClapGo_PluginStateLoad
+func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	in := api.NewInputStream(stream)
+	
+	// Read state version
+	version, err := in.ReadUint32()
+	if err != nil || version != 1 {
+		return false
+	}
+	
+	// Read parameter count
+	paramCount, err := in.ReadUint32()
+	if err != nil {
+		return false
+	}
+	
+	// Read each parameter ID and value
+	for i := uint32(0); i < paramCount; i++ {
+		// Read parameter ID
+		paramID, err := in.ReadUint32()
+		if err != nil {
+			return false
+		}
+		
+		// Read parameter value
+		value, err := in.ReadFloat64()
+		if err != nil {
+			return false
+		}
+		
+		// Set parameter value
+		p.paramManager.SetParameterValue(paramID, value)
+		
+		// Update internal state
+		switch paramID {
+		case 1: // Volume
+			atomic.StoreInt64(&p.volume, int64(floatToBits(value)))
+		case 2: // Waveform
+			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
+		case 3: // Attack
+			atomic.StoreInt64(&p.attack, int64(floatToBits(value)))
+		case 4: // Decay
+			atomic.StoreInt64(&p.decay, int64(floatToBits(value)))
+		case 5: // Sustain
+			atomic.StoreInt64(&p.sustain, int64(floatToBits(value)))
+		case 6: // Release
+			atomic.StoreInt64(&p.release, int64(floatToBits(value)))
+		}
+	}
+	
+	// Read custom state data
+	jsonLength, err := in.ReadUint32()
+	if err != nil {
+		return false
+	}
+	
+	if jsonLength > 0 {
+		jsonData := make([]byte, jsonLength)
+		if _, err := in.Read(jsonData); err != nil {
+			return false
+		}
+		
+		var stateData map[string]interface{}
+		if err := json.Unmarshal(jsonData, &stateData); err == nil {
+			p.LoadState(stateData)
+		}
+	}
+	
+	return C.bool(true)
+}
+
 // Voice represents a single active note
 type Voice struct {
 	NoteID       int32
@@ -241,6 +573,9 @@ type SynthPlugin struct {
 	
 	// Parameter management using our new abstraction
 	paramManager *api.ParameterManager
+	
+	// Note port management
+	notePortManager *api.NotePortManager
 }
 
 // TransportInfo holds host transport information
@@ -267,6 +602,7 @@ func NewSynthPlugin() *SynthPlugin {
 			Tempo: 120.0,
 		},
 		paramManager: api.NewParameterManager(),
+		notePortManager: api.NewNotePortManager(),
 	}
 	
 	// Set default values atomically
@@ -284,6 +620,9 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(4, "Decay", 0.001, 2.0, 0.1))
 	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(5, "Sustain", 0.0, 1.0, 0.7))
 	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(6, "Release", 0.001, 5.0, 0.3))
+	
+	// Configure note port for instrument
+	plugin.notePortManager.AddInputPort(api.CreateDefaultInstrumentPort())
 	
 	return plugin
 }
@@ -414,6 +753,11 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			
 			// Check if voice is still active
 			if voice.ReleasePhase >= 1.0 {
+				// Send note end event to host if we have a valid note ID
+				if voice.NoteID >= 0 && events != nil {
+					endEvent := api.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
+					events.PushOutputEvent(endEvent)
+				}
 				p.voices[i] = nil
 			}
 		}
@@ -444,23 +788,23 @@ func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount ui
 		// Handle each event type safely using our abstraction
 		switch event.Type {
 		case api.EventTypeParamValue:
-			if paramEvent, ok := event.Data.(api.ParamEvent); ok {
+			if paramEvent, ok := event.Data.(api.ParamValueEvent); ok {
 				p.handleParameterChange(paramEvent)
 			}
 		case api.EventTypeNoteOn:
 			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
-				p.handleNoteOn(noteEvent)
+				p.handleNoteOn(noteEvent, event.Time)
 			}
 		case api.EventTypeNoteOff:
 			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
-				p.handleNoteOff(noteEvent)
+				p.handleNoteOff(noteEvent, event.Time)
 			}
 		}
 	}
 }
 
 // handleParameterChange processes a parameter change event
-func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamEvent) {
+func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 	// Handle the parameter change based on its ID
 	switch paramEvent.ParamID {
 	case 1: // Volume
@@ -485,14 +829,14 @@ func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamEvent) {
 }
 
 // handleNoteOn processes a note on event
-func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent) {
+func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent, time uint32) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
 	}
 	
 	// Ensure velocity is positive
-	velocity := noteEvent.Value
+	velocity := noteEvent.Velocity
 	if velocity <= 0 {
 		velocity = 0.01 // Very quiet but not silent
 	}
@@ -513,7 +857,7 @@ func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent) {
 }
 
 // handleNoteOff processes a note off event
-func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent) {
+func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent, time uint32) {
 	// Find the voice with this note ID or key/channel combination
 	for _, voice := range p.voices {
 		// Safety check
@@ -527,6 +871,80 @@ func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent) {
 		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Start the release phase (0.0 = start of release)
 			voice.ReleasePhase = 0.0
+		}
+	}
+}
+
+// handleNoteChoke processes a note choke event (immediate stop)
+func (p *SynthPlugin) handleNoteChoke(noteEvent api.NoteEvent, time uint32) {
+	// Find the voice with this note ID or key/channel combination
+	for i, voice := range p.voices {
+		// Safety check
+		if voice == nil || !voice.IsActive {
+			continue
+		}
+		
+		// Match on note ID if provided (non-negative), otherwise match on key and channel
+		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
+		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
+		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
+			// Immediately deactivate the voice
+			p.voices[i] = nil
+		}
+	}
+}
+
+// handleMIDI processes MIDI 1.0 events
+func (p *SynthPlugin) handleMIDI(midiEvent api.MIDIEvent, time uint32) {
+	if len(midiEvent.Data) < 3 {
+		return
+	}
+	
+	status := midiEvent.Data[0] & 0xF0
+	channel := midiEvent.Data[0] & 0x0F
+	
+	switch status {
+	case 0x90: // Note On
+		if midiEvent.Data[2] > 0 { // Velocity > 0
+			noteEvent := api.NoteEvent{
+				NoteID:   -1,
+				Port:     midiEvent.Port,
+				Channel:  int16(channel),
+				Key:      int16(midiEvent.Data[1]),
+				Velocity: float64(midiEvent.Data[2]) / 127.0,
+			}
+			p.handleNoteOn(noteEvent, time)
+		} else { // Velocity = 0 is Note Off
+			noteEvent := api.NoteEvent{
+				NoteID:   -1,
+				Port:     midiEvent.Port,
+				Channel:  int16(channel),
+				Key:      int16(midiEvent.Data[1]),
+				Velocity: 0.0,
+			}
+			p.handleNoteOff(noteEvent, time)
+		}
+		
+	case 0x80: // Note Off
+		noteEvent := api.NoteEvent{
+			NoteID:   -1,
+			Port:     midiEvent.Port,
+			Channel:  int16(channel),
+			Key:      int16(midiEvent.Data[1]),
+			Velocity: float64(midiEvent.Data[2]) / 127.0,
+		}
+		p.handleNoteOff(noteEvent, time)
+		
+	case 0xB0: // Control Change
+		// Handle common CCs
+		switch midiEvent.Data[1] {
+		case 7: // Volume
+			value := float64(midiEvent.Data[2]) / 127.0
+			paramEvent := api.ParamValueEvent{
+				ParamID: 1, // Volume parameter
+				Value:   value,
+			}
+			p.handleParameterChange(paramEvent)
 		}
 	}
 }
@@ -627,39 +1045,16 @@ func noteToFrequency(note int) float64 {
 	return 440.0 * math.Pow(2.0, (float64(note)-69.0)/12.0)
 }
 
+// GetNotePortManager returns the plugin's note port manager
+func (p *SynthPlugin) GetNotePortManager() *api.NotePortManager {
+	return p.notePortManager
+}
+
 // GetExtension gets a plugin extension
 func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
-	// Check for parameter extension
-	if id == api.ExtParams {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// Check for state extension
-	if id == api.ExtState {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// Check for note ports extension
-	if id == api.ExtNotePorts {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// Check for audio ports extension
-	if id == api.ExtAudioPorts {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// Check for preset load extension
-	if id == api.ExtPresetLoad {
-		// Extension not yet supported
-		return nil
-	}
-	
-	// No other extensions supported
+	// All extensions are handled by the C bridge based on exported functions
+	// The C bridge checks for the presence of required exports and provides
+	// the extension implementation if available
 	return nil
 }
 

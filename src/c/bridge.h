@@ -47,6 +47,11 @@ typedef struct go_plugin_data {
     const clap_plugin_descriptor_t* descriptor;
     // For manifest-loaded plugins, store the manifest index
     int manifest_index;
+    
+    // Extension support flags - determined at plugin creation
+    bool supports_params;      // Has param-related exports
+    bool supports_note_ports;  // Has note port exports
+    bool supports_state;       // Has state save/load exports
 } go_plugin_data_t;
 
 

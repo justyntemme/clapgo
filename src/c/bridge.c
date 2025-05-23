@@ -43,6 +43,10 @@ extern void ClapGo_PluginParamsFlush(void* plugin, void* in_events, void* out_ev
 extern bool ClapGo_PluginStateSave(void* plugin, void* stream);
 extern bool ClapGo_PluginStateLoad(void* plugin, void* stream);
 
+// Note ports extension Go exports - weak symbols to allow optional implementation
+__attribute__((weak)) uint32_t ClapGo_PluginNotePortsCount(void* plugin, bool is_input);
+__attribute__((weak)) bool ClapGo_PluginNotePortsGet(void* plugin, uint32_t index, bool is_input, void* info);
+
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
     printf("Searching for manifest for plugin: %s\n", plugin_path);
@@ -198,6 +202,13 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->descriptor = entry->descriptor;
     data->go_instance = go_instance;
     data->manifest_index = index;
+    
+    // Determine extension support based on available exports
+    data->supports_params = (ClapGo_PluginParamsCount != NULL);
+    data->supports_note_ports = (ClapGo_PluginNotePortsCount != NULL && 
+                                 ClapGo_PluginNotePortsGet != NULL);
+    data->supports_state = (ClapGo_PluginStateSave != NULL && 
+                           ClapGo_PluginStateLoad != NULL);
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -463,6 +474,16 @@ static const clap_plugin_state_t s_state_extension = {
     .load = clapgo_state_load
 };
 
+// Forward declarations for note ports extension
+static uint32_t clapgo_note_ports_count(const clap_plugin_t* plugin, bool is_input);
+static bool clapgo_note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_note_port_info_t* info);
+
+// Note ports extension structure - GUARDRAILS compliant (full implementation)
+static const clap_plugin_note_ports_t s_note_ports_extension = {
+    .count = clapgo_note_ports_count,
+    .get = clapgo_note_ports_get
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -504,21 +525,39 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     
     // Check if this is the params extension
     if (strcmp(id, CLAP_EXT_PARAMS) == 0) {
-        printf("DEBUG: params extension requested, returning implementation\n");
-        return &s_params_extension;
+        if (data->supports_params) {
+            printf("DEBUG: params extension requested and supported\n");
+            return &s_params_extension;
+        }
+        printf("DEBUG: params extension requested but not supported\n");
+        return NULL;
     }
     
     // Check if this is the state extension
     if (strcmp(id, CLAP_EXT_STATE) == 0) {
-        printf("DEBUG: state extension requested, returning implementation\n");
-        return &s_state_extension;
+        if (data->supports_state) {
+            printf("DEBUG: state extension requested and supported\n");
+            return &s_state_extension;
+        }
+        printf("DEBUG: state extension requested but not supported\n");
+        return NULL;
     }
     
     // Check if this is the audio ports extension
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
-        printf("DEBUG: audio ports extension requested, returning implementation\n");
-        // Return the fully implemented audio ports extension
+        printf("DEBUG: audio ports extension requested, always supported\n");
+        // Audio ports are always supported for all plugins
         return &s_audio_ports_extension;
+    }
+    
+    // Check if this is the note ports extension
+    if (strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) {
+        if (data->supports_note_ports) {
+            printf("DEBUG: note ports extension requested and supported\n");
+            return &s_note_ports_extension;
+        }
+        printf("DEBUG: note ports extension requested but not supported\n");
+        return NULL;
     }
     
     // Call into Go code to get the extension
@@ -628,4 +667,38 @@ static bool clapgo_state_load(const clap_plugin_t* plugin, const clap_istream_t*
     
     // Call into Go to load state
     return ClapGo_PluginStateLoad(data->go_instance, (void*)stream);
+}
+
+// Note ports extension implementation - GUARDRAILS compliant (full implementation)
+
+// Get the number of note ports
+static uint32_t clapgo_note_ports_count(const clap_plugin_t* plugin, bool is_input) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists (not NULL due to weak symbol)
+    if (!ClapGo_PluginNotePortsCount) {
+        return 0;
+    }
+    
+    // Call into Go to get note port count
+    return ClapGo_PluginNotePortsCount(data->go_instance, is_input);
+}
+
+// Get note port info
+static bool clapgo_note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_note_port_info_t* info) {
+    if (!plugin || !info) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists (not NULL due to weak symbol)
+    if (!ClapGo_PluginNotePortsGet) {
+        return false;
+    }
+    
+    // Call into Go to get note port info
+    return ClapGo_PluginNotePortsGet(data->go_instance, index, is_input, info);
 }
