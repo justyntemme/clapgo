@@ -20,6 +20,7 @@ package main
 // }
 import "C"
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
@@ -32,6 +33,10 @@ import (
 )
 
 // This example demonstrates a simple synthesizer plugin using the new API abstractions.
+
+// Embed factory presets
+//go:embed presets/factory/*.json
+var factoryPresets embed.FS
 
 // Export Go plugin functionality
 var (
@@ -194,8 +199,22 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
+	// Set logger on the event pool for diagnostics
+	if pool := eventHandler.GetEventPool(); pool != nil && p.logger != nil {
+		pool.SetLogger(p.logger)
+	}
+	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
+	
+	// Periodically log event pool diagnostics (every 1000 process calls)
+	p.processCallCount++
+	if p.processCallCount % 1000 == 0 && p.processCallCount != p.lastEventPoolDump {
+		p.lastEventPoolDump = p.processCallCount
+		if pool := eventHandler.GetEventPool(); pool != nil {
+			pool.LogDiagnostics()
+		}
+	}
 	
 	return C.int32_t(result)
 }
@@ -611,8 +630,8 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	// For preset loads, we might want to reset voice allocation
 	if contextType == C.uint32_t(api.StateContextForPreset) && result {
 		// Clear all active voices when loading a preset
-		// Note: In a real plugin, you'd want proper synchronization here
-		// For now, we're assuming preset loads happen on the main thread
+		// Note: This assumes preset loads happen on the main thread
+		// Additional synchronization may be needed for multi-threaded hosts
 		for i := range p.voices {
 			if p.voices[i] != nil {
 				p.voices[i].IsActive = false
@@ -696,16 +715,14 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		return C.bool(true)
 		
 	case C.uint32_t(api.PresetLocationPlugin):
-		// Load bundled preset
-		// For this example, we'll load presets from an embedded presets directory
+		// Load bundled preset from embedded files
 		presetPath := filepath.Join("presets", "factory", loadKeyStr+".json")
 		
-		// Try to load from the file system first (for development)
-		presetData, err := os.ReadFile(presetPath)
+		// Read from embedded filesystem
+		presetData, err := factoryPresets.ReadFile(presetPath)
 		if err != nil {
-			// In a real plugin, you might embed presets in the binary
 			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to load bundled preset: %v", err))
+				p.logger.Error(fmt.Sprintf("Failed to load bundled preset '%s': %v", loadKeyStr, err))
 			}
 			return C.bool(false)
 		}
@@ -791,6 +808,10 @@ type SynthPlugin struct {
 	// Host utilities
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
+	
+	// Diagnostics
+	processCallCount uint64
+	lastEventPoolDump uint64
 }
 
 // TransportInfo holds host transport information
@@ -851,6 +872,12 @@ func (p *SynthPlugin) Init() bool {
 	
 	if p.logger != nil {
 		p.logger.Debug("Synth plugin initialized")
+		
+		// Log available bundled presets
+		presets := p.GetAvailablePresets()
+		if len(presets) > 0 {
+			p.logger.Info(fmt.Sprintf("Available bundled presets: %v", presets))
+		}
 	}
 	
 	// Check initial track info
@@ -1574,6 +1601,30 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 			// Synths typically wouldn't be on master, but if so, could adjust
 		}
 	}
+}
+
+// GetAvailablePresets returns a list of available bundled preset names
+func (p *SynthPlugin) GetAvailablePresets() []string {
+	var presets []string
+	
+	// Read the embedded preset directory
+	entries, err := factoryPresets.ReadDir("presets/factory")
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Error(fmt.Sprintf("Failed to read preset directory: %v", err))
+		}
+		return presets
+	}
+	
+	// Collect preset names (without .json extension)
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+			presetName := entry.Name()[:len(entry.Name())-5] // Remove .json
+			presets = append(presets, presetName)
+		}
+	}
+	
+	return presets
 }
 
 // GetVoiceInfo returns voice count and capacity information

@@ -85,6 +85,10 @@ __attribute__((weak)) bool ClapGo_PluginPresetLoadFromLocation(void* plugin, uin
 // Track info extension
 __attribute__((weak)) void ClapGo_PluginTrackInfoChanged(void* plugin);
 
+// Param indication extension
+__attribute__((weak)) void ClapGo_PluginParamIndicationSetMapping(void* plugin, uint64_t param_id, bool has_mapping, void* color, char* label, char* description);
+__attribute__((weak)) void ClapGo_PluginParamIndicationSetAutomation(void* plugin, uint64_t param_id, uint32_t automation_state, void* color);
+
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
     printf("Searching for manifest for plugin: %s\n", plugin_path);
@@ -260,6 +264,8 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
                                    ClapGo_PluginStateLoadWithContext != NULL);
     data->supports_preset_load = (ClapGo_PluginPresetLoadFromLocation != NULL);
     data->supports_track_info = (ClapGo_PluginTrackInfoChanged != NULL);
+    data->supports_param_indication = (ClapGo_PluginParamIndicationSetMapping != NULL &&
+                                      ClapGo_PluginParamIndicationSetAutomation != NULL);
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -615,6 +621,16 @@ static const clap_plugin_track_info_t s_track_info_extension = {
     .changed = clapgo_track_info_changed
 };
 
+// Forward declarations for param indication extension
+static void clapgo_param_indication_set_mapping(const clap_plugin_t* plugin, clap_id param_id, bool has_mapping, const clap_color_t* color, const char* label, const char* description);
+static void clapgo_param_indication_set_automation(const clap_plugin_t* plugin, clap_id param_id, uint32_t automation_state, const clap_color_t* color);
+
+// Param indication extension structure
+static const clap_plugin_param_indication_t s_param_indication_extension = {
+    .set_mapping = clapgo_param_indication_set_mapping,
+    .set_automation = clapgo_param_indication_set_automation
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -789,6 +805,16 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
             return &s_track_info_extension;
         }
         printf("DEBUG: track info extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the param indication extension
+    if (strcmp(id, CLAP_EXT_PARAM_INDICATION) == 0 || strcmp(id, CLAP_EXT_PARAM_INDICATION_COMPAT) == 0) {
+        if (data->supports_param_indication) {
+            printf("DEBUG: param indication extension requested and supported\n");
+            return &s_param_indication_extension;
+        }
+        printf("DEBUG: param indication extension requested but not supported\n");
         return NULL;
     }
     
@@ -1165,4 +1191,37 @@ static void clapgo_track_info_changed(const clap_plugin_t* plugin) {
     }
     
     ClapGo_PluginTrackInfoChanged(data->go_instance);
+}
+
+// Param indication extension implementation
+static void clapgo_param_indication_set_mapping(const clap_plugin_t* plugin, clap_id param_id, 
+                                                bool has_mapping, const clap_color_t* color, 
+                                                const char* label, const char* description) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginParamIndicationSetMapping) {
+        return;
+    }
+    
+    ClapGo_PluginParamIndicationSetMapping(data->go_instance, param_id, has_mapping, 
+                                           (void*)color, (char*)label, (char*)description);
+}
+
+static void clapgo_param_indication_set_automation(const clap_plugin_t* plugin, clap_id param_id,
+                                                   uint32_t automation_state, const clap_color_t* color) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginParamIndicationSetAutomation) {
+        return;
+    }
+    
+    ClapGo_PluginParamIndicationSetAutomation(data->go_instance, param_id, automation_state, (void*)color);
 }

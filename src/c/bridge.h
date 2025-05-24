@@ -61,6 +61,7 @@ typedef struct go_plugin_data {
     bool supports_state_context; // Has state context exports
     bool supports_preset_load;  // Has preset load export
     bool supports_track_info;   // Has track info export
+    bool supports_param_indication; // Has param indication exports
 } go_plugin_data_t;
 
 

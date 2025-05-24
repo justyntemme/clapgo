@@ -67,6 +67,7 @@ package api
 // }
 import "C"
 import (
+	"fmt"
 	"unsafe"
 )
 
@@ -80,13 +81,21 @@ func NewHostLogger(host unsafe.Pointer) *HostLogger {
 	return &HostLogger{host: host}
 }
 
-// Log sends a log message to the host
-func (l *HostLogger) Log(severity int32, message string) {
+// Log sends a log message to the host with optional formatting
+func (l *HostLogger) Log(severity int32, message string, args ...interface{}) {
 	if l.host == nil {
 		return
 	}
 	
-	cMsg := C.CString(message)
+	// Format message if args are provided
+	var finalMessage string
+	if len(args) > 0 {
+		finalMessage = fmt.Sprintf(message, args...)
+	} else {
+		finalMessage = message
+	}
+	
+	cMsg := C.CString(finalMessage)
 	defer C.free(unsafe.Pointer(cMsg))
 	
 	C.clap_host_log_helper((*C.clap_host_t)(l.host), C.int32_t(severity), cMsg)
@@ -94,27 +103,27 @@ func (l *HostLogger) Log(severity int32, message string) {
 
 // Debug logs a debug message
 func (l *HostLogger) Debug(message string) {
-	l.Log(LogDebug, message)
+	l.Log(LogSeverityDebug, message)
 }
 
 // Info logs an info message
 func (l *HostLogger) Info(message string) {
-	l.Log(LogInfo, message)
+	l.Log(LogSeverityInfo, message)
 }
 
 // Warning logs a warning message
 func (l *HostLogger) Warning(message string) {
-	l.Log(LogWarning, message)
+	l.Log(LogSeverityWarning, message)
 }
 
 // Error logs an error message
 func (l *HostLogger) Error(message string) {
-	l.Log(LogError, message)
+	l.Log(LogSeverityError, message)
 }
 
 // Fatal logs a fatal error message
 func (l *HostLogger) Fatal(message string) {
-	l.Log(LogFatal, message)
+	l.Log(LogSeverityFatal, message)
 }
 
 // HostTimerSupport provides timer functionality from the host
@@ -205,7 +214,7 @@ func (n *HostAudioPortsConfigNotifier) NotifyRescan() {
 		return
 	}
 	
-	// TODO: Add C helper function
+	// Host notification not yet implemented
 }
 
 // HostSurroundNotifier notifies the host about surround changes
@@ -224,7 +233,7 @@ func (n *HostSurroundNotifier) NotifySurroundChanged() {
 		return
 	}
 	
-	// TODO: Add C helper function
+	// Host notification not yet implemented
 }
 
 // HostVoiceInfoNotifier notifies the host about voice info changes
@@ -243,7 +252,7 @@ func (n *HostVoiceInfoNotifier) NotifyVoiceInfoChanged() {
 		return
 	}
 	
-	// TODO: Add C helper function
+	// Host notification not yet implemented
 }
 
 // HostTrackInfo provides track information from the host

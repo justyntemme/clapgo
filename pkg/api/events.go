@@ -30,14 +30,449 @@ static inline bool clap_output_events_try_push_helper(const clap_output_events_t
 */
 import "C"
 import (
+	"log"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 )
+
+// Logger interface for event pool logging
+type Logger interface {
+	Log(severity int32, message string, args ...interface{})
+}
+
+// EventPool manages pre-allocated events to avoid allocations during audio processing
+type EventPool struct {
+	// Separate pools for each event type to avoid interface{} allocations
+	paramValuePool      sync.Pool
+	paramModPool        sync.Pool
+	paramGesturePool    sync.Pool
+	noteEventPool       sync.Pool
+	noteExpressionPool  sync.Pool
+	transportPool       sync.Pool
+	midiPool            sync.Pool
+	midiSysexPool       sync.Pool
+	midi2Pool           sync.Pool
+	eventPool           sync.Pool // For Event structs themselves
+
+	// Diagnostics
+	totalAllocations    uint64
+	poolHits           uint64
+	poolMisses         uint64
+	highWaterMark      uint64
+	currentAllocated   uint64
+	
+	// Configuration
+	warnOnAllocation   bool
+	logger             Logger
+}
+
+// NewEventPool creates a new event pool with default settings
+func NewEventPool() *EventPool {
+	ep := &EventPool{
+		warnOnAllocation: true,
+	}
+
+	// Initialize pools with factory functions
+	ep.paramValuePool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new ParamValueEvent - consider increasing pool size")
+		}
+		return &ParamValueEvent{}
+	}
+
+	ep.paramModPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new ParamModEvent - consider increasing pool size")
+		}
+		return &ParamModEvent{}
+	}
+
+	ep.paramGesturePool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new ParamGestureEvent - consider increasing pool size")
+		}
+		return &ParamGestureEvent{}
+	}
+
+	ep.noteEventPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new NoteEvent - consider increasing pool size")
+		}
+		return &NoteEvent{}
+	}
+
+	ep.noteExpressionPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new NoteExpressionEvent - consider increasing pool size")
+		}
+		return &NoteExpressionEvent{}
+	}
+
+	ep.transportPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new TransportEvent - consider increasing pool size")
+		}
+		return &TransportEvent{}
+	}
+
+	ep.midiPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new MIDIEvent - consider increasing pool size")
+		}
+		return &MIDIEvent{Data: make([]byte, 3)}
+	}
+
+	ep.midiSysexPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new MIDISysexEvent - consider increasing pool size")
+		}
+		return &MIDISysexEvent{}
+	}
+
+	ep.midi2Pool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new MIDI2Event - consider increasing pool size")
+		}
+		return &MIDI2Event{Data: make([]uint32, 4)}
+	}
+
+	ep.eventPool.New = func() interface{} {
+		atomic.AddUint64(&ep.totalAllocations, 1)
+		atomic.AddUint64(&ep.poolMisses, 1)
+		if ep.warnOnAllocation && ep.logger != nil {
+			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new Event - consider increasing pool size")
+		}
+		return &Event{}
+	}
+
+	// Pre-allocate initial events
+	ep.preallocate()
+
+	return ep
+}
+
+// SetLogger sets the logger for warnings
+func (ep *EventPool) SetLogger(logger Logger) {
+	ep.logger = logger
+}
+
+// preallocate creates initial pool of events
+func (ep *EventPool) preallocate() {
+	// Pre-allocate common event counts
+	const (
+		initialParamEvents     = 128
+		initialNoteEvents      = 64
+		initialOtherEvents     = 32
+	)
+
+	// Pre-allocate parameter events
+	for i := 0; i < initialParamEvents; i++ {
+		ep.paramValuePool.Put(&ParamValueEvent{})
+		ep.paramModPool.Put(&ParamModEvent{})
+		ep.eventPool.Put(&Event{})
+	}
+
+	// Pre-allocate note events
+	for i := 0; i < initialNoteEvents; i++ {
+		ep.noteEventPool.Put(&NoteEvent{})
+		ep.noteExpressionPool.Put(&NoteExpressionEvent{})
+		ep.eventPool.Put(&Event{})
+	}
+
+	// Pre-allocate other events
+	for i := 0; i < initialOtherEvents; i++ {
+		ep.paramGesturePool.Put(&ParamGestureEvent{})
+		ep.transportPool.Put(&TransportEvent{})
+		ep.midiPool.Put(&MIDIEvent{Data: make([]byte, 3)})
+		ep.midiSysexPool.Put(&MIDISysexEvent{})
+		ep.midi2Pool.Put(&MIDI2Event{Data: make([]uint32, 4)})
+		ep.eventPool.Put(&Event{})
+	}
+}
+
+// GetEvent gets an Event from the pool
+func (ep *EventPool) GetEvent() *Event {
+	atomic.AddUint64(&ep.currentAllocated, 1)
+	current := atomic.LoadUint64(&ep.currentAllocated)
+	for {
+		oldMax := atomic.LoadUint64(&ep.highWaterMark)
+		if current <= oldMax || atomic.CompareAndSwapUint64(&ep.highWaterMark, oldMax, current) {
+			break
+		}
+	}
+	
+	event := ep.eventPool.Get().(*Event)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetParamValueEvent gets a ParamValueEvent from the pool
+func (ep *EventPool) GetParamValueEvent() *ParamValueEvent {
+	event := ep.paramValuePool.Get().(*ParamValueEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetParamModEvent gets a ParamModEvent from the pool
+func (ep *EventPool) GetParamModEvent() *ParamModEvent {
+	event := ep.paramModPool.Get().(*ParamModEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetParamGestureEvent gets a ParamGestureEvent from the pool
+func (ep *EventPool) GetParamGestureEvent() *ParamGestureEvent {
+	event := ep.paramGesturePool.Get().(*ParamGestureEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetNoteEvent gets a NoteEvent from the pool
+func (ep *EventPool) GetNoteEvent() *NoteEvent {
+	event := ep.noteEventPool.Get().(*NoteEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetNoteExpressionEvent gets a NoteExpressionEvent from the pool
+func (ep *EventPool) GetNoteExpressionEvent() *NoteExpressionEvent {
+	event := ep.noteExpressionPool.Get().(*NoteExpressionEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetTransportEvent gets a TransportEvent from the pool
+func (ep *EventPool) GetTransportEvent() *TransportEvent {
+	event := ep.transportPool.Get().(*TransportEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetMIDIEvent gets a MIDIEvent from the pool
+func (ep *EventPool) GetMIDIEvent() *MIDIEvent {
+	event := ep.midiPool.Get().(*MIDIEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetMIDISysexEvent gets a MIDISysexEvent from the pool
+func (ep *EventPool) GetMIDISysexEvent() *MIDISysexEvent {
+	event := ep.midiSysexPool.Get().(*MIDISysexEvent)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// GetMIDI2Event gets a MIDI2Event from the pool
+func (ep *EventPool) GetMIDI2Event() *MIDI2Event {
+	event := ep.midi2Pool.Get().(*MIDI2Event)
+	atomic.AddUint64(&ep.poolHits, 1)
+	return event
+}
+
+// ReturnEvent returns an Event to the pool
+func (ep *EventPool) ReturnEvent(event *Event) {
+	if event == nil {
+		return
+	}
+	
+	atomic.AddUint64(&ep.currentAllocated, ^uint64(0)) // Decrement by 1
+	
+	// Clear the event
+	event.Time = 0
+	event.Type = 0
+	event.Flags = 0
+	event.Data = nil
+	
+	ep.eventPool.Put(event)
+}
+
+// ReturnParamValueEvent returns a ParamValueEvent to the pool
+func (ep *EventPool) ReturnParamValueEvent(event *ParamValueEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = ParamValueEvent{
+		NoteID:  -1,
+		Port:    -1,
+		Channel: -1,
+		Key:     -1,
+	}
+	
+	ep.paramValuePool.Put(event)
+}
+
+// ReturnParamModEvent returns a ParamModEvent to the pool
+func (ep *EventPool) ReturnParamModEvent(event *ParamModEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = ParamModEvent{
+		NoteID:  -1,
+		Port:    -1,
+		Channel: -1,
+		Key:     -1,
+	}
+	
+	ep.paramModPool.Put(event)
+}
+
+// ReturnParamGestureEvent returns a ParamGestureEvent to the pool
+func (ep *EventPool) ReturnParamGestureEvent(event *ParamGestureEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = ParamGestureEvent{}
+	
+	ep.paramGesturePool.Put(event)
+}
+
+// ReturnNoteEvent returns a NoteEvent to the pool
+func (ep *EventPool) ReturnNoteEvent(event *NoteEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = NoteEvent{
+		NoteID: -1,
+	}
+	
+	ep.noteEventPool.Put(event)
+}
+
+// ReturnNoteExpressionEvent returns a NoteExpressionEvent to the pool
+func (ep *EventPool) ReturnNoteExpressionEvent(event *NoteExpressionEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = NoteExpressionEvent{
+		NoteID: -1,
+	}
+	
+	ep.noteExpressionPool.Put(event)
+}
+
+// ReturnTransportEvent returns a TransportEvent to the pool
+func (ep *EventPool) ReturnTransportEvent(event *TransportEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	*event = TransportEvent{}
+	
+	ep.transportPool.Put(event)
+}
+
+// ReturnMIDIEvent returns a MIDIEvent to the pool
+func (ep *EventPool) ReturnMIDIEvent(event *MIDIEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event data but keep the slice
+	event.Port = 0
+	for i := range event.Data {
+		event.Data[i] = 0
+	}
+	
+	ep.midiPool.Put(event)
+}
+
+// ReturnMIDISysexEvent returns a MIDISysexEvent to the pool
+func (ep *EventPool) ReturnMIDISysexEvent(event *MIDISysexEvent) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event
+	event.Port = 0
+	event.Data = nil // Let GC handle the old data
+	
+	ep.midiSysexPool.Put(event)
+}
+
+// ReturnMIDI2Event returns a MIDI2Event to the pool
+func (ep *EventPool) ReturnMIDI2Event(event *MIDI2Event) {
+	if event == nil {
+		return
+	}
+	
+	// Clear the event data but keep the slice
+	event.Port = 0
+	for i := range event.Data {
+		event.Data[i] = 0
+	}
+	
+	ep.midi2Pool.Put(event)
+}
+
+// GetDiagnostics returns pool performance statistics
+func (ep *EventPool) GetDiagnostics() (totalAllocations, poolHits, poolMisses, highWaterMark, currentAllocated uint64) {
+	return atomic.LoadUint64(&ep.totalAllocations),
+		atomic.LoadUint64(&ep.poolHits),
+		atomic.LoadUint64(&ep.poolMisses),
+		atomic.LoadUint64(&ep.highWaterMark),
+		atomic.LoadUint64(&ep.currentAllocated)
+}
+
+// LogDiagnostics logs current pool statistics
+func (ep *EventPool) LogDiagnostics() {
+	totalAlloc, hits, misses, hwm, current := ep.GetDiagnostics()
+	
+	hitRate := float64(0)
+	if hits+misses > 0 {
+		hitRate = float64(hits) / float64(hits+misses) * 100
+	}
+	
+	msg := "EventPool diagnostics:"
+	if ep.logger != nil {
+		ep.logger.Log(LogSeverityInfo, msg)
+		ep.logger.Log(LogSeverityInfo, "  Total allocations: %d", totalAlloc)
+		ep.logger.Log(LogSeverityInfo, "  Pool hits: %d", hits)
+		ep.logger.Log(LogSeverityInfo, "  Pool misses: %d", misses)
+		ep.logger.Log(LogSeverityInfo, "  Hit rate: %.2f%%", hitRate)
+		ep.logger.Log(LogSeverityInfo, "  High water mark: %d", hwm)
+		ep.logger.Log(LogSeverityInfo, "  Currently allocated: %d", current)
+	} else {
+		log.Printf("%s Total allocations: %d, Pool hits: %d, Pool misses: %d, Hit rate: %.2f%%, High water mark: %d, Currently allocated: %d",
+			msg, totalAlloc, hits, misses, hitRate, hwm, current)
+	}
+}
 
 // EventProcessor handles all C event conversion internally
 // This abstracts away all the unsafe pointer operations from plugin developers
 type EventProcessor struct {
 	inputEvents  *C.clap_input_events_t
 	outputEvents *C.clap_output_events_t
+	eventPool    *EventPool
 }
 
 // NewEventProcessor creates a new EventProcessor from C event queues
@@ -45,7 +480,18 @@ func NewEventProcessor(inputEvents, outputEvents unsafe.Pointer) *EventProcessor
 	return &EventProcessor{
 		inputEvents:  (*C.clap_input_events_t)(inputEvents),
 		outputEvents: (*C.clap_output_events_t)(outputEvents),
+		eventPool:    NewEventPool(),
 	}
+}
+
+// SetEventPool allows setting a custom event pool (useful for sharing across processors)
+func (ep *EventProcessor) SetEventPool(pool *EventPool) {
+	ep.eventPool = pool
+}
+
+// GetEventPool returns the event pool for diagnostics
+func (ep *EventProcessor) GetEventPool() *EventPool {
+	return ep.eventPool
 }
 
 // GetInputEventCount returns the number of input events
@@ -68,7 +514,7 @@ func (ep *EventProcessor) GetInputEvent(index uint32) *Event {
 		return nil
 	}
 	
-	return convertCEventToGo(cEventHeader)
+	return convertCEventToGo(cEventHeader, ep.eventPool)
 }
 
 // PushOutputEvent pushes an output event to the host
@@ -96,6 +542,56 @@ func (ep *EventProcessor) ProcessInputEvents() {
 	// The actual processing is done by calling GetInputEvent() in a loop
 }
 
+// ReturnEventToPool returns an event and its data to the pool
+func (ep *EventProcessor) ReturnEventToPool(event *Event) {
+	if event == nil || ep.eventPool == nil {
+		return
+	}
+	
+	// Return the specific event data to its pool
+	switch event.Type {
+	case EventTypeParamValue:
+		if e, ok := event.Data.(ParamValueEvent); ok {
+			ep.eventPool.ReturnParamValueEvent(&e)
+		}
+	case EventTypeParamMod:
+		if e, ok := event.Data.(ParamModEvent); ok {
+			ep.eventPool.ReturnParamModEvent(&e)
+		}
+	case EventTypeParamGestureBegin, EventTypeParamGestureEnd:
+		if e, ok := event.Data.(ParamGestureEvent); ok {
+			ep.eventPool.ReturnParamGestureEvent(&e)
+		}
+	case EventTypeNoteOn, EventTypeNoteOff, EventTypeNoteChoke, EventTypeNoteEnd:
+		if e, ok := event.Data.(NoteEvent); ok {
+			ep.eventPool.ReturnNoteEvent(&e)
+		}
+	case EventTypeNoteExpression:
+		if e, ok := event.Data.(NoteExpressionEvent); ok {
+			ep.eventPool.ReturnNoteExpressionEvent(&e)
+		}
+	case EventTypeTransport:
+		if e, ok := event.Data.(TransportEvent); ok {
+			ep.eventPool.ReturnTransportEvent(&e)
+		}
+	case EventTypeMIDI:
+		if e, ok := event.Data.(MIDIEvent); ok {
+			ep.eventPool.ReturnMIDIEvent(&e)
+		}
+	case EventTypeMIDISysex:
+		if e, ok := event.Data.(MIDISysexEvent); ok {
+			ep.eventPool.ReturnMIDISysexEvent(&e)
+		}
+	case EventTypeMIDI2:
+		if e, ok := event.Data.(MIDI2Event); ok {
+			ep.eventPool.ReturnMIDI2Event(&e)
+		}
+	}
+	
+	// Return the event struct itself
+	ep.eventPool.ReturnEvent(event)
+}
+
 // ProcessAllEvents processes all input events and calls the appropriate handler
 func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 	if handler == nil {
@@ -103,11 +599,15 @@ func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 	}
 	
 	count := ep.GetInputEventCount()
+	// Collect events to return to pool after processing
+	events := make([]*Event, 0, count)
+	
 	for i := uint32(0); i < count; i++ {
 		event := ep.GetInputEvent(i)
 		if event == nil {
 			continue
 		}
+		events = append(events, event)
 		
 		// Route to the appropriate handler based on event type
 		switch event.Type {
@@ -165,6 +665,11 @@ func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 			}
 		}
 	}
+	
+	// Return all events to the pool after processing
+	for _, event := range events {
+		ep.ReturnEventToPool(event)
+	}
 }
 
 // AddOutputEvent adds an event to the output queue (legacy interface)
@@ -178,7 +683,7 @@ func (ep *EventProcessor) AddOutputEvent(eventType int, data interface{}) {
 }
 
 // convertCEventToGo converts a C CLAP event to a Go Event struct
-func convertCEventToGo(cEventHeader *C.clap_event_header_t) *Event {
+func convertCEventToGo(cEventHeader *C.clap_event_header_t, pool *EventPool) *Event {
 	if cEventHeader == nil {
 		return nil
 	}
@@ -188,118 +693,162 @@ func convertCEventToGo(cEventHeader *C.clap_event_header_t) *Event {
 		return nil
 	}
 	
-	event := &Event{
-		Time:  uint32(cEventHeader.time),
-		Type:  int(cEventHeader._type),
-		Flags: uint32(cEventHeader.flags),
+	// Get event from pool if available
+	var event *Event
+	if pool != nil {
+		event = pool.GetEvent()
+	} else {
+		event = &Event{}
 	}
+	
+	event.Time = uint32(cEventHeader.time)
+	event.Type = int(cEventHeader._type)
+	event.Flags = uint32(cEventHeader.flags)
 	
 	// Convert event data based on type
 	switch int(cEventHeader._type) {
 	case EventTypeParamValue:
 		cParamEvent := (*C.clap_event_param_value_t)(unsafe.Pointer(cEventHeader))
-		event.Data = ParamValueEvent{
-			ParamID: uint32(cParamEvent.param_id),
-			Cookie:  unsafe.Pointer(cParamEvent.cookie),
-			NoteID:  int32(cParamEvent.note_id),
-			Port:    int16(cParamEvent.port_index),
-			Channel: int16(cParamEvent.channel),
-			Key:     int16(cParamEvent.key),
-			Value:   float64(cParamEvent.value),
+		var paramEvent *ParamValueEvent
+		if pool != nil {
+			paramEvent = pool.GetParamValueEvent()
+		} else {
+			paramEvent = &ParamValueEvent{}
 		}
+		paramEvent.ParamID = uint32(cParamEvent.param_id)
+		paramEvent.Cookie = unsafe.Pointer(cParamEvent.cookie)
+		paramEvent.NoteID = int32(cParamEvent.note_id)
+		paramEvent.Port = int16(cParamEvent.port_index)
+		paramEvent.Channel = int16(cParamEvent.channel)
+		paramEvent.Key = int16(cParamEvent.key)
+		paramEvent.Value = float64(cParamEvent.value)
+		event.Data = *paramEvent
 		
 	case EventTypeParamMod:
 		cParamModEvent := (*C.clap_event_param_mod_t)(unsafe.Pointer(cEventHeader))
-		event.Data = ParamModEvent{
-			ParamID: uint32(cParamModEvent.param_id),
-			Cookie:  unsafe.Pointer(cParamModEvent.cookie),
-			NoteID:  int32(cParamModEvent.note_id),
-			Port:    int16(cParamModEvent.port_index),
-			Channel: int16(cParamModEvent.channel),
-			Key:     int16(cParamModEvent.key),
-			Amount:  float64(cParamModEvent.amount),
+		var paramModEvent *ParamModEvent
+		if pool != nil {
+			paramModEvent = pool.GetParamModEvent()
+		} else {
+			paramModEvent = &ParamModEvent{}
 		}
+		paramModEvent.ParamID = uint32(cParamModEvent.param_id)
+		paramModEvent.Cookie = unsafe.Pointer(cParamModEvent.cookie)
+		paramModEvent.NoteID = int32(cParamModEvent.note_id)
+		paramModEvent.Port = int16(cParamModEvent.port_index)
+		paramModEvent.Channel = int16(cParamModEvent.channel)
+		paramModEvent.Key = int16(cParamModEvent.key)
+		paramModEvent.Amount = float64(cParamModEvent.amount)
+		event.Data = *paramModEvent
 		
 	case EventTypeParamGestureBegin, EventTypeParamGestureEnd:
 		cGestureEvent := (*C.clap_event_param_gesture_t)(unsafe.Pointer(cEventHeader))
-		event.Data = ParamGestureEvent{
-			ParamID: uint32(cGestureEvent.param_id),
+		var gestureEvent *ParamGestureEvent
+		if pool != nil {
+			gestureEvent = pool.GetParamGestureEvent()
+		} else {
+			gestureEvent = &ParamGestureEvent{}
 		}
+		gestureEvent.ParamID = uint32(cGestureEvent.param_id)
+		event.Data = *gestureEvent
 		
 	case EventTypeNoteOn, EventTypeNoteOff, EventTypeNoteChoke, EventTypeNoteEnd:
 		cNoteEvent := (*C.clap_event_note_t)(unsafe.Pointer(cEventHeader))
-		event.Data = NoteEvent{
-			NoteID:   int32(cNoteEvent.note_id),
-			Port:     int16(cNoteEvent.port_index),
-			Channel:  int16(cNoteEvent.channel),
-			Key:      int16(cNoteEvent.key),
-			Velocity: float64(cNoteEvent.velocity),
+		var noteEvent *NoteEvent
+		if pool != nil {
+			noteEvent = pool.GetNoteEvent()
+		} else {
+			noteEvent = &NoteEvent{}
 		}
+		noteEvent.NoteID = int32(cNoteEvent.note_id)
+		noteEvent.Port = int16(cNoteEvent.port_index)
+		noteEvent.Channel = int16(cNoteEvent.channel)
+		noteEvent.Key = int16(cNoteEvent.key)
+		noteEvent.Velocity = float64(cNoteEvent.velocity)
+		event.Data = *noteEvent
 		
 	case EventTypeNoteExpression:
 		cNoteExprEvent := (*C.clap_event_note_expression_t)(unsafe.Pointer(cEventHeader))
-		event.Data = NoteExpressionEvent{
-			ExpressionID: int32(cNoteExprEvent.expression_id),
-			NoteID:       int32(cNoteExprEvent.note_id),
-			Port:         int16(cNoteExprEvent.port_index),
-			Channel:      int16(cNoteExprEvent.channel),
-			Key:          int16(cNoteExprEvent.key),
-			Value:        float64(cNoteExprEvent.value),
+		var noteExprEvent *NoteExpressionEvent
+		if pool != nil {
+			noteExprEvent = pool.GetNoteExpressionEvent()
+		} else {
+			noteExprEvent = &NoteExpressionEvent{}
 		}
+		noteExprEvent.ExpressionID = int32(cNoteExprEvent.expression_id)
+		noteExprEvent.NoteID = int32(cNoteExprEvent.note_id)
+		noteExprEvent.Port = int16(cNoteExprEvent.port_index)
+		noteExprEvent.Channel = int16(cNoteExprEvent.channel)
+		noteExprEvent.Key = int16(cNoteExprEvent.key)
+		noteExprEvent.Value = float64(cNoteExprEvent.value)
+		event.Data = *noteExprEvent
 		
 	case EventTypeTransport:
 		cTransportEvent := (*C.clap_event_transport_t)(unsafe.Pointer(cEventHeader))
-		event.Data = TransportEvent{
-			Flags:             uint32(cTransportEvent.flags),
-			SongPosBeats:      uint64(cTransportEvent.song_pos_beats),
-			SongPosSeconds:    uint64(cTransportEvent.song_pos_seconds),
-			Tempo:             float64(cTransportEvent.tempo),
-			TempoInc:          float64(cTransportEvent.tempo_inc),
-			LoopStartBeats:    uint64(cTransportEvent.loop_start_beats),
-			LoopEndBeats:      uint64(cTransportEvent.loop_end_beats),
-			LoopStartSeconds:  uint64(cTransportEvent.loop_start_seconds),
-			LoopEndSeconds:    uint64(cTransportEvent.loop_end_seconds),
-			BarStart:          uint64(cTransportEvent.bar_start),
-			BarNumber:         int32(cTransportEvent.bar_number),
-			TimeSignatureNum:  uint16(cTransportEvent.tsig_num),
-			TimeSignatureDen:  uint16(cTransportEvent.tsig_denom),
+		var transportEvent *TransportEvent
+		if pool != nil {
+			transportEvent = pool.GetTransportEvent()
+		} else {
+			transportEvent = &TransportEvent{}
 		}
+		transportEvent.Flags = uint32(cTransportEvent.flags)
+		transportEvent.SongPosBeats = uint64(cTransportEvent.song_pos_beats)
+		transportEvent.SongPosSeconds = uint64(cTransportEvent.song_pos_seconds)
+		transportEvent.Tempo = float64(cTransportEvent.tempo)
+		transportEvent.TempoInc = float64(cTransportEvent.tempo_inc)
+		transportEvent.LoopStartBeats = uint64(cTransportEvent.loop_start_beats)
+		transportEvent.LoopEndBeats = uint64(cTransportEvent.loop_end_beats)
+		transportEvent.LoopStartSeconds = uint64(cTransportEvent.loop_start_seconds)
+		transportEvent.LoopEndSeconds = uint64(cTransportEvent.loop_end_seconds)
+		transportEvent.BarStart = uint64(cTransportEvent.bar_start)
+		transportEvent.BarNumber = int32(cTransportEvent.bar_number)
+		transportEvent.TimeSignatureNum = uint16(cTransportEvent.tsig_num)
+		transportEvent.TimeSignatureDen = uint16(cTransportEvent.tsig_denom)
+		event.Data = *transportEvent
 		
 	case EventTypeMIDI:
 		cMidiEvent := (*C.clap_event_midi_t)(unsafe.Pointer(cEventHeader))
-		// Create a Go slice from the C array
-		midiData := make([]byte, 3)
+		var midiEvent *MIDIEvent
+		if pool != nil {
+			midiEvent = pool.GetMIDIEvent()
+		} else {
+			midiEvent = &MIDIEvent{Data: make([]byte, 3)}
+		}
+		midiEvent.Port = int16(cMidiEvent.port_index)
 		for i := 0; i < 3; i++ {
-			midiData[i] = byte(cMidiEvent.data[i])
+			midiEvent.Data[i] = byte(cMidiEvent.data[i])
 		}
-		event.Data = MIDIEvent{
-			Port: int16(cMidiEvent.port_index),
-			Data: midiData,
-		}
+		event.Data = *midiEvent
 		
 	case EventTypeMIDISysex:
 		cSysexEvent := (*C.clap_event_midi_sysex_t)(unsafe.Pointer(cEventHeader))
+		var sysexEvent *MIDISysexEvent
+		if pool != nil {
+			sysexEvent = pool.GetMIDISysexEvent()
+		} else {
+			sysexEvent = &MIDISysexEvent{}
+		}
+		sysexEvent.Port = int16(cSysexEvent.port_index)
 		// Copy sysex data to Go slice
-		sysexData := make([]byte, cSysexEvent.size)
+		sysexEvent.Data = make([]byte, cSysexEvent.size)
 		if cSysexEvent.size > 0 && cSysexEvent.buffer != nil {
-			C.memcpy(unsafe.Pointer(&sysexData[0]), unsafe.Pointer(cSysexEvent.buffer), C.size_t(cSysexEvent.size))
+			C.memcpy(unsafe.Pointer(&sysexEvent.Data[0]), unsafe.Pointer(cSysexEvent.buffer), C.size_t(cSysexEvent.size))
 		}
-		event.Data = MIDISysexEvent{
-			Port: int16(cSysexEvent.port_index),
-			Data: sysexData,
-		}
+		event.Data = *sysexEvent
 		
 	case EventTypeMIDI2:
 		cMidi2Event := (*C.clap_event_midi2_t)(unsafe.Pointer(cEventHeader))
-		// Create Go slice from C array
-		midi2Data := make([]uint32, 4)
+		var midi2Event *MIDI2Event
+		if pool != nil {
+			midi2Event = pool.GetMIDI2Event()
+		} else {
+			midi2Event = &MIDI2Event{Data: make([]uint32, 4)}
+		}
+		midi2Event.Port = int16(cMidi2Event.port_index)
 		for i := 0; i < 4; i++ {
-			midi2Data[i] = uint32(cMidi2Event.data[i])
+			midi2Event.Data[i] = uint32(cMidi2Event.data[i])
 		}
-		event.Data = MIDI2Event{
-			Port: int16(cMidi2Event.port_index),
-			Data: midi2Data,
-		}
+		event.Data = *midi2Event
 		
 	default:
 		// Unknown event type, store raw data

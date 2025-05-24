@@ -152,6 +152,17 @@ const (
 	PresetLocationFileFD   = 1
 )
 
+// Log severity levels
+const (
+	LogSeverityDebug     = 0
+	LogSeverityInfo      = 1
+	LogSeverityWarning   = 2
+	LogSeverityError     = 3
+	LogSeverityFatal     = 4
+	LogSeverityHostMisbehaving = 5
+	LogSeverityPluginMisbehaving = 6
+)
+
 // Other constants
 const (
 	InvalidID = 0xFFFFFFFF // Invalid ID constant for ports without a pair

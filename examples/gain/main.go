@@ -20,15 +20,21 @@ package main
 // }
 import "C"
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
 )
+
+// Embed factory presets
+//go:embed presets/factory/*.json
+var factoryPresets embed.FS
 
 // Global plugin instance
 var gainPlugin *GainPlugin
@@ -196,8 +202,22 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
+	// Set logger on the event pool for diagnostics
+	if pool := eventHandler.GetEventPool(); pool != nil && p.logger != nil {
+		pool.SetLogger(p.logger)
+	}
+	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
+	
+	// Periodically log event pool diagnostics (every 1000 process calls)
+	p.processCallCount++
+	if p.processCallCount % 1000 == 0 && p.processCallCount != p.lastEventPoolDump {
+		p.lastEventPoolDump = p.processCallCount
+		if pool := eventHandler.GetEventPool(); pool != nil {
+			pool.LogDiagnostics()
+		}
+	}
 	
 	return C.int32_t(result)
 }
@@ -378,6 +398,10 @@ type GainPlugin struct {
 	// Host utilities
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
+	
+	// Diagnostics
+	processCallCount uint64
+	lastEventPoolDump uint64
 }
 
 // NewGainPlugin creates a new gain plugin instance
@@ -832,9 +856,40 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 		return false
 		
 	case api.PresetLocationPlugin:
-		// For this simple example, we don't have bundled presets
+		// Load bundled preset from embedded files
+		presetPath := filepath.Join("presets", "factory", loadKey+".json")
+		
+		// Read from embedded filesystem
+		presetData, err := factoryPresets.ReadFile(presetPath)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to load bundled preset '%s': %v", loadKey, err))
+			}
+			return false
+		}
+		
+		// Parse the preset data
+		var state map[string]interface{}
+		if err := json.Unmarshal(presetData, &state); err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
+			}
+			return false
+		}
+		
+		// Load the preset state
+		if gainValue, ok := state["gain"].(float64); ok {
+			atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+			p.paramManager.SetParameterValue(0, gainValue)
+			
+			if p.logger != nil {
+				p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", loadKey, gainValue))
+			}
+			return true
+		}
+		
 		if p.logger != nil {
-			p.logger.Info("No bundled presets available for gain plugin")
+			p.logger.Error("Invalid preset format: missing gain value")
 		}
 		return false
 		

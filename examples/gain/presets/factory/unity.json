@@ -1,0 +1,5 @@
+{
+  "name": "Unity Gain",
+  "description": "0dB gain - no change to signal",
+  "gain": 1.0
+}

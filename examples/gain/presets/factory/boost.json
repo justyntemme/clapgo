@@ -1,0 +1,5 @@
+{
+  "name": "6dB Boost",
+  "description": "Boost signal by 6dB",
+  "gain": 2.0
+}

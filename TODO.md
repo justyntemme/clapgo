@@ -2,6 +2,49 @@
 
 This document outlines the implementation strategy for completing ClapGo's CLAP feature support, organized by priority and dependencies.
 
+## CRITICAL PRIORITY: Memory Allocation Optimization
+
+### Event Pool for Zero-Allocation Processing
+**Priority**: CRITICAL - Performance impact on real-time audio thread
+**Current Issue**: Events are allocated on every process call, causing potential audio glitches
+
+**Required Implementation**:
+- [ ] Implement event pool with pre-allocated event objects
+- [ ] Support for all event types (note, MIDI, parameter, etc.)
+- [ ] Thread-safe pool management for multi-threaded hosts
+- [ ] Configurable pool size based on expected event density
+- [ ] Automatic pool growth if needed (with warnings)
+
+**Implementation Strategy**:
+1. Create `EventPool` struct with pre-allocated event slices
+   - Separate pools for each event type to avoid interface{} allocations
+   - Pre-allocate common sizes (e.g., 128 events per type)
+2. Modify `convertCEventToGo` to take events from pool instead of allocating
+3. Add `ReturnToPool()` method on events for recycling
+4. Update `EventProcessor` to manage pool lifecycle:
+   - Get events from pool in `GetInputEvent()`
+   - Return events to pool after processing
+   - Clear event data to prevent data leaks
+5. Implement pool growing strategy:
+   - Start with reasonable defaults
+   - Double size when exhausted (with warning log)
+   - Never shrink during runtime
+6. Add diagnostics:
+   - Pool hit/miss counters
+   - High water mark tracking
+   - Warning when allocation happens in process()
+
+**Code Locations to Update**:
+- `pkg/api/events.go`: Add EventPool, modify convertCEventToGo
+- `pkg/api/events.go`: Update EventProcessor to use pool
+- Examples: Update to return events to pool after use
+
+**Why Critical**: 
+- Audio processing requires deterministic timing
+- GC pauses can cause audio dropouts
+- Professional plugins must avoid allocations in process()
+- Industry standard is zero-allocation audio processing
+
 ## Lessons Learned from Phase 1-2 Implementation
 
 ### Architecture Principles (MUST FOLLOW)
@@ -80,10 +123,10 @@ This document outlines the implementation strategy for completing ClapGo's CLAP 
 - [x] Output event handling via PushBackEvent
 - [x] Event type detection and routing
 
-**Still Needed** (Lower Priority):
-- [ ] Event sorting by timestamp validation
-- [ ] Event pool for allocation-free processing
-- [ ] Advanced event filtering
+**Still Needed**:
+- [ ] Event pool for allocation-free processing (CRITICAL - See top priority section)
+- [ ] Event sorting by timestamp validation (Medium Priority)
+- [ ] Advanced event filtering (Lower Priority)
 
 ## Phase 2: MIDI/Note Support (COMPLETED)
 
