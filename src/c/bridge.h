@@ -52,6 +52,15 @@ typedef struct go_plugin_data {
     bool supports_params;      // Has param-related exports
     bool supports_note_ports;  // Has note port exports
     bool supports_state;       // Has state save/load exports
+    bool supports_latency;     // Has latency export
+    bool supports_tail;        // Has tail export
+    bool supports_timer;       // Has timer export
+    bool supports_audio_ports_config; // Has audio ports config exports
+    bool supports_surround;    // Has surround exports
+    bool supports_voice_info;  // Has voice info export
+    bool supports_state_context; // Has state context exports
+    bool supports_preset_load;  // Has preset load export
+    bool supports_track_info;   // Has track info export
 } go_plugin_data_t;
 
 

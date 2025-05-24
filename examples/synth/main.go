@@ -25,6 +25,7 @@ import (
 	"github.com/justyntemme/clapgo/pkg/api"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
@@ -48,6 +49,15 @@ func init() {
 func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
 	if id == PluginID {
+		// Store the host pointer and create utilities
+		synthPlugin.host = host
+		synthPlugin.logger = api.NewHostLogger(host)
+		
+		// Log plugin creation
+		if synthPlugin.logger != nil {
+			synthPlugin.logger.Info("Creating synth plugin instance")
+		}
+		
 		handle := cgo.NewHandle(synthPlugin)
 		return unsafe.Pointer(handle)
 	}
@@ -540,6 +550,195 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	return C.bool(true)
 }
 
+// State Context Extension Exports
+
+//export ClapGo_PluginStateSaveWithContext
+func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Log the context type
+	if p.logger != nil {
+		switch contextType {
+		case C.uint32_t(api.StateContextForPreset):
+			p.logger.Info("Saving state for preset")
+		case C.uint32_t(api.StateContextForDuplicate):
+			p.logger.Info("Saving state for duplicate")
+		case C.uint32_t(api.StateContextForProject):
+			p.logger.Info("Saving state for project")
+		default:
+			p.logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
+		}
+	}
+	
+	// For preset saves, we might want to clear voice state
+	// For duplicate/project saves, we keep everything
+	if contextType == C.uint32_t(api.StateContextForPreset) {
+		// Save without active voice data for presets
+		return ClapGo_PluginStateSave(plugin, stream)
+	}
+	
+	// For other contexts, save everything including voice state
+	return ClapGo_PluginStateSave(plugin, stream)
+}
+
+//export ClapGo_PluginStateLoadWithContext
+func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Log the context type
+	if p.logger != nil {
+		switch contextType {
+		case C.uint32_t(api.StateContextForPreset):
+			p.logger.Info("Loading state for preset")
+		case C.uint32_t(api.StateContextForDuplicate):
+			p.logger.Info("Loading state for duplicate")
+		case C.uint32_t(api.StateContextForProject):
+			p.logger.Info("Loading state for project")
+		default:
+			p.logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
+		}
+	}
+	
+	// Load the state
+	result := ClapGo_PluginStateLoad(plugin, stream)
+	
+	// For preset loads, we might want to reset voice allocation
+	if contextType == C.uint32_t(api.StateContextForPreset) && result {
+		// Clear all active voices when loading a preset
+		// Note: In a real plugin, you'd want proper synchronization here
+		// For now, we're assuming preset loads happen on the main thread
+		for i := range p.voices {
+			if p.voices[i] != nil {
+				p.voices[i].IsActive = false
+			}
+		}
+	}
+	
+	return result
+}
+
+// Preset Load Extension Exports
+
+//export ClapGo_PluginPresetLoadFromLocation
+func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Convert C strings to Go strings
+	var locationStr, loadKeyStr string
+	if location != nil {
+		locationStr = C.GoString(location)
+	}
+	if loadKey != nil {
+		loadKeyStr = C.GoString(loadKey)
+	}
+	
+	// Log the preset load request
+	if p.logger != nil {
+		switch locationKind {
+		case C.uint32_t(api.PresetLocationFile):
+			p.logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", locationStr, loadKeyStr))
+		case C.uint32_t(api.PresetLocationPlugin):
+			p.logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKeyStr))
+		default:
+			p.logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
+			return C.bool(false)
+		}
+	}
+	
+	// Handle different location kinds
+	switch locationKind {
+	case C.uint32_t(api.PresetLocationFile):
+		// Load preset from file
+		if locationStr == "" {
+			return C.bool(false)
+		}
+		
+		// Read the preset file
+		presetData, err := os.ReadFile(locationStr)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
+			}
+			return C.bool(false)
+		}
+		
+		// Parse the preset data
+		var preset map[string]interface{}
+		if err := json.Unmarshal(presetData, &preset); err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
+			}
+			return C.bool(false)
+		}
+		
+		// Clear all active voices when loading a preset
+		for i := range p.voices {
+			if p.voices[i] != nil {
+				p.voices[i].IsActive = false
+			}
+		}
+		
+		// Load the preset state
+		p.LoadState(preset)
+		
+		if p.logger != nil {
+			p.logger.Info("Preset loaded successfully")
+		}
+		return C.bool(true)
+		
+	case C.uint32_t(api.PresetLocationPlugin):
+		// Load bundled preset
+		// For this example, we'll load presets from an embedded presets directory
+		presetPath := filepath.Join("presets", "factory", loadKeyStr+".json")
+		
+		// Try to load from the file system first (for development)
+		presetData, err := os.ReadFile(presetPath)
+		if err != nil {
+			// In a real plugin, you might embed presets in the binary
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to load bundled preset: %v", err))
+			}
+			return C.bool(false)
+		}
+		
+		// Parse the preset data
+		var preset map[string]interface{}
+		if err := json.Unmarshal(presetData, &preset); err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
+			}
+			return C.bool(false)
+		}
+		
+		// Clear all active voices when loading a preset
+		for i := range p.voices {
+			if p.voices[i] != nil {
+				p.voices[i].IsActive = false
+			}
+		}
+		
+		// Load the preset state
+		p.LoadState(preset)
+		
+		if p.logger != nil {
+			p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded successfully", loadKeyStr))
+		}
+		return C.bool(true)
+		
+	default:
+		return C.bool(false)
+	}
+}
+
 // Voice represents a single active note
 type Voice struct {
 	NoteID       int32
@@ -588,6 +787,10 @@ type SynthPlugin struct {
 	
 	// Note port management
 	notePortManager *api.NotePortManager
+	
+	// Host utilities
+	logger       *api.HostLogger
+	trackInfo    *api.HostTrackInfo
 }
 
 // TransportInfo holds host transport information
@@ -641,6 +844,20 @@ func NewSynthPlugin() *SynthPlugin {
 
 // Init initializes the plugin
 func (p *SynthPlugin) Init() bool {
+	// Initialize track info helper
+	if p.host != nil {
+		p.trackInfo = api.NewHostTrackInfo(p.host)
+	}
+	
+	if p.logger != nil {
+		p.logger.Debug("Synth plugin initialized")
+	}
+	
+	// Check initial track info
+	if p.trackInfo != nil {
+		p.OnTrackInfoChanged()
+	}
+	
 	return true
 }
 
@@ -657,6 +874,10 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 	// Clear all voices
 	for i := range p.voices {
 		p.voices[i] = nil
+	}
+	
+	if p.logger != nil {
+		p.logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
 	}
 	
 	return true
@@ -939,6 +1160,10 @@ func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent, time uint32) {
 		Phase:       0.0,
 		IsActive:    true,
 		ReleasePhase: -1.0, // Not in release phase
+	}
+	
+	if p.logger != nil {
+		p.logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
 	}
 }
 
@@ -1278,6 +1503,96 @@ func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	}
 }
 
+// GetLatency returns the plugin's latency in samples
+func (p *SynthPlugin) GetLatency() uint32 {
+	// Synth has no lookahead or processing latency
+	return 0
+}
+
+// GetTail returns the plugin's tail length in samples
+func (p *SynthPlugin) GetTail() uint32 {
+	// Get release time
+	release := floatFromBits(uint64(atomic.LoadInt64(&p.release)))
+	
+	// Convert to samples
+	tailSamples := uint32(release * p.sampleRate)
+	
+	// Add some extra samples for safety
+	return tailSamples + uint32(p.sampleRate * 0.1) // 100ms extra
+}
+
+// OnTimer handles timer callbacks
+func (p *SynthPlugin) OnTimer(timerID uint64) {
+	// Synth doesn't currently use timers
+	// Could be used for UI updates, voice status monitoring, etc.
+	if p.logger != nil {
+		p.logger.Debug(fmt.Sprintf("Timer %d fired", timerID))
+	}
+}
+
+// OnTrackInfoChanged is called when the track information changes
+func (p *SynthPlugin) OnTrackInfoChanged() {
+	if p.trackInfo == nil {
+		return
+	}
+	
+	// Get the new track information
+	info, ok := p.trackInfo.GetTrackInfo()
+	if !ok {
+		if p.logger != nil {
+			p.logger.Warning("Failed to get track info")
+		}
+		return
+	}
+	
+	// Log the track information
+	if p.logger != nil {
+		p.logger.Info(fmt.Sprintf("Track info changed:"))
+		if info.Flags&api.TrackInfoHasTrackName != 0 {
+			p.logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
+		}
+		if info.Flags&api.TrackInfoHasTrackColor != 0 {
+			p.logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
+				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
+		}
+		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
+			p.logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
+				info.AudioChannelCount, info.AudioPortType))
+		}
+		
+		// Adjust synth behavior based on track type
+		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
+			p.logger.Info("  This is a return track - adjusting for wet signal")
+			// Could adjust default mix to 100% wet
+		}
+		if info.Flags&api.TrackInfoIsForBus != 0 {
+			p.logger.Info("  This is a bus track")
+			// Could adjust polyphony or processing
+		}
+		if info.Flags&api.TrackInfoIsForMaster != 0 {
+			p.logger.Info("  This is the master track")
+			// Synths typically wouldn't be on master, but if so, could adjust
+		}
+	}
+}
+
+// GetVoiceInfo returns voice count and capacity information
+func (p *SynthPlugin) GetVoiceInfo() api.VoiceInfo {
+	// Count active voices
+	activeVoices := uint32(0)
+	for _, voice := range p.voices {
+		if voice != nil && voice.IsActive {
+			activeVoices++
+		}
+	}
+	
+	return api.VoiceInfo{
+		VoiceCount:    uint32(len(p.voices)), // Maximum polyphony
+		VoiceCapacity: uint32(len(p.voices)), // Same as count in our implementation
+		Flags:         api.VoiceInfoSupportsOverlappingNotes, // We support note IDs
+	}
+}
+
 // LoadPreset loads a preset from a location
 func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) bool {
 	// Open the preset file
@@ -1331,6 +1646,63 @@ func floatToBits(f float64) uint64 {
 
 func floatFromBits(b uint64) float64 {
 	return *(*float64)(unsafe.Pointer(&b))
+}
+
+// Phase 3 Extension Exports
+
+//export ClapGo_PluginLatencyGet
+func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.uint32_t(p.GetLatency())
+}
+
+//export ClapGo_PluginTailGet
+func ClapGo_PluginTailGet(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.uint32_t(p.GetTail())
+}
+
+//export ClapGo_PluginOnTimer
+func ClapGo_PluginOnTimer(plugin unsafe.Pointer, timerID C.uint64_t) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.OnTimer(uint64(timerID))
+}
+
+//export ClapGo_PluginVoiceInfoGet
+func ClapGo_PluginVoiceInfoGet(plugin unsafe.Pointer, info unsafe.Pointer) C.bool {
+	if plugin == nil || info == nil {
+		return false
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	voiceInfo := p.GetVoiceInfo()
+	
+	// Convert to C struct
+	cInfo := (*C.clap_voice_info_t)(info)
+	cInfo.voice_count = C.uint32_t(voiceInfo.VoiceCount)
+	cInfo.voice_capacity = C.uint32_t(voiceInfo.VoiceCapacity)
+	cInfo.flags = C.uint64_t(voiceInfo.Flags)
+	
+	return true
+}
+
+// Phase 7 Extension Exports
+
+//export ClapGo_PluginTrackInfoChanged
+func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.OnTrackInfoChanged()
 }
 
 func main() {

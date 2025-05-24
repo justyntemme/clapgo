@@ -51,6 +51,18 @@
     {
       "id": "clap.note-name",
       "supported": false
+    },
+    {
+      "id": "clap.latency",
+      "supported": true
+    },
+    {
+      "id": "clap.tail",
+      "supported": true
+    },
+    {
+      "id": "clap.timer-support",
+      "supported": true
     }
   ]
 }

@@ -47,6 +47,44 @@ extern bool ClapGo_PluginStateLoad(void* plugin, void* stream);
 __attribute__((weak)) uint32_t ClapGo_PluginNotePortsCount(void* plugin, bool is_input);
 __attribute__((weak)) bool ClapGo_PluginNotePortsGet(void* plugin, uint32_t index, bool is_input, void* info);
 
+// Phase 3 extension Go exports - weak symbols to allow optional implementation
+// Latency extension
+__attribute__((weak)) uint32_t ClapGo_PluginLatencyGet(void* plugin);
+
+// Tail extension  
+__attribute__((weak)) uint32_t ClapGo_PluginTailGet(void* plugin);
+
+// Log extension - host side, no plugin exports needed
+
+// Timer support extension
+__attribute__((weak)) void ClapGo_PluginOnTimer(void* plugin, uint64_t timer_id);
+
+// Phase 5 extension Go exports - weak symbols to allow optional implementation
+// Audio ports config extension
+__attribute__((weak)) uint32_t ClapGo_PluginAudioPortsConfigCount(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginAudioPortsConfigGet(void* plugin, uint32_t index, void* config);
+__attribute__((weak)) bool ClapGo_PluginAudioPortsConfigSelect(void* plugin, uint64_t config_id);
+__attribute__((weak)) uint64_t ClapGo_PluginAudioPortsConfigCurrentConfig(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginAudioPortsConfigGetInfo(void* plugin, uint64_t config_id, uint32_t port_index, bool is_input, void* info);
+
+// Surround extension  
+__attribute__((weak)) bool ClapGo_PluginSurroundIsChannelMaskSupported(void* plugin, uint64_t channel_mask);
+__attribute__((weak)) uint32_t ClapGo_PluginSurroundGetChannelMap(void* plugin, bool is_input, uint32_t port_index, uint8_t* channel_map, uint32_t channel_map_capacity);
+
+// Voice info extension
+__attribute__((weak)) bool ClapGo_PluginVoiceInfoGet(void* plugin, void* info);
+
+// Phase 6 extension Go exports
+// State context extension
+__attribute__((weak)) bool ClapGo_PluginStateSaveWithContext(void* plugin, void* stream, uint32_t context_type);
+__attribute__((weak)) bool ClapGo_PluginStateLoadWithContext(void* plugin, void* stream, uint32_t context_type);
+
+// Preset load extension
+__attribute__((weak)) bool ClapGo_PluginPresetLoadFromLocation(void* plugin, uint32_t location_kind, char* location, char* load_key);
+
+// Track info extension
+__attribute__((weak)) void ClapGo_PluginTrackInfoChanged(void* plugin);
+
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
     printf("Searching for manifest for plugin: %s\n", plugin_path);
@@ -209,6 +247,19 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
                                  ClapGo_PluginNotePortsGet != NULL);
     data->supports_state = (ClapGo_PluginStateSave != NULL && 
                            ClapGo_PluginStateLoad != NULL);
+    data->supports_latency = (ClapGo_PluginLatencyGet != NULL);
+    data->supports_tail = (ClapGo_PluginTailGet != NULL);
+    data->supports_timer = (ClapGo_PluginOnTimer != NULL);
+    data->supports_audio_ports_config = (ClapGo_PluginAudioPortsConfigCount != NULL &&
+                                         ClapGo_PluginAudioPortsConfigGet != NULL &&
+                                         ClapGo_PluginAudioPortsConfigSelect != NULL);
+    data->supports_surround = (ClapGo_PluginSurroundIsChannelMaskSupported != NULL &&
+                              ClapGo_PluginSurroundGetChannelMap != NULL);
+    data->supports_voice_info = (ClapGo_PluginVoiceInfoGet != NULL);
+    data->supports_state_context = (ClapGo_PluginStateSaveWithContext != NULL &&
+                                   ClapGo_PluginStateLoadWithContext != NULL);
+    data->supports_preset_load = (ClapGo_PluginPresetLoadFromLocation != NULL);
+    data->supports_track_info = (ClapGo_PluginTrackInfoChanged != NULL);
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -474,6 +525,16 @@ static const clap_plugin_state_t s_state_extension = {
     .load = clapgo_state_load
 };
 
+// Forward declarations for state context extension
+static bool clapgo_state_context_save(const clap_plugin_t* plugin, const clap_ostream_t* stream, uint32_t context_type);
+static bool clapgo_state_context_load(const clap_plugin_t* plugin, const clap_istream_t* stream, uint32_t context_type);
+
+// State context extension structure - GUARDRAILS compliant (full implementation)
+static const clap_plugin_state_context_t s_state_context_extension = {
+    .save = clapgo_state_context_save,
+    .load = clapgo_state_context_load
+};
+
 // Forward declarations for note ports extension
 static uint32_t clapgo_note_ports_count(const clap_plugin_t* plugin, bool is_input);
 static bool clapgo_note_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_note_port_info_t* info);
@@ -482,6 +543,76 @@ static bool clapgo_note_ports_get(const clap_plugin_t* plugin, uint32_t index, b
 static const clap_plugin_note_ports_t s_note_ports_extension = {
     .count = clapgo_note_ports_count,
     .get = clapgo_note_ports_get
+};
+
+// Forward declarations for Phase 3 extensions
+static uint32_t clapgo_latency_get(const clap_plugin_t* plugin);
+static uint32_t clapgo_tail_get(const clap_plugin_t* plugin);
+static void clapgo_timer_on_timer(const clap_plugin_t* plugin, clap_id timer_id);
+
+// Latency extension structure
+static const clap_plugin_latency_t s_latency_extension = {
+    .get = clapgo_latency_get
+};
+
+// Tail extension structure
+static const clap_plugin_tail_t s_tail_extension = {
+    .get = clapgo_tail_get
+};
+
+// Timer support extension structure
+static const clap_plugin_timer_support_t s_timer_support_extension = {
+    .on_timer = clapgo_timer_on_timer
+};
+
+// Forward declarations for Phase 5 extensions
+static uint32_t clapgo_audio_ports_config_count(const clap_plugin_t* plugin);
+static bool clapgo_audio_ports_config_get(const clap_plugin_t* plugin, uint32_t index, clap_audio_ports_config_t* config);
+static bool clapgo_audio_ports_config_select(const clap_plugin_t* plugin, clap_id config_id);
+static clap_id clapgo_audio_ports_config_info_current_config(const clap_plugin_t* plugin);
+static bool clapgo_audio_ports_config_info_get(const clap_plugin_t* plugin, clap_id config_id, uint32_t port_index, bool is_input, clap_audio_port_info_t* info);
+static bool clapgo_surround_is_channel_mask_supported(const clap_plugin_t* plugin, uint64_t channel_mask);
+static uint32_t clapgo_surround_get_channel_map(const clap_plugin_t* plugin, bool is_input, uint32_t port_index, uint8_t* channel_map, uint32_t channel_map_capacity);
+static bool clapgo_voice_info_get(const clap_plugin_t* plugin, clap_voice_info_t* info);
+
+// Audio ports config extension structure
+static const clap_plugin_audio_ports_config_t s_audio_ports_config_extension = {
+    .count = clapgo_audio_ports_config_count,
+    .get = clapgo_audio_ports_config_get,
+    .select = clapgo_audio_ports_config_select
+};
+
+// Audio ports config info extension structure
+static const clap_plugin_audio_ports_config_info_t s_audio_ports_config_info_extension = {
+    .current_config = clapgo_audio_ports_config_info_current_config,
+    .get = clapgo_audio_ports_config_info_get
+};
+
+// Surround extension structure
+static const clap_plugin_surround_t s_surround_extension = {
+    .is_channel_mask_supported = clapgo_surround_is_channel_mask_supported,
+    .get_channel_map = clapgo_surround_get_channel_map
+};
+
+// Voice info extension structure
+static const clap_plugin_voice_info_t s_voice_info_extension = {
+    .get = clapgo_voice_info_get
+};
+
+// Forward declaration for preset load extension
+static bool clapgo_preset_load_from_location(const clap_plugin_t* plugin, uint32_t location_kind, const char* location, const char* load_key);
+
+// Preset load extension structure
+static const clap_plugin_preset_load_t s_preset_load_extension = {
+    .from_location = clapgo_preset_load_from_location
+};
+
+// Forward declaration for track info extension
+static void clapgo_track_info_changed(const clap_plugin_t* plugin);
+
+// Track info extension structure
+static const clap_plugin_track_info_t s_track_info_extension = {
+    .changed = clapgo_track_info_changed
 };
 
 // Get the number of audio ports
@@ -543,6 +674,16 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
         return NULL;
     }
     
+    // Check if this is the state context extension
+    if (strcmp(id, CLAP_EXT_STATE_CONTEXT) == 0) {
+        if (data->supports_state_context) {
+            printf("DEBUG: state context extension requested and supported\n");
+            return &s_state_context_extension;
+        }
+        printf("DEBUG: state context extension requested but not supported\n");
+        return NULL;
+    }
+    
     // Check if this is the audio ports extension
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) {
         printf("DEBUG: audio ports extension requested, always supported\n");
@@ -557,6 +698,97 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
             return &s_note_ports_extension;
         }
         printf("DEBUG: note ports extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the latency extension
+    if (strcmp(id, CLAP_EXT_LATENCY) == 0) {
+        if (data->supports_latency) {
+            printf("DEBUG: latency extension requested and supported\n");
+            return &s_latency_extension;
+        }
+        printf("DEBUG: latency extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the tail extension
+    if (strcmp(id, CLAP_EXT_TAIL) == 0) {
+        if (data->supports_tail) {
+            printf("DEBUG: tail extension requested and supported\n");
+            return &s_tail_extension;
+        }
+        printf("DEBUG: tail extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the timer support extension
+    if (strcmp(id, CLAP_EXT_TIMER_SUPPORT) == 0) {
+        if (data->supports_timer) {
+            printf("DEBUG: timer support extension requested and supported\n");
+            return &s_timer_support_extension;
+        }
+        printf("DEBUG: timer support extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the audio ports config extension
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0) {
+        if (data->supports_audio_ports_config) {
+            printf("DEBUG: audio ports config extension requested and supported\n");
+            return &s_audio_ports_config_extension;
+        }
+        printf("DEBUG: audio ports config extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the audio ports config info extension
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO) == 0 || 
+        strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT) == 0) {
+        if (data->supports_audio_ports_config) {
+            printf("DEBUG: audio ports config info extension requested and supported\n");
+            return &s_audio_ports_config_info_extension;
+        }
+        printf("DEBUG: audio ports config info extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the surround extension  
+    if (strcmp(id, CLAP_EXT_SURROUND) == 0 || strcmp(id, CLAP_EXT_SURROUND_COMPAT) == 0) {
+        if (data->supports_surround) {
+            printf("DEBUG: surround extension requested and supported\n");
+            return &s_surround_extension;
+        }
+        printf("DEBUG: surround extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the voice info extension
+    if (strcmp(id, CLAP_EXT_VOICE_INFO) == 0) {
+        if (data->supports_voice_info) {
+            printf("DEBUG: voice info extension requested and supported\n");
+            return &s_voice_info_extension;
+        }
+        printf("DEBUG: voice info extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the preset load extension
+    if (strcmp(id, CLAP_EXT_PRESET_LOAD) == 0) {
+        if (data->supports_preset_load) {
+            printf("DEBUG: preset load extension requested and supported\n");
+            return &s_preset_load_extension;
+        }
+        printf("DEBUG: preset load extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the track info extension
+    if (strcmp(id, CLAP_EXT_TRACK_INFO) == 0 || strcmp(id, CLAP_EXT_TRACK_INFO_COMPAT) == 0) {
+        if (data->supports_track_info) {
+            printf("DEBUG: track info extension requested and supported\n");
+            return &s_track_info_extension;
+        }
+        printf("DEBUG: track info extension requested but not supported\n");
         return NULL;
     }
     
@@ -701,4 +933,236 @@ static bool clapgo_note_ports_get(const clap_plugin_t* plugin, uint32_t index, b
     
     // Call into Go to get note port info
     return ClapGo_PluginNotePortsGet(data->go_instance, index, is_input, info);
+}
+
+// Phase 3 Extension Implementations
+
+// Latency extension implementation
+static uint32_t clapgo_latency_get(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists (not NULL due to weak symbol)
+    if (!ClapGo_PluginLatencyGet) {
+        return 0;
+    }
+    
+    // Call into Go to get latency
+    return ClapGo_PluginLatencyGet(data->go_instance);
+}
+
+// Tail extension implementation
+static uint32_t clapgo_tail_get(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists (not NULL due to weak symbol)
+    if (!ClapGo_PluginTailGet) {
+        return 0;
+    }
+    
+    // Call into Go to get tail length
+    return ClapGo_PluginTailGet(data->go_instance);
+}
+
+// Timer support extension implementation
+static void clapgo_timer_on_timer(const clap_plugin_t* plugin, clap_id timer_id) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists (not NULL due to weak symbol)
+    if (!ClapGo_PluginOnTimer) {
+        return;
+    }
+    
+    // Call into Go to handle timer
+    ClapGo_PluginOnTimer(data->go_instance, timer_id);
+}
+
+// Phase 5 Extension Implementations
+
+// Audio ports config extension implementation
+static uint32_t clapgo_audio_ports_config_count(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsConfigCount) {
+        return 0;
+    }
+    
+    return ClapGo_PluginAudioPortsConfigCount(data->go_instance);
+}
+
+static bool clapgo_audio_ports_config_get(const clap_plugin_t* plugin, uint32_t index, clap_audio_ports_config_t* config) {
+    if (!plugin || !config) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsConfigGet) {
+        return false;
+    }
+    
+    return ClapGo_PluginAudioPortsConfigGet(data->go_instance, index, config);
+}
+
+static bool clapgo_audio_ports_config_select(const clap_plugin_t* plugin, clap_id config_id) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsConfigSelect) {
+        return false;
+    }
+    
+    return ClapGo_PluginAudioPortsConfigSelect(data->go_instance, config_id);
+}
+
+// Audio ports config info extension implementation
+static clap_id clapgo_audio_ports_config_info_current_config(const clap_plugin_t* plugin) {
+    if (!plugin) return CLAP_INVALID_ID;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return CLAP_INVALID_ID;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsConfigCurrentConfig) {
+        return CLAP_INVALID_ID;
+    }
+    
+    return ClapGo_PluginAudioPortsConfigCurrentConfig(data->go_instance);
+}
+
+static bool clapgo_audio_ports_config_info_get(const clap_plugin_t* plugin, clap_id config_id, 
+                                                uint32_t port_index, bool is_input, 
+                                                clap_audio_port_info_t* info) {
+    if (!plugin || !info) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsConfigGetInfo) {
+        return false;
+    }
+    
+    return ClapGo_PluginAudioPortsConfigGetInfo(data->go_instance, config_id, port_index, is_input, info);
+}
+
+// Surround extension implementation
+static bool clapgo_surround_is_channel_mask_supported(const clap_plugin_t* plugin, uint64_t channel_mask) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginSurroundIsChannelMaskSupported) {
+        return false;
+    }
+    
+    return ClapGo_PluginSurroundIsChannelMaskSupported(data->go_instance, channel_mask);
+}
+
+static uint32_t clapgo_surround_get_channel_map(const clap_plugin_t* plugin, bool is_input, 
+                                               uint32_t port_index, uint8_t* channel_map, 
+                                               uint32_t channel_map_capacity) {
+    if (!plugin || !channel_map) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginSurroundGetChannelMap) {
+        return 0;
+    }
+    
+    return ClapGo_PluginSurroundGetChannelMap(data->go_instance, is_input, port_index, 
+                                              channel_map, channel_map_capacity);
+}
+
+// Voice info extension implementation
+static bool clapgo_voice_info_get(const clap_plugin_t* plugin, clap_voice_info_t* info) {
+    if (!plugin || !info) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginVoiceInfoGet) {
+        return false;
+    }
+    
+    return ClapGo_PluginVoiceInfoGet(data->go_instance, info);
+}
+
+// State context extension implementation
+static bool clapgo_state_context_save(const clap_plugin_t* plugin, const clap_ostream_t* stream, uint32_t context_type) {
+    if (!plugin || !stream) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginStateSaveWithContext) {
+        return false;
+    }
+    
+    return ClapGo_PluginStateSaveWithContext(data->go_instance, (void*)stream, context_type);
+}
+
+static bool clapgo_state_context_load(const clap_plugin_t* plugin, const clap_istream_t* stream, uint32_t context_type) {
+    if (!plugin || !stream) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginStateLoadWithContext) {
+        return false;
+    }
+    
+    return ClapGo_PluginStateLoadWithContext(data->go_instance, (void*)stream, context_type);
+}
+
+// Preset load extension implementation
+static bool clapgo_preset_load_from_location(const clap_plugin_t* plugin, uint32_t location_kind, const char* location, const char* load_key) {
+    if (!plugin || !location) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginPresetLoadFromLocation) {
+        return false;
+    }
+    
+    return ClapGo_PluginPresetLoadFromLocation(data->go_instance, location_kind, (char*)location, (char*)load_key);
+}
+
+// Track info extension implementation
+static void clapgo_track_info_changed(const clap_plugin_t* plugin) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginTrackInfoChanged) {
+        return;
+    }
+    
+    ClapGo_PluginTrackInfoChanged(data->go_instance);
 }

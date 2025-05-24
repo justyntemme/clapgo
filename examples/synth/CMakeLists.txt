@@ -1,35 +1,26 @@
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libsynth.so ${CMAKE_CURRENT_BINARY_DIR}/libsynth.h
-    COMMENT "Building Go shared library synth"
-    COMMAND ${CMAKE_COMMAND} -E env GOPATH=${CMAKE_BINARY_DIR}/go CGO_ENABLED=1 CLAPGO_PLUGIN_TYPE=synth ${GO_EXECUTABLE} build -buildmode=c-shared -o ${CMAKE_CURRENT_BINARY_DIR}/libsynth.so ${CMAKE_CURRENT_SOURCE_DIR}/main.go
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/main.go
+# Add Go shared library for the synth plugin
+add_go_library(synth-go
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/main.go
+        ${CMAKE_CURRENT_SOURCE_DIR}/constants.go
+    OUTPUT_NAME
+        synth
 )
 
-add_custom_target(synth-go DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libsynth.so)
+# Find json-c
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSON_C REQUIRED json-c)
 
-add_library(synth MODULE 
-    ${CMAKE_SOURCE_DIR}/src/c/plugin.c
+# Build the CLAP plugin
+add_clap_plugin(synth
+    SOURCES
+        ${CMAKE_SOURCE_DIR}/src/c/plugin.c
+        ${CMAKE_SOURCE_DIR}/src/c/bridge.c
+        ${CMAKE_SOURCE_DIR}/src/c/manifest.c
+    LINK_LIBRARIES
+        synth-go
+        ${JSON_C_LIBRARIES}
 )
 
-set_target_properties(synth PROPERTIES 
-    OUTPUT_NAME "synth"
-    PREFIX ""
-    SUFFIX ".clap"
-)
-
-target_include_directories(synth PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_BINARY_DIR}
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-target_link_libraries(synth PRIVATE 
-    ${CMAKE_CURRENT_BINARY_DIR}/libsynth.so
-)
-
-add_dependencies(synth synth-go)
-
-install(TARGETS synth
-    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/plugins
-)
+# Add json-c include directories
+target_include_directories(synth PRIVATE ${JSON_C_INCLUDE_DIRS})

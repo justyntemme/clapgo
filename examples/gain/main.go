@@ -20,8 +20,10 @@ package main
 // }
 import "C"
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"runtime/cgo"
 	"sync/atomic"
@@ -45,6 +47,15 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	fmt.Printf("Gain plugin - ClapGo_CreatePlugin with ID: %s\n", id)
 	
 	if id == PluginID {
+		// Store the host pointer and create utilities
+		gainPlugin.host = host
+		gainPlugin.logger = api.NewHostLogger(host)
+		
+		// Log plugin creation
+		if gainPlugin.logger != nil {
+			gainPlugin.logger.Info("Creating gain plugin instance")
+		}
+		
 		// Create a CGO handle to safely pass the Go object to C
 		handle := cgo.NewHandle(gainPlugin)
 		fmt.Printf("Created plugin instance: %s\n", id)
@@ -363,6 +374,10 @@ type GainPlugin struct {
 	
 	// Parameter management using our new abstraction
 	paramManager *api.ParameterManager
+	
+	// Host utilities
+	logger       *api.HostLogger
+	trackInfo    *api.HostTrackInfo
 }
 
 // NewGainPlugin creates a new gain plugin instance
@@ -386,6 +401,20 @@ func NewGainPlugin() *GainPlugin {
 
 // Init initializes the plugin
 func (p *GainPlugin) Init() bool {
+	// Initialize track info helper
+	if p.host != nil {
+		p.trackInfo = api.NewHostTrackInfo(p.host)
+	}
+	
+	if p.logger != nil {
+		p.logger.Debug("Gain plugin initialized")
+	}
+	
+	// Check initial track info
+	if p.trackInfo != nil {
+		p.OnTrackInfoChanged()
+	}
+	
 	return true
 }
 
@@ -398,6 +427,11 @@ func (p *GainPlugin) Destroy() {
 func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
 	p.sampleRate = sampleRate
 	p.isActivated = true
+	
+	if p.logger != nil {
+		p.logger.Info(fmt.Sprintf("Plugin activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
+	}
+	
 	return true
 }
 
@@ -513,6 +547,13 @@ func (p *GainPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 		
 		// Update parameter manager
 		p.paramManager.SetParameterValue(paramEvent.ParamID, value)
+		
+		// Log the parameter change
+		if p.logger != nil {
+			// Convert to dB for logging
+			db := 20.0 * math.Log10(value)
+			p.logger.Debug(fmt.Sprintf("Gain changed to %.2f dB", db))
+		}
 	}
 }
 
@@ -546,6 +587,70 @@ func (p *GainPlugin) OnMainThread() {
 // GetPluginID returns the plugin ID
 func (p *GainPlugin) GetPluginID() string {
 	return PluginID
+}
+
+// GetLatency returns the plugin's latency in samples
+func (p *GainPlugin) GetLatency() uint32 {
+	// Gain plugin has no latency
+	return 0
+}
+
+// GetTail returns the plugin's tail length in samples
+func (p *GainPlugin) GetTail() uint32 {
+	// Gain plugin has no tail (no reverb/delay)
+	return 0
+}
+
+// OnTimer handles timer callbacks
+func (p *GainPlugin) OnTimer(timerID uint64) {
+	// Gain plugin doesn't use timers
+	// This is here as an example implementation
+}
+
+// OnTrackInfoChanged is called when the track information changes
+func (p *GainPlugin) OnTrackInfoChanged() {
+	if p.trackInfo == nil {
+		return
+	}
+	
+	// Get the new track information
+	info, ok := p.trackInfo.GetTrackInfo()
+	if !ok {
+		if p.logger != nil {
+			p.logger.Warning("Failed to get track info")
+		}
+		return
+	}
+	
+	// Log the track information
+	if p.logger != nil {
+		p.logger.Info(fmt.Sprintf("Track info changed:"))
+		if info.Flags&api.TrackInfoHasTrackName != 0 {
+			p.logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
+		}
+		if info.Flags&api.TrackInfoHasTrackColor != 0 {
+			p.logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
+				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
+		}
+		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
+			p.logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
+				info.AudioChannelCount, info.AudioPortType))
+		}
+		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
+			p.logger.Info("  This is a return track")
+		}
+		if info.Flags&api.TrackInfoIsForBus != 0 {
+			p.logger.Info("  This is a bus track")
+		}
+		if info.Flags&api.TrackInfoIsForMaster != 0 {
+			p.logger.Info("  This is the master track")
+		}
+	}
+	
+	// For a more sophisticated plugin, you might:
+	// - Adjust default parameter values based on track type
+	// - Configure audio processing differently for bus/master tracks
+	// - Update GUI to show track information
 }
 
 // SaveState saves the plugin state to a stream
@@ -627,6 +732,117 @@ func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 	return true
 }
 
+// SaveStateWithContext saves the plugin state to a stream with context
+func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
+	// Log the context type
+	if p.logger != nil {
+		switch contextType {
+		case api.StateContextForPreset:
+			p.logger.Info("Saving state for preset")
+		case api.StateContextForDuplicate:
+			p.logger.Info("Saving state for duplicate")
+		case api.StateContextForProject:
+			p.logger.Info("Saving state for project")
+		default:
+			p.logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
+		}
+	}
+	
+	// For this simple gain plugin, we save the same data regardless of context
+	// More complex plugins might save different data based on context
+	return p.SaveState(stream)
+}
+
+// LoadStateWithContext loads the plugin state from a stream with context
+func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
+	// Log the context type
+	if p.logger != nil {
+		switch contextType {
+		case api.StateContextForPreset:
+			p.logger.Info("Loading state for preset")
+		case api.StateContextForDuplicate:
+			p.logger.Info("Loading state for duplicate")
+		case api.StateContextForProject:
+			p.logger.Info("Loading state for project")
+		default:
+			p.logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
+		}
+	}
+	
+	// For this simple gain plugin, we load the same data regardless of context
+	// More complex plugins might handle loading differently based on context
+	return p.LoadState(stream)
+}
+
+// LoadPresetFromLocation loads a preset from the specified location
+func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) bool {
+	// Log the preset load request
+	if p.logger != nil {
+		switch locationKind {
+		case api.PresetLocationFile:
+			p.logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", location, loadKey))
+		case api.PresetLocationPlugin:
+			p.logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKey))
+		default:
+			p.logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
+			return false
+		}
+	}
+	
+	// Handle different location kinds
+	switch locationKind {
+	case api.PresetLocationFile:
+		// Load preset from file
+		if location == "" {
+			return false
+		}
+		
+		// Read the preset file
+		presetData, err := os.ReadFile(location)
+		if err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
+			}
+			return false
+		}
+		
+		// Parse the preset data
+		var state map[string]interface{}
+		if err := json.Unmarshal(presetData, &state); err != nil {
+			if p.logger != nil {
+				p.logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
+			}
+			return false
+		}
+		
+		// Load the preset state
+		if gainValue, ok := state["gain"].(float64); ok {
+			atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+			p.paramManager.SetParameterValue(0, gainValue)
+			
+			if p.logger != nil {
+				p.logger.Info(fmt.Sprintf("Preset loaded: gain = %.2f", gainValue))
+			}
+			return true
+		}
+		
+		if p.logger != nil {
+			p.logger.Error("Invalid preset format: missing gain value")
+		}
+		return false
+		
+	case api.PresetLocationPlugin:
+		// For this simple example, we don't have bundled presets
+		if p.logger != nil {
+			p.logger.Info("No bundled presets available for gain plugin")
+		}
+		return false
+		
+	default:
+		return false
+	}
+}
+
 // Helper functions for atomic float64 operations
 func floatToBits(f float64) uint64 {
 	return *(*uint64)(unsafe.Pointer(&f))
@@ -652,6 +868,87 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	}
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	return C.bool(p.LoadState(stream))
+}
+
+// State Context Extension Exports
+
+//export ClapGo_PluginStateSaveWithContext
+func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.bool(p.SaveStateWithContext(stream, uint32(contextType)))
+}
+
+//export ClapGo_PluginStateLoadWithContext
+func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
+	if plugin == nil || stream == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.bool(p.LoadStateWithContext(stream, uint32(contextType)))
+}
+
+// Preset Load Extension Exports
+
+//export ClapGo_PluginPresetLoadFromLocation
+func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Convert C strings to Go strings
+	var locationStr, loadKeyStr string
+	if location != nil {
+		locationStr = C.GoString(location)
+	}
+	if loadKey != nil {
+		loadKeyStr = C.GoString(loadKey)
+	}
+	
+	return C.bool(p.LoadPresetFromLocation(uint32(locationKind), locationStr, loadKeyStr))
+}
+
+// Phase 3 Extension Exports
+
+//export ClapGo_PluginLatencyGet
+func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.uint32_t(p.GetLatency())
+}
+
+//export ClapGo_PluginTailGet
+func ClapGo_PluginTailGet(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.uint32_t(p.GetTail())
+}
+
+//export ClapGo_PluginOnTimer
+func ClapGo_PluginOnTimer(plugin unsafe.Pointer, timerID C.uint64_t) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	p.OnTimer(uint64(timerID))
+}
+
+// Phase 7 Extension Exports
+
+//export ClapGo_PluginTrackInfoChanged
+func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	p.OnTrackInfoChanged()
 }
 
 func main() {
