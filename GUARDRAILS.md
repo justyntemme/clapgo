@@ -261,3 +261,31 @@ If the answer is no, don't implement it. If you're unsure, refer to:
 4. `examples/gain/main.go` - for proper Go plugin implementation
 
 Remember: **ClapGo is a bridge, not a framework. Stay true to CLAP while enabling Go development.**
+
+## 🎯 Build System and Examples Guidelines
+
+### Build System Requirements
+**❌ FORBIDDEN:**
+- NEVER worry about CMake configurations or files
+- NEVER modify CMakeLists.txt files
+- NEVER create CMake-based build instructions
+
+**✅ CORRECT APPROACH:**
+- Use `make` and the Makefile exclusively
+- All builds should be done via: `make examples`
+- Test with clap-validator using the testing scripts
+
+**WHY:** The CMake system is only for GUI work. The core ClapGo bridge uses Make.
+
+### Example Plugin Guidelines
+**❌ FORBIDDEN:**
+- NEVER work on GUI examples (gain-with-gui)
+- NEVER create simplified or demo versions of examples
+- NEVER create placeholder implementations
+
+**✅ CORRECT APPROACH:**
+- Focus exclusively on `gain` and `synth` examples
+- Implement full, production-ready functionality
+- Keep code clean and readable while being complete
+
+**WHY:** Examples should demonstrate real-world usage, not simplified concepts. GUI examples are out of scope.

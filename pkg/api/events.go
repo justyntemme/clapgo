@@ -134,7 +134,7 @@ func NewEventPool() *EventPool {
 		if ep.warnOnAllocation && ep.logger != nil {
 			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new MIDIEvent - consider increasing pool size")
 		}
-		return &MIDIEvent{Data: make([]byte, 3)}
+		return &MIDIEvent{}
 	}
 
 	ep.midiSysexPool.New = func() interface{} {
@@ -152,7 +152,7 @@ func NewEventPool() *EventPool {
 		if ep.warnOnAllocation && ep.logger != nil {
 			ep.logger.Log(LogSeverityWarning, "EventPool: Allocating new MIDI2Event - consider increasing pool size")
 		}
-		return &MIDI2Event{Data: make([]uint32, 4)}
+		return &MIDI2Event{}
 	}
 
 	ep.eventPool.New = func() interface{} {
@@ -202,9 +202,9 @@ func (ep *EventPool) preallocate() {
 	for i := 0; i < initialOtherEvents; i++ {
 		ep.paramGesturePool.Put(&ParamGestureEvent{})
 		ep.transportPool.Put(&TransportEvent{})
-		ep.midiPool.Put(&MIDIEvent{Data: make([]byte, 3)})
+		ep.midiPool.Put(&MIDIEvent{})
 		ep.midiSysexPool.Put(&MIDISysexEvent{})
-		ep.midi2Pool.Put(&MIDI2Event{Data: make([]uint32, 4)})
+		ep.midi2Pool.Put(&MIDI2Event{})
 		ep.eventPool.Put(&Event{})
 	}
 }
@@ -599,15 +599,12 @@ func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 	}
 	
 	count := ep.GetInputEventCount()
-	// Collect events to return to pool after processing
-	events := make([]*Event, 0, count)
 	
 	for i := uint32(0); i < count; i++ {
 		event := ep.GetInputEvent(i)
 		if event == nil {
 			continue
 		}
-		events = append(events, event)
 		
 		// Route to the appropriate handler based on event type
 		switch event.Type {
@@ -664,10 +661,8 @@ func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 				handler.HandleMIDI2(&e, event.Time)
 			}
 		}
-	}
-	
-	// Return all events to the pool after processing
-	for _, event := range events {
+		
+		// Return event to pool immediately after processing
 		ep.ReturnEventToPool(event)
 	}
 }
@@ -812,7 +807,7 @@ func convertCEventToGo(cEventHeader *C.clap_event_header_t, pool *EventPool) *Ev
 		if pool != nil {
 			midiEvent = pool.GetMIDIEvent()
 		} else {
-			midiEvent = &MIDIEvent{Data: make([]byte, 3)}
+			midiEvent = &MIDIEvent{}
 		}
 		midiEvent.Port = int16(cMidiEvent.port_index)
 		for i := 0; i < 3; i++ {
@@ -842,7 +837,7 @@ func convertCEventToGo(cEventHeader *C.clap_event_header_t, pool *EventPool) *Ev
 		if pool != nil {
 			midi2Event = pool.GetMIDI2Event()
 		} else {
-			midi2Event = &MIDI2Event{Data: make([]uint32, 4)}
+			midi2Event = &MIDI2Event{}
 		}
 		midi2Event.Port = int16(cMidi2Event.port_index)
 		for i := 0; i < 4; i++ {
@@ -1020,7 +1015,7 @@ func convertGoEventToC(event *Event) *C.clap_event_header_t {
 			cEvent.header.flags = C.uint32_t(event.Flags)
 			
 			cEvent.port_index = C.uint16_t(midiEvent.Port)
-			for i := 0; i < 3 && i < len(midiEvent.Data); i++ {
+			for i := 0; i < 3; i++ {
 				cEvent.data[i] = C.uint8_t(midiEvent.Data[i])
 			}
 			
@@ -1065,7 +1060,7 @@ func convertGoEventToC(event *Event) *C.clap_event_header_t {
 			cEvent.header.flags = C.uint32_t(event.Flags)
 			
 			cEvent.port_index = C.uint16_t(midi2Event.Port)
-			for i := 0; i < 4 && i < len(midi2Event.Data); i++ {
+			for i := 0; i < 4; i++ {
 				cEvent.data[i] = C.uint32_t(midi2Event.Data[i])
 			}
 			
@@ -1102,8 +1097,8 @@ type MIDIEvent struct {
 	// Port is the port index
 	Port int16
 	
-	// Data contains the 3-byte MIDI message
-	Data []byte
+	// Data contains the 3-byte MIDI message (fixed array for zero allocation)
+	Data [3]byte
 }
 
 // MIDISysexEvent represents MIDI system exclusive events
@@ -1120,8 +1115,8 @@ type MIDI2Event struct {
 	// Port is the port index
 	Port int16
 	
-	// Data contains the 4 32-bit words of MIDI 2.0 message
-	Data []uint32
+	// Data contains the 4 32-bit words of MIDI 2.0 message (fixed array for zero allocation)
+	Data [4]uint32
 }
 
 // TransportEvent represents transport events
@@ -1330,7 +1325,7 @@ func CreateNoteExpressionEvent(time uint32, expressionID int32, noteID int32, po
 }
 
 // CreateMIDIEvent creates a MIDI 1.0 event
-func CreateMIDIEvent(time uint32, port int16, data []byte) *Event {
+func CreateMIDIEvent(time uint32, port int16, data [3]byte) *Event {
 	return &Event{
 		Time: time,
 		Type: EventTypeMIDI,
@@ -1354,7 +1349,7 @@ func CreateMIDISysexEvent(time uint32, port int16, data []byte) *Event {
 }
 
 // CreateMIDI2Event creates a MIDI 2.0 event
-func CreateMIDI2Event(time uint32, port int16, data []uint32) *Event {
+func CreateMIDI2Event(time uint32, port int16, data [4]uint32) *Event {
 	return &Event{
 		Time: time,
 		Type: EventTypeMIDI2,
