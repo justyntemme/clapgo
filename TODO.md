@@ -55,13 +55,20 @@ The Preset Discovery Factory extension is now our highest priority implementatio
    - File type associations
 
 **Implementation Strategy:**
-Following the established ClapGo patterns:
-1. Add factory support to plugin entry (not individual plugins)
-2. Create Go interfaces for preset discovery provider
-3. Implement C bridge for factory and provider callbacks
-4. Design efficient metadata extraction without allocations
+Following the manifest system approach for consistency:
+1. **C-Native Implementation**: Build preset discovery entirely in C using json-c like the manifest system
+2. Add factory support to plugin entry (not individual plugins)
+3. Use json-c for preset file parsing (consistent with manifest.c)
+4. Store preset metadata in C structures with fixed allocations
 5. Support both file-based and bundled presets
-6. Integrate with existing manifest system
+6. Integrate with existing C bridge architecture
+
+**Why C Implementation:**
+- Consistent with manifest system architecture
+- Zero allocation guarantees using json-c memory management
+- Better DAW compatibility with predictable C interfaces
+- Simpler architecture without Go/C boundary overhead
+- Matches CLAP performance requirements for fast scanning
 
 **Performance Requirements:**
 - Pre-allocated buffers for metadata
