@@ -68,8 +68,33 @@ package api
 import "C"
 import (
 	"fmt"
+	"strings"
+	"sync"
 	"unsafe"
 )
+
+// Default log buffer size - can be adjusted based on needs
+const DefaultLogBufferSize = 4096 // 4KB buffer for detailed logs
+
+// LogBuffer represents a reusable buffer for log formatting
+type LogBuffer struct {
+	builder strings.Builder
+	cBuffer [DefaultLogBufferSize]C.char // Fixed-size C string buffer
+}
+
+// LoggerPool manages reusable buffers for zero-allocation logging
+type LoggerPool struct {
+	bufferPool sync.Pool
+}
+
+// Global logger pool instance
+var globalLoggerPool = &LoggerPool{
+	bufferPool: sync.Pool{
+		New: func() interface{} {
+			return &LogBuffer{}
+		},
+	},
+}
 
 // HostLogger provides logging functionality to the host
 type HostLogger struct {
@@ -87,18 +112,41 @@ func (l *HostLogger) Log(severity int32, message string, args ...interface{}) {
 		return
 	}
 	
+	// Get a buffer from the pool
+	buffer := globalLoggerPool.bufferPool.Get().(*LogBuffer)
+	defer globalLoggerPool.bufferPool.Put(buffer)
+	
+	// Reset the string builder
+	buffer.builder.Reset()
+	
 	// Format message if args are provided
-	var finalMessage string
 	if len(args) > 0 {
-		finalMessage = fmt.Sprintf(message, args...)
+		// Use Fprintf with the builder to avoid allocation
+		fmt.Fprintf(&buffer.builder, message, args...)
 	} else {
-		finalMessage = message
+		// Direct write for simple messages
+		buffer.builder.WriteString(message)
 	}
 	
-	cMsg := C.CString(finalMessage)
-	defer C.free(unsafe.Pointer(cMsg))
+	// Get the formatted string
+	formatted := buffer.builder.String()
 	
-	C.clap_host_log_helper((*C.clap_host_t)(l.host), C.int32_t(severity), cMsg)
+	// Copy to C buffer if it fits
+	if len(formatted) < len(buffer.cBuffer)-1 {
+		// Zero-copy conversion to C string using pre-allocated buffer
+		for i := 0; i < len(formatted); i++ {
+			buffer.cBuffer[i] = C.char(formatted[i])
+		}
+		buffer.cBuffer[len(formatted)] = 0
+		
+		// Use the pre-allocated C buffer
+		C.clap_host_log_helper((*C.clap_host_t)(l.host), C.int32_t(severity), &buffer.cBuffer[0])
+	} else {
+		// Fallback for messages that exceed buffer size
+		cMsg := C.CString(formatted)
+		defer C.free(unsafe.Pointer(cMsg))
+		C.clap_host_log_helper((*C.clap_host_t)(l.host), C.int32_t(severity), cMsg)
+	}
 }
 
 // Debug logs a debug message

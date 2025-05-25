@@ -115,6 +115,11 @@ type EventHandler interface {
 	// ProcessAllEvents processes all input events and calls the appropriate handler.
 	// This is a convenience method that iterates through all events.
 	ProcessAllEvents(handler TypedEventHandler)
+
+	// ProcessTypedEvents processes all input events directly without interface{} boxing.
+	// This is the zero-allocation path for event processing and should be preferred
+	// over ProcessAllEvents for real-time audio processing.
+	ProcessTypedEvents(handler TypedEventHandler)
 }
 
 // TypedEventHandler provides callbacks for each event type.

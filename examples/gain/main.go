@@ -151,6 +151,10 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginStartProcessing
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
+	// Mark this thread as audio thread for debug builds
+	api.DebugMarkAudioThread()
+	defer api.DebugUnmarkAudioThread()
+	
 	if plugin == nil {
 		return C.bool(false)
 	}
@@ -160,6 +164,10 @@ func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 
 //export ClapGo_PluginStopProcessing
 func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
+	// Mark this thread as audio thread for debug builds
+	api.DebugMarkAudioThread()
+	defer api.DebugUnmarkAudioThread()
+	
 	if plugin == nil {
 		return
 	}
@@ -178,6 +186,10 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
+	// Mark this thread as audio thread for debug builds
+	api.DebugMarkAudioThread()
+	defer api.DebugUnmarkAudioThread()
+	
 	if plugin == nil || process == nil {
 		return C.int32_t(api.ProcessError)
 	}
@@ -398,6 +410,7 @@ type GainPlugin struct {
 	// Host utilities
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
+	threadCheck  *api.ThreadChecker
 	
 	// Diagnostics
 	processCallCount uint64
@@ -425,6 +438,17 @@ func NewGainPlugin() *GainPlugin {
 
 // Init initializes the plugin
 func (p *GainPlugin) Init() bool {
+	// Mark this as main thread for debug builds
+	api.DebugSetMainThread()
+	
+	// Initialize thread checker
+	if p.host != nil {
+		p.threadCheck = api.NewThreadChecker(p.host)
+		if p.threadCheck.IsAvailable() && p.logger != nil {
+			p.logger.Info("Thread Check extension available - thread safety validation enabled")
+		}
+	}
+	
 	// Initialize track info helper
 	if p.host != nil {
 		p.trackInfo = api.NewHostTrackInfo(p.host)
@@ -444,11 +468,23 @@ func (p *GainPlugin) Init() bool {
 
 // Destroy cleans up plugin resources
 func (p *GainPlugin) Destroy() {
+	// Assert main thread
+	api.DebugAssertMainThread("GainPlugin.Destroy")
+	if p.threadCheck != nil {
+		p.threadCheck.AssertMainThread("GainPlugin.Destroy")
+	}
+	
 	// Nothing to clean up
 }
 
 // Activate prepares the plugin for processing
 func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+	// Assert main thread
+	api.DebugAssertMainThread("GainPlugin.Activate")
+	if p.threadCheck != nil {
+		p.threadCheck.AssertMainThread("GainPlugin.Activate")
+	}
+	
 	p.sampleRate = sampleRate
 	p.isActivated = true
 	
@@ -466,6 +502,12 @@ func (p *GainPlugin) Deactivate() {
 
 // StartProcessing begins audio processing
 func (p *GainPlugin) StartProcessing() bool {
+	// Assert audio thread
+	api.DebugAssertAudioThread("GainPlugin.StartProcessing")
+	if p.threadCheck != nil {
+		p.threadCheck.AssertAudioThread("GainPlugin.StartProcessing")
+	}
+	
 	if !p.isActivated {
 		return false
 	}
@@ -486,6 +528,12 @@ func (p *GainPlugin) Reset() {
 
 // Process processes audio data using the new abstractions
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+	// Assert audio thread
+	api.DebugAssertAudioThread("GainPlugin.Process")
+	if p.threadCheck != nil {
+		p.threadCheck.AssertAudioThread("GainPlugin.Process")
+	}
+	
 	// Check if we're in a valid state for processing
 	if !p.isActivated || !p.isProcessing {
 		return api.ProcessError
@@ -536,31 +584,19 @@ func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
 		return
 	}
 	
-	// Process each event using our abstraction - NO MORE MANUAL C STRUCT PARSING!
-	eventCount := events.GetInputEventCount()
-	for i := uint32(0); i < eventCount; i++ {
-		event := events.GetInputEvent(i)
-		if event == nil {
-			continue
-		}
-		
-		// Handle parameter events using our abstraction
-		switch event.Type {
-		case api.EventTypeParamValue:
-			if paramEvent, ok := event.Data.(api.ParamValueEvent); ok {
-				p.handleParameterChange(paramEvent)
-			}
-		}
-	}
+	// Use the zero-allocation ProcessTypedEvents method instead of ProcessAllEvents
+	events.ProcessTypedEvents(p)
 }
 
-// handleParameterChange processes a parameter change event
-func (p *GainPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
+// TypedEventHandler implementation for zero-allocation event processing
+
+// HandleParamValue handles parameter value changes
+func (p *GainPlugin) HandleParamValue(event *api.ParamValueEvent, time uint32) {
 	// Handle the parameter change based on its ID
-	switch paramEvent.ParamID {
+	switch event.ParamID {
 	case 0: // Gain parameter
 		// Clamp value to valid range
-		value := paramEvent.Value
+		value := event.Value
 		if value < 0.0 {
 			value = 0.0
 		}
@@ -570,7 +606,7 @@ func (p *GainPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 		atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
 		
 		// Update parameter manager
-		p.paramManager.SetParameterValue(paramEvent.ParamID, value)
+		p.paramManager.SetParameterValue(event.ParamID, value)
 		
 		// Log the parameter change
 		if p.logger != nil {
@@ -579,6 +615,66 @@ func (p *GainPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 			p.logger.Debug(fmt.Sprintf("Gain changed to %.2f dB", db))
 		}
 	}
+}
+
+// HandleParamMod handles parameter modulation events
+func (p *GainPlugin) HandleParamMod(event *api.ParamModEvent, time uint32) {
+	// Gain plugin doesn't support parameter modulation
+}
+
+// HandleParamGestureBegin handles parameter gesture begin events
+func (p *GainPlugin) HandleParamGestureBegin(event *api.ParamGestureEvent, time uint32) {
+	// Could be used to start automation recording
+}
+
+// HandleParamGestureEnd handles parameter gesture end events
+func (p *GainPlugin) HandleParamGestureEnd(event *api.ParamGestureEvent, time uint32) {
+	// Could be used to end automation recording
+}
+
+// HandleNoteOn handles note on events
+func (p *GainPlugin) HandleNoteOn(event *api.NoteEvent, time uint32) {
+	// Gain plugin doesn't process notes
+}
+
+// HandleNoteOff handles note off events
+func (p *GainPlugin) HandleNoteOff(event *api.NoteEvent, time uint32) {
+	// Gain plugin doesn't process notes
+}
+
+// HandleNoteChoke handles note choke events
+func (p *GainPlugin) HandleNoteChoke(event *api.NoteEvent, time uint32) {
+	// Gain plugin doesn't process notes
+}
+
+// HandleNoteEnd handles note end events
+func (p *GainPlugin) HandleNoteEnd(event *api.NoteEvent, time uint32) {
+	// Gain plugin doesn't process notes
+}
+
+// HandleNoteExpression handles note expression events
+func (p *GainPlugin) HandleNoteExpression(event *api.NoteExpressionEvent, time uint32) {
+	// Gain plugin doesn't support note expression
+}
+
+// HandleTransport handles transport events
+func (p *GainPlugin) HandleTransport(event *api.TransportEvent, time uint32) {
+	// Gain plugin doesn't use transport information
+}
+
+// HandleMIDI handles MIDI events
+func (p *GainPlugin) HandleMIDI(event *api.MIDIEvent, time uint32) {
+	// Gain plugin doesn't process MIDI
+}
+
+// HandleMIDISysex handles MIDI sysex events
+func (p *GainPlugin) HandleMIDISysex(event *api.MIDISysexEvent, time uint32) {
+	// Gain plugin doesn't process sysex
+}
+
+// HandleMIDI2 handles MIDI 2.0 events
+func (p *GainPlugin) HandleMIDI2(event *api.MIDI2Event, time uint32) {
+	// Gain plugin doesn't process MIDI 2.0
 }
 
 // GetExtension gets a plugin extension

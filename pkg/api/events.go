@@ -667,6 +667,175 @@ func (ep *EventProcessor) ProcessAllEvents(handler TypedEventHandler) {
 	}
 }
 
+// ProcessTypedEvents processes all input events directly without interface{} boxing
+// This is the zero-allocation path for event processing
+func (ep *EventProcessor) ProcessTypedEvents(handler TypedEventHandler) {
+	if handler == nil || ep.inputEvents == nil {
+		return
+	}
+	
+	count := uint32(C.clap_input_events_size_helper(ep.inputEvents))
+	
+	for i := uint32(0); i < count; i++ {
+		cEventHeader := C.clap_input_events_get_helper(ep.inputEvents, C.uint32_t(i))
+		if cEventHeader == nil || cEventHeader.space_id != 0 {
+			continue
+		}
+		
+		time := uint32(cEventHeader.time)
+		
+		// Process events directly without creating Event wrapper
+		switch int(cEventHeader._type) {
+		case EventTypeParamValue:
+			cParamEvent := (*C.clap_event_param_value_t)(unsafe.Pointer(cEventHeader))
+			paramEvent := ep.eventPool.GetParamValueEvent()
+			paramEvent.ParamID = uint32(cParamEvent.param_id)
+			paramEvent.Cookie = unsafe.Pointer(cParamEvent.cookie)
+			paramEvent.NoteID = int32(cParamEvent.note_id)
+			paramEvent.Port = int16(cParamEvent.port_index)
+			paramEvent.Channel = int16(cParamEvent.channel)
+			paramEvent.Key = int16(cParamEvent.key)
+			paramEvent.Value = float64(cParamEvent.value)
+			handler.HandleParamValue(paramEvent, time)
+			ep.eventPool.ReturnParamValueEvent(paramEvent)
+			
+		case EventTypeParamMod:
+			cParamModEvent := (*C.clap_event_param_mod_t)(unsafe.Pointer(cEventHeader))
+			paramModEvent := ep.eventPool.GetParamModEvent()
+			paramModEvent.ParamID = uint32(cParamModEvent.param_id)
+			paramModEvent.Cookie = unsafe.Pointer(cParamModEvent.cookie)
+			paramModEvent.NoteID = int32(cParamModEvent.note_id)
+			paramModEvent.Port = int16(cParamModEvent.port_index)
+			paramModEvent.Channel = int16(cParamModEvent.channel)
+			paramModEvent.Key = int16(cParamModEvent.key)
+			paramModEvent.Amount = float64(cParamModEvent.amount)
+			handler.HandleParamMod(paramModEvent, time)
+			ep.eventPool.ReturnParamModEvent(paramModEvent)
+			
+		case EventTypeParamGestureBegin:
+			cGestureEvent := (*C.clap_event_param_gesture_t)(unsafe.Pointer(cEventHeader))
+			gestureEvent := ep.eventPool.GetParamGestureEvent()
+			gestureEvent.ParamID = uint32(cGestureEvent.param_id)
+			handler.HandleParamGestureBegin(gestureEvent, time)
+			ep.eventPool.ReturnParamGestureEvent(gestureEvent)
+			
+		case EventTypeParamGestureEnd:
+			cGestureEvent := (*C.clap_event_param_gesture_t)(unsafe.Pointer(cEventHeader))
+			gestureEvent := ep.eventPool.GetParamGestureEvent()
+			gestureEvent.ParamID = uint32(cGestureEvent.param_id)
+			handler.HandleParamGestureEnd(gestureEvent, time)
+			ep.eventPool.ReturnParamGestureEvent(gestureEvent)
+			
+		case EventTypeNoteOn:
+			cNoteEvent := (*C.clap_event_note_t)(unsafe.Pointer(cEventHeader))
+			noteEvent := ep.eventPool.GetNoteEvent()
+			noteEvent.NoteID = int32(cNoteEvent.note_id)
+			noteEvent.Port = int16(cNoteEvent.port_index)
+			noteEvent.Channel = int16(cNoteEvent.channel)
+			noteEvent.Key = int16(cNoteEvent.key)
+			noteEvent.Velocity = float64(cNoteEvent.velocity)
+			handler.HandleNoteOn(noteEvent, time)
+			ep.eventPool.ReturnNoteEvent(noteEvent)
+			
+		case EventTypeNoteOff:
+			cNoteEvent := (*C.clap_event_note_t)(unsafe.Pointer(cEventHeader))
+			noteEvent := ep.eventPool.GetNoteEvent()
+			noteEvent.NoteID = int32(cNoteEvent.note_id)
+			noteEvent.Port = int16(cNoteEvent.port_index)
+			noteEvent.Channel = int16(cNoteEvent.channel)
+			noteEvent.Key = int16(cNoteEvent.key)
+			noteEvent.Velocity = float64(cNoteEvent.velocity)
+			handler.HandleNoteOff(noteEvent, time)
+			ep.eventPool.ReturnNoteEvent(noteEvent)
+			
+		case EventTypeNoteChoke:
+			cNoteEvent := (*C.clap_event_note_t)(unsafe.Pointer(cEventHeader))
+			noteEvent := ep.eventPool.GetNoteEvent()
+			noteEvent.NoteID = int32(cNoteEvent.note_id)
+			noteEvent.Port = int16(cNoteEvent.port_index)
+			noteEvent.Channel = int16(cNoteEvent.channel)
+			noteEvent.Key = int16(cNoteEvent.key)
+			noteEvent.Velocity = float64(cNoteEvent.velocity)
+			handler.HandleNoteChoke(noteEvent, time)
+			ep.eventPool.ReturnNoteEvent(noteEvent)
+			
+		case EventTypeNoteEnd:
+			cNoteEvent := (*C.clap_event_note_t)(unsafe.Pointer(cEventHeader))
+			noteEvent := ep.eventPool.GetNoteEvent()
+			noteEvent.NoteID = int32(cNoteEvent.note_id)
+			noteEvent.Port = int16(cNoteEvent.port_index)
+			noteEvent.Channel = int16(cNoteEvent.channel)
+			noteEvent.Key = int16(cNoteEvent.key)
+			noteEvent.Velocity = float64(cNoteEvent.velocity)
+			handler.HandleNoteEnd(noteEvent, time)
+			ep.eventPool.ReturnNoteEvent(noteEvent)
+			
+		case EventTypeNoteExpression:
+			cNoteExprEvent := (*C.clap_event_note_expression_t)(unsafe.Pointer(cEventHeader))
+			noteExprEvent := ep.eventPool.GetNoteExpressionEvent()
+			noteExprEvent.ExpressionID = int32(cNoteExprEvent.expression_id)
+			noteExprEvent.NoteID = int32(cNoteExprEvent.note_id)
+			noteExprEvent.Port = int16(cNoteExprEvent.port_index)
+			noteExprEvent.Channel = int16(cNoteExprEvent.channel)
+			noteExprEvent.Key = int16(cNoteExprEvent.key)
+			noteExprEvent.Value = float64(cNoteExprEvent.value)
+			handler.HandleNoteExpression(noteExprEvent, time)
+			ep.eventPool.ReturnNoteExpressionEvent(noteExprEvent)
+			
+		case EventTypeTransport:
+			cTransportEvent := (*C.clap_event_transport_t)(unsafe.Pointer(cEventHeader))
+			transportEvent := ep.eventPool.GetTransportEvent()
+			transportEvent.Flags = uint32(cTransportEvent.flags)
+			transportEvent.SongPosBeats = uint64(cTransportEvent.song_pos_beats)
+			transportEvent.SongPosSeconds = uint64(cTransportEvent.song_pos_seconds)
+			transportEvent.Tempo = float64(cTransportEvent.tempo)
+			transportEvent.TempoInc = float64(cTransportEvent.tempo_inc)
+			transportEvent.LoopStartBeats = uint64(cTransportEvent.loop_start_beats)
+			transportEvent.LoopEndBeats = uint64(cTransportEvent.loop_end_beats)
+			transportEvent.LoopStartSeconds = uint64(cTransportEvent.loop_start_seconds)
+			transportEvent.LoopEndSeconds = uint64(cTransportEvent.loop_end_seconds)
+			transportEvent.BarStart = uint64(cTransportEvent.bar_start)
+			transportEvent.BarNumber = int32(cTransportEvent.bar_number)
+			transportEvent.TimeSignatureNum = uint16(cTransportEvent.tsig_num)
+			transportEvent.TimeSignatureDen = uint16(cTransportEvent.tsig_denom)
+			handler.HandleTransport(transportEvent, time)
+			ep.eventPool.ReturnTransportEvent(transportEvent)
+			
+		case EventTypeMIDI:
+			cMidiEvent := (*C.clap_event_midi_t)(unsafe.Pointer(cEventHeader))
+			midiEvent := ep.eventPool.GetMIDIEvent()
+			midiEvent.Port = int16(cMidiEvent.port_index)
+			for j := 0; j < 3; j++ {
+				midiEvent.Data[j] = byte(cMidiEvent.data[j])
+			}
+			handler.HandleMIDI(midiEvent, time)
+			ep.eventPool.ReturnMIDIEvent(midiEvent)
+			
+		case EventTypeMIDISysex:
+			cSysexEvent := (*C.clap_event_midi_sysex_t)(unsafe.Pointer(cEventHeader))
+			sysexEvent := ep.eventPool.GetMIDISysexEvent()
+			sysexEvent.Port = int16(cSysexEvent.port_index)
+			// Copy sysex data to Go slice
+			sysexEvent.Data = make([]byte, cSysexEvent.size)
+			if cSysexEvent.size > 0 && cSysexEvent.buffer != nil {
+				C.memcpy(unsafe.Pointer(&sysexEvent.Data[0]), unsafe.Pointer(cSysexEvent.buffer), C.size_t(cSysexEvent.size))
+			}
+			handler.HandleMIDISysex(sysexEvent, time)
+			ep.eventPool.ReturnMIDISysexEvent(sysexEvent)
+			
+		case EventTypeMIDI2:
+			cMidi2Event := (*C.clap_event_midi2_t)(unsafe.Pointer(cEventHeader))
+			midi2Event := ep.eventPool.GetMIDI2Event()
+			midi2Event.Port = int16(cMidi2Event.port_index)
+			for j := 0; j < 4; j++ {
+				midi2Event.Data[j] = uint32(cMidi2Event.data[j])
+			}
+			handler.HandleMIDI2(midi2Event, time)
+			ep.eventPool.ReturnMIDI2Event(midi2Event)
+		}
+	}
+}
+
 // AddOutputEvent adds an event to the output queue (legacy interface)
 func (ep *EventProcessor) AddOutputEvent(eventType int, data interface{}) {
 	event := &Event{

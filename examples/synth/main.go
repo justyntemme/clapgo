@@ -175,6 +175,10 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
+	// Mark this thread as audio thread for debug builds
+	api.DebugMarkAudioThread()
+	defer api.DebugUnmarkAudioThread()
+	
 	if plugin == nil || process == nil {
 		return C.int32_t(api.ProcessError)
 	}
@@ -808,6 +812,7 @@ type SynthPlugin struct {
 	// Host utilities
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
+	threadCheck  *api.ThreadChecker
 	
 	// Diagnostics
 	processCallCount uint64
@@ -865,6 +870,17 @@ func NewSynthPlugin() *SynthPlugin {
 
 // Init initializes the plugin
 func (p *SynthPlugin) Init() bool {
+	// Mark this as main thread for debug builds
+	api.DebugSetMainThread()
+	
+	// Initialize thread checker
+	if p.host != nil {
+		p.threadCheck = api.NewThreadChecker(p.host)
+		if p.threadCheck.IsAvailable() && p.logger != nil {
+			p.logger.Info("Thread Check extension available - thread safety validation enabled")
+		}
+	}
+	
 	// Initialize track info helper
 	if p.host != nil {
 		p.trackInfo = api.NewHostTrackInfo(p.host)

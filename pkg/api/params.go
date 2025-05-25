@@ -10,15 +10,21 @@ import (
 // Common parameter errors
 var (
 	ErrInvalidParam = errors.New("invalid parameter ID")
+	ErrListenerLimitReached = errors.New("parameter listener limit reached")
 )
+
+// MaxParameterListeners is the maximum number of parameter change listeners
+const MaxParameterListeners = 16
 
 // ParameterManager provides thread-safe parameter management with validation
 // and change notification. It completely abstracts C interop from plugin developers.
 type ParameterManager struct {
-	mutex      sync.RWMutex
-	params     map[uint32]*Parameter
-	paramOrder []uint32
-	listeners  []ParameterChangeListener
+	mutex         sync.RWMutex
+	params        map[uint32]*Parameter
+	paramOrder    []uint32
+	listeners     [MaxParameterListeners]ParameterChangeListener
+	listenerCount int32 // atomic
+	logger        Logger // Optional logger for warnings
 }
 
 // Parameter represents a plugin parameter with thread-safe access
@@ -34,9 +40,9 @@ type ParameterChangeListener func(paramID uint32, oldValue, newValue float64)
 // NewParameterManager creates a new thread-safe parameter manager
 func NewParameterManager() *ParameterManager {
 	return &ParameterManager{
-		params:     make(map[uint32]*Parameter),
-		paramOrder: make([]uint32, 0),
-		listeners:  make([]ParameterChangeListener, 0),
+		params:        make(map[uint32]*Parameter),
+		paramOrder:    make([]uint32, 0),
+		listenerCount: 0,
 	}
 }
 
@@ -161,22 +167,99 @@ func (pm *ParameterManager) SetParameterValue(paramID uint32, value float64) err
 }
 
 // AddChangeListener adds a parameter change listener
-func (pm *ParameterManager) AddChangeListener(listener ParameterChangeListener) {
+// Returns an error if the listener limit is reached
+func (pm *ParameterManager) AddChangeListener(listener ParameterChangeListener) error {
+	if listener == nil {
+		return errors.New("listener cannot be nil")
+	}
+	
+	// Use mutex for the entire operation to fix race condition
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
-	pm.listeners = append(pm.listeners, listener)
+	
+	count := atomic.LoadInt32(&pm.listenerCount)
+	if count >= MaxParameterListeners {
+		// Log warning if logger is available
+		if pm.logger != nil {
+			pm.logger.Log(LogWarning, "Parameter listener limit reached (%d listeners). Consider increasing MaxParameterListeners.", MaxParameterListeners)
+		}
+		return ErrListenerLimitReached
+	}
+	
+	// Add listener and increment count
+	pm.listeners[count] = listener
+	atomic.AddInt32(&pm.listenerCount, 1)
+	
+	return nil
+}
+
+// SetLogger sets an optional logger for warnings
+func (pm *ParameterManager) SetLogger(logger Logger) {
+	pm.mutex.Lock()
+	pm.logger = logger
+	pm.mutex.Unlock()
+}
+
+// RemoveChangeListener removes a parameter change listener
+// Returns true if the listener was found and removed
+func (pm *ParameterManager) RemoveChangeListener(listener ParameterChangeListener) bool {
+	if listener == nil {
+		return false
+	}
+	
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+	
+	count := atomic.LoadInt32(&pm.listenerCount)
+	
+	// Find and remove the listener
+	for i := int32(0); i < count; i++ {
+		// Compare function pointers
+		if pm.listeners[i] == nil {
+			continue
+		}
+		
+		// Note: This comparison works for function values in Go
+		listenerPtr1 := *(*uintptr)(unsafe.Pointer(&pm.listeners[i]))
+		listenerPtr2 := *(*uintptr)(unsafe.Pointer(&listener))
+		
+		if listenerPtr1 == listenerPtr2 {
+			// Shift remaining listeners down
+			for j := i; j < count-1; j++ {
+				pm.listeners[j] = pm.listeners[j+1]
+			}
+			// Clear the last slot
+			pm.listeners[count-1] = nil
+			// Decrement count
+			atomic.AddInt32(&pm.listenerCount, -1)
+			return true
+		}
+	}
+	
+	return false
+}
+
+// GetListenerCount returns the current number of registered listeners
+func (pm *ParameterManager) GetListenerCount() int32 {
+	return atomic.LoadInt32(&pm.listenerCount)
 }
 
 // notifyListeners notifies all registered listeners of parameter changes
 func (pm *ParameterManager) notifyListeners(paramID uint32, oldValue, newValue float64) {
+	// Take a snapshot of listeners under lock to avoid race conditions
 	pm.mutex.RLock()
-	listeners := make([]ParameterChangeListener, len(pm.listeners))
-	copy(listeners, pm.listeners)
+	count := atomic.LoadInt32(&pm.listenerCount)
+	var listeners [MaxParameterListeners]ParameterChangeListener
+	copy(listeners[:count], pm.listeners[:count])
 	pm.mutex.RUnlock()
 	
 	// Call listeners without holding the lock
-	for _, listener := range listeners {
-		listener(paramID, oldValue, newValue)
+	for i := int32(0); i < count; i++ {
+		listener := listeners[i]
+		
+		if listener != nil {
+			listener(paramID, oldValue, newValue)
+		}
 	}
 }
 
