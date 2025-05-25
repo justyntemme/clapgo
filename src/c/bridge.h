@@ -67,6 +67,10 @@ typedef struct go_plugin_data {
     bool supports_note_name; // Has note name exports
     bool supports_ambisonic; // Has ambisonic exports
     bool supports_audio_ports_activation; // Has audio ports activation exports
+    bool supports_configurable_audio_ports; // Has configurable audio ports exports
+    bool supports_posix_fd_support; // Has POSIX FD support export
+    bool supports_render; // Has render exports
+    bool supports_thread_pool; // Has thread pool export
 } go_plugin_data_t;
 
 

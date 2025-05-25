@@ -112,6 +112,20 @@ __attribute__((weak)) bool ClapGo_PluginAmbisonicGetConfig(void* plugin, bool is
 __attribute__((weak)) bool ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing(void* plugin);
 __attribute__((weak)) bool ClapGo_PluginAudioPortsActivationSetActive(void* plugin, bool is_input, uint32_t port_index, bool is_active, uint32_t sample_size);
 
+// Configurable audio ports extension
+__attribute__((weak)) bool ClapGo_PluginConfigurableAudioPortsCanApplyConfiguration(void* plugin, void* requests, uint32_t request_count);
+__attribute__((weak)) bool ClapGo_PluginConfigurableAudioPortsApplyConfiguration(void* plugin, void* requests, uint32_t request_count);
+
+// POSIX FD support extension
+__attribute__((weak)) void ClapGo_PluginPosixFDSupportOnFD(void* plugin, int fd, uint32_t flags);
+
+// Render extension
+__attribute__((weak)) bool ClapGo_PluginRenderHasHardRealtimeRequirement(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginRenderSet(void* plugin, int32_t mode);
+
+// Thread pool extension
+__attribute__((weak)) void ClapGo_PluginThreadPoolExec(void* plugin, uint32_t task_index);
+
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
     printf("Searching for manifest for plugin: %s\n", plugin_path);
@@ -299,6 +313,12 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
                                ClapGo_PluginAmbisonicGetConfig != NULL);
     data->supports_audio_ports_activation = (ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing != NULL &&
                                             ClapGo_PluginAudioPortsActivationSetActive != NULL);
+    data->supports_configurable_audio_ports = (ClapGo_PluginConfigurableAudioPortsCanApplyConfiguration != NULL &&
+                                               ClapGo_PluginConfigurableAudioPortsApplyConfiguration != NULL);
+    data->supports_posix_fd_support = (ClapGo_PluginPosixFDSupportOnFD != NULL);
+    data->supports_render = (ClapGo_PluginRenderHasHardRealtimeRequirement != NULL &&
+                            ClapGo_PluginRenderSet != NULL);
+    data->supports_thread_pool = (ClapGo_PluginThreadPoolExec != NULL);
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -714,6 +734,42 @@ static const clap_plugin_audio_ports_activation_t s_audio_ports_activation_exten
     .set_active = clapgo_audio_ports_activation_set_active
 };
 
+// Forward declarations for configurable audio ports extension
+static bool clapgo_configurable_audio_ports_can_apply_configuration(const clap_plugin_t* plugin, const clap_audio_port_configuration_request_t* requests, uint32_t request_count);
+static bool clapgo_configurable_audio_ports_apply_configuration(const clap_plugin_t* plugin, const clap_audio_port_configuration_request_t* requests, uint32_t request_count);
+
+// Configurable audio ports extension structure
+static const clap_plugin_configurable_audio_ports_t s_configurable_audio_ports_extension = {
+    .can_apply_configuration = clapgo_configurable_audio_ports_can_apply_configuration,
+    .apply_configuration = clapgo_configurable_audio_ports_apply_configuration
+};
+
+// Forward declaration for POSIX FD support extension
+static void clapgo_posix_fd_support_on_fd(const clap_plugin_t* plugin, int fd, clap_posix_fd_flags_t flags);
+
+// POSIX FD support extension structure
+static const clap_plugin_posix_fd_support_t s_posix_fd_support_extension = {
+    .on_fd = clapgo_posix_fd_support_on_fd
+};
+
+// Forward declarations for render extension
+static bool clapgo_render_has_hard_realtime_requirement(const clap_plugin_t* plugin);
+static bool clapgo_render_set(const clap_plugin_t* plugin, clap_plugin_render_mode mode);
+
+// Render extension structure
+static const clap_plugin_render_t s_render_extension = {
+    .has_hard_realtime_requirement = clapgo_render_has_hard_realtime_requirement,
+    .set = clapgo_render_set
+};
+
+// Forward declaration for thread pool extension
+static void clapgo_thread_pool_exec(const clap_plugin_t* plugin, uint32_t task_index);
+
+// Thread pool extension structure
+static const clap_plugin_thread_pool_t s_thread_pool_extension = {
+    .exec = clapgo_thread_pool_exec
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -948,6 +1004,46 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
             return &s_audio_ports_activation_extension;
         }
         printf("DEBUG: audio ports activation extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the configurable audio ports extension
+    if (strcmp(id, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS) == 0 || strcmp(id, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT) == 0) {
+        if (data->supports_configurable_audio_ports) {
+            printf("DEBUG: configurable audio ports extension requested and supported\n");
+            return &s_configurable_audio_ports_extension;
+        }
+        printf("DEBUG: configurable audio ports extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the POSIX FD support extension
+    if (strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT) == 0) {
+        if (data->supports_posix_fd_support) {
+            printf("DEBUG: POSIX FD support extension requested and supported\n");
+            return &s_posix_fd_support_extension;
+        }
+        printf("DEBUG: POSIX FD support extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the render extension
+    if (strcmp(id, CLAP_EXT_RENDER) == 0) {
+        if (data->supports_render) {
+            printf("DEBUG: render extension requested and supported\n");
+            return &s_render_extension;
+        }
+        printf("DEBUG: render extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the thread pool extension
+    if (strcmp(id, CLAP_EXT_THREAD_POOL) == 0) {
+        if (data->supports_thread_pool) {
+            printf("DEBUG: thread pool extension requested and supported\n");
+            return &s_thread_pool_extension;
+        }
+        printf("DEBUG: thread pool extension requested but not supported\n");
         return NULL;
     }
     
@@ -1514,4 +1610,92 @@ static bool clapgo_audio_ports_activation_set_active(const clap_plugin_t* plugin
     }
     
     return ClapGo_PluginAudioPortsActivationSetActive(data->go_instance, is_input, port_index, is_active, sample_size);
+}
+
+// Configurable audio ports extension implementation
+static bool clapgo_configurable_audio_ports_can_apply_configuration(const clap_plugin_t* plugin, const clap_audio_port_configuration_request_t* requests, uint32_t request_count) {
+    if (!plugin || !requests) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginConfigurableAudioPortsCanApplyConfiguration) {
+        return false;
+    }
+    
+    return ClapGo_PluginConfigurableAudioPortsCanApplyConfiguration(data->go_instance, (void*)requests, request_count);
+}
+
+static bool clapgo_configurable_audio_ports_apply_configuration(const clap_plugin_t* plugin, const clap_audio_port_configuration_request_t* requests, uint32_t request_count) {
+    if (!plugin || !requests) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginConfigurableAudioPortsApplyConfiguration) {
+        return false;
+    }
+    
+    return ClapGo_PluginConfigurableAudioPortsApplyConfiguration(data->go_instance, (void*)requests, request_count);
+}
+
+// POSIX FD support extension implementation
+static void clapgo_posix_fd_support_on_fd(const clap_plugin_t* plugin, int fd, clap_posix_fd_flags_t flags) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginPosixFDSupportOnFD) {
+        return;
+    }
+    
+    ClapGo_PluginPosixFDSupportOnFD(data->go_instance, fd, (uint32_t)flags);
+}
+
+// Render extension implementation
+static bool clapgo_render_has_hard_realtime_requirement(const clap_plugin_t* plugin) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginRenderHasHardRealtimeRequirement) {
+        return false;
+    }
+    
+    return ClapGo_PluginRenderHasHardRealtimeRequirement(data->go_instance);
+}
+
+static bool clapgo_render_set(const clap_plugin_t* plugin, clap_plugin_render_mode mode) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginRenderSet) {
+        return false;
+    }
+    
+    return ClapGo_PluginRenderSet(data->go_instance, (int32_t)mode);
+}
+
+// Thread pool extension implementation
+static void clapgo_thread_pool_exec(const clap_plugin_t* plugin, uint32_t task_index) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginThreadPoolExec) {
+        return;
+    }
+    
+    ClapGo_PluginThreadPoolExec(data->go_instance, task_index);
 }
