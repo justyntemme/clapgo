@@ -7,6 +7,9 @@
 #include <libgen.h>  // For dirname()
 #include <unistd.h>  // For access()
 
+// Include CLAP extension headers for constants
+#include "../../include/clap/include/clap/ext/audio-ports-activation.h"
+
 // Simplified manifest plugin entry for self-contained plugins
 typedef struct {
     plugin_manifest_t manifest;
@@ -88,6 +91,26 @@ __attribute__((weak)) void ClapGo_PluginTrackInfoChanged(void* plugin);
 // Param indication extension
 __attribute__((weak)) void ClapGo_PluginParamIndicationSetMapping(void* plugin, uint64_t param_id, bool has_mapping, void* color, char* label, char* description);
 __attribute__((weak)) void ClapGo_PluginParamIndicationSetAutomation(void* plugin, uint64_t param_id, uint32_t automation_state, void* color);
+
+// Context menu extension
+__attribute__((weak)) bool ClapGo_PluginContextMenuPopulate(void* plugin, uint32_t target_kind, uint64_t target_id, void* builder);
+__attribute__((weak)) bool ClapGo_PluginContextMenuPerform(void* plugin, uint32_t target_kind, uint64_t target_id, uint64_t action_id);
+
+// Remote controls extension
+__attribute__((weak)) uint32_t ClapGo_PluginRemoteControlsCount(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginRemoteControlsGet(void* plugin, uint32_t page_index, void* page);
+
+// Note name extension
+__attribute__((weak)) uint32_t ClapGo_PluginNoteNameCount(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginNoteNameGet(void* plugin, uint32_t index, void* note_name);
+
+// Ambisonic extension
+__attribute__((weak)) bool ClapGo_PluginAmbisonicIsConfigSupported(void* plugin, void* config);
+__attribute__((weak)) bool ClapGo_PluginAmbisonicGetConfig(void* plugin, bool is_input, uint32_t port_index, void* config);
+
+// Audio ports activation extension
+__attribute__((weak)) bool ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing(void* plugin);
+__attribute__((weak)) bool ClapGo_PluginAudioPortsActivationSetActive(void* plugin, bool is_input, uint32_t port_index, bool is_active, uint32_t sample_size);
 
 // Find manifest files for the plugin
 int clapgo_find_manifests(const char* plugin_path) {
@@ -266,6 +289,16 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->supports_track_info = (ClapGo_PluginTrackInfoChanged != NULL);
     data->supports_param_indication = (ClapGo_PluginParamIndicationSetMapping != NULL &&
                                       ClapGo_PluginParamIndicationSetAutomation != NULL);
+    data->supports_context_menu = (ClapGo_PluginContextMenuPopulate != NULL &&
+                                  ClapGo_PluginContextMenuPerform != NULL);
+    data->supports_remote_controls = (ClapGo_PluginRemoteControlsCount != NULL &&
+                                     ClapGo_PluginRemoteControlsGet != NULL);
+    data->supports_note_name = (ClapGo_PluginNoteNameCount != NULL &&
+                               ClapGo_PluginNoteNameGet != NULL);
+    data->supports_ambisonic = (ClapGo_PluginAmbisonicIsConfigSupported != NULL &&
+                               ClapGo_PluginAmbisonicGetConfig != NULL);
+    data->supports_audio_ports_activation = (ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing != NULL &&
+                                            ClapGo_PluginAudioPortsActivationSetActive != NULL);
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -631,6 +664,56 @@ static const clap_plugin_param_indication_t s_param_indication_extension = {
     .set_automation = clapgo_param_indication_set_automation
 };
 
+// Forward declarations for context menu extension
+static bool clapgo_context_menu_populate(const clap_plugin_t* plugin, const clap_context_menu_target_t* target, const clap_context_menu_builder_t* builder);
+static bool clapgo_context_menu_perform(const clap_plugin_t* plugin, const clap_context_menu_target_t* target, clap_id action_id);
+
+// Context menu extension structure
+static const clap_plugin_context_menu_t s_context_menu_extension = {
+    .populate = clapgo_context_menu_populate,
+    .perform = clapgo_context_menu_perform
+};
+
+// Forward declarations for remote controls extension
+static uint32_t clapgo_remote_controls_count(const clap_plugin_t* plugin);
+static bool clapgo_remote_controls_get(const clap_plugin_t* plugin, uint32_t page_index, clap_remote_controls_page_t* page);
+
+// Remote controls extension structure
+static const clap_plugin_remote_controls_t s_remote_controls_extension = {
+    .count = clapgo_remote_controls_count,
+    .get = clapgo_remote_controls_get
+};
+
+// Forward declarations for note name extension
+static uint32_t clapgo_note_name_count(const clap_plugin_t* plugin);
+static bool clapgo_note_name_get(const clap_plugin_t* plugin, uint32_t index, clap_note_name_t* note_name);
+
+// Note name extension structure
+static const clap_plugin_note_name_t s_note_name_extension = {
+    .count = clapgo_note_name_count,
+    .get = clapgo_note_name_get
+};
+
+// Forward declarations for ambisonic extension
+static bool clapgo_ambisonic_is_config_supported(const clap_plugin_t* plugin, const clap_ambisonic_config_t* config);
+static bool clapgo_ambisonic_get_config(const clap_plugin_t* plugin, bool is_input, uint32_t port_index, clap_ambisonic_config_t* config);
+
+// Ambisonic extension structure
+static const clap_plugin_ambisonic_t s_ambisonic_extension = {
+    .is_config_supported = clapgo_ambisonic_is_config_supported,
+    .get_config = clapgo_ambisonic_get_config
+};
+
+// Forward declarations for audio ports activation extension
+static bool clapgo_audio_ports_activation_can_activate_while_processing(const clap_plugin_t* plugin);
+static bool clapgo_audio_ports_activation_set_active(const clap_plugin_t* plugin, bool is_input, uint32_t port_index, bool is_active, uint32_t sample_size);
+
+// Audio ports activation extension structure
+static const clap_plugin_audio_ports_activation_t s_audio_ports_activation_extension = {
+    .can_activate_while_processing = clapgo_audio_ports_activation_can_activate_while_processing,
+    .set_active = clapgo_audio_ports_activation_set_active
+};
+
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
     (void)plugin; // Suppress unused parameter warning
@@ -815,6 +898,56 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
             return &s_param_indication_extension;
         }
         printf("DEBUG: param indication extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the context menu extension
+    if (strcmp(id, CLAP_EXT_CONTEXT_MENU) == 0 || strcmp(id, CLAP_EXT_CONTEXT_MENU_COMPAT) == 0) {
+        if (data->supports_context_menu) {
+            printf("DEBUG: context menu extension requested and supported\n");
+            return &s_context_menu_extension;
+        }
+        printf("DEBUG: context menu extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the remote controls extension
+    if (strcmp(id, CLAP_EXT_REMOTE_CONTROLS) == 0 || strcmp(id, CLAP_EXT_REMOTE_CONTROLS_COMPAT) == 0) {
+        if (data->supports_remote_controls) {
+            printf("DEBUG: remote controls extension requested and supported\n");
+            return &s_remote_controls_extension;
+        }
+        printf("DEBUG: remote controls extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the note name extension
+    if (strcmp(id, CLAP_EXT_NOTE_NAME) == 0) {
+        if (data->supports_note_name) {
+            printf("DEBUG: note name extension requested and supported\n");
+            return &s_note_name_extension;
+        }
+        printf("DEBUG: note name extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the ambisonic extension
+    if (strcmp(id, CLAP_EXT_AMBISONIC) == 0 || strcmp(id, CLAP_EXT_AMBISONIC_COMPAT) == 0) {
+        if (data->supports_ambisonic) {
+            printf("DEBUG: ambisonic extension requested and supported\n");
+            return &s_ambisonic_extension;
+        }
+        printf("DEBUG: ambisonic extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the audio ports activation extension
+    if (strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION) == 0 || strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT) == 0) {
+        if (data->supports_audio_ports_activation) {
+            printf("DEBUG: audio ports activation extension requested and supported\n");
+            return &s_audio_ports_activation_extension;
+        }
+        printf("DEBUG: audio ports activation extension requested but not supported\n");
         return NULL;
     }
     
@@ -1224,4 +1357,161 @@ static void clapgo_param_indication_set_automation(const clap_plugin_t* plugin, 
     }
     
     ClapGo_PluginParamIndicationSetAutomation(data->go_instance, param_id, automation_state, (void*)color);
+}
+
+// Context menu extension implementation
+static bool clapgo_context_menu_populate(const clap_plugin_t* plugin, const clap_context_menu_target_t* target, 
+                                        const clap_context_menu_builder_t* builder) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginContextMenuPopulate) {
+        return false;
+    }
+    
+    // Extract target info with defaults for null target
+    uint32_t target_kind = target ? target->kind : CLAP_CONTEXT_MENU_TARGET_KIND_GLOBAL;
+    uint64_t target_id = target ? target->id : 0;
+    
+    return ClapGo_PluginContextMenuPopulate(data->go_instance, target_kind, target_id, (void*)builder);
+}
+
+static bool clapgo_context_menu_perform(const clap_plugin_t* plugin, const clap_context_menu_target_t* target, 
+                                       clap_id action_id) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginContextMenuPerform) {
+        return false;
+    }
+    
+    // Extract target info with defaults for null target
+    uint32_t target_kind = target ? target->kind : CLAP_CONTEXT_MENU_TARGET_KIND_GLOBAL;
+    uint64_t target_id = target ? target->id : 0;
+    
+    return ClapGo_PluginContextMenuPerform(data->go_instance, target_kind, target_id, action_id);
+}
+
+// Remote controls extension implementation
+static uint32_t clapgo_remote_controls_count(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginRemoteControlsCount) {
+        return 0;
+    }
+    
+    return ClapGo_PluginRemoteControlsCount(data->go_instance);
+}
+
+static bool clapgo_remote_controls_get(const clap_plugin_t* plugin, uint32_t page_index, 
+                                      clap_remote_controls_page_t* page) {
+    if (!plugin || !page) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginRemoteControlsGet) {
+        return false;
+    }
+    
+    return ClapGo_PluginRemoteControlsGet(data->go_instance, page_index, page);
+}
+
+// Note name extension implementation
+static uint32_t clapgo_note_name_count(const clap_plugin_t* plugin) {
+    if (!plugin) return 0;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return 0;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginNoteNameCount) {
+        return 0;
+    }
+    
+    return ClapGo_PluginNoteNameCount(data->go_instance);
+}
+
+static bool clapgo_note_name_get(const clap_plugin_t* plugin, uint32_t index, 
+                                clap_note_name_t* note_name) {
+    if (!plugin || !note_name) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginNoteNameGet) {
+        return false;
+    }
+    
+    return ClapGo_PluginNoteNameGet(data->go_instance, index, note_name);
+}
+
+// Ambisonic extension implementation
+static bool clapgo_ambisonic_is_config_supported(const clap_plugin_t* plugin, const clap_ambisonic_config_t* config) {
+    if (!plugin || !config) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAmbisonicIsConfigSupported) {
+        return false;
+    }
+    
+    return ClapGo_PluginAmbisonicIsConfigSupported(data->go_instance, (void*)config);
+}
+
+static bool clapgo_ambisonic_get_config(const clap_plugin_t* plugin, bool is_input, uint32_t port_index, clap_ambisonic_config_t* config) {
+    if (!plugin || !config) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAmbisonicGetConfig) {
+        return false;
+    }
+    
+    return ClapGo_PluginAmbisonicGetConfig(data->go_instance, is_input, port_index, config);
+}
+
+// Audio ports activation extension implementation
+static bool clapgo_audio_ports_activation_can_activate_while_processing(const clap_plugin_t* plugin) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing) {
+        return false;
+    }
+    
+    return ClapGo_PluginAudioPortsActivationCanActivateWhileProcessing(data->go_instance);
+}
+
+static bool clapgo_audio_ports_activation_set_active(const clap_plugin_t* plugin, bool is_input, uint32_t port_index, bool is_active, uint32_t sample_size) {
+    if (!plugin) return false;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return false;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginAudioPortsActivationSetActive) {
+        return false;
+    }
+    
+    return ClapGo_PluginAudioPortsActivationSetActive(data->go_instance, is_input, port_index, is_active, sample_size);
 }

@@ -282,10 +282,58 @@ Remember: **ClapGo is a bridge, not a framework. Stay true to CLAP while enablin
 - NEVER work on GUI examples (gain-with-gui)
 - NEVER create simplified or demo versions of examples
 - NEVER create placeholder implementations
+- NEVER duplicate boilerplate code across plugins
 
 **✅ CORRECT APPROACH:**
 - Focus exclusively on `gain` and `synth` examples
 - Implement full, production-ready functionality
 - Keep code clean and readable while being complete
+- Extract common functionality into library helper functions
+- Minimize duplicated code across plugin examples
 
 **WHY:** Examples should demonstrate real-world usage, not simplified concepts. GUI examples are out of scope.
+
+### Code Duplication and Helper Functions
+**❌ FORBIDDEN:**
+- NEVER copy-paste boilerplate code between plugin examples
+- NEVER implement extension methods with duplicated logic
+- NEVER write repetitive export functions without abstraction
+
+**✅ CORRECT APPROACH:**
+- Create helper functions in the `pkg/api` package for common patterns
+- Use composition and embedding for shared plugin functionality
+- Provide default implementations that plugins can override
+- Keep plugin-specific code to the absolute minimum
+
+**Example of Good Practice:**
+```go
+// In pkg/api/context_menu_helpers.go
+type DefaultContextMenuProvider struct {
+    paramManager *ParameterManager
+    pluginName   string
+}
+
+func (d *DefaultContextMenuProvider) PopulateParameterMenu(paramID uint32, builder *ContextMenuBuilder) {
+    // Common parameter menu items like "Reset to Default"
+}
+
+// In plugin code - minimal implementation
+func (p *GainPlugin) PopulateContextMenu(target *ContextMenuTarget, builder *ContextMenuBuilder) bool {
+    helper := api.NewDefaultContextMenuProvider(p.paramManager, "Gain Plugin")
+    
+    if target != nil && target.Kind == api.ContextMenuTargetKindParam {
+        // Use helper for common items
+        helper.PopulateParameterMenu(target.ID, builder)
+        
+        // Add plugin-specific items only
+        if target.ID == 0 { // Gain parameter
+            builder.AddItem(&api.ContextMenuSubmenu{Label: "Presets", IsEnabled: true})
+            // ... specific presets
+            builder.AddItem(&api.ContextMenuEndSubmenu{})
+        }
+    }
+    return true
+}
+```
+
+**WHY:** This approach reduces maintenance burden, ensures consistency, and makes the API easier to use for plugin developers.

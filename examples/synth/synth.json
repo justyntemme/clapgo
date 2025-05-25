@@ -5,7 +5,7 @@
     "name": "ClapGo Simple Synth",
     "vendor": "ClapGo",
     "version": "1.0.0",
-    "description": "",
+    "description": "A simple synthesizer with note name support",
     "url": "https://github.com/justyntemme/clapgo",
     "manualUrl": "https://github.com/justyntemme/clapgo",
     "supportUrl": "https://github.com/justyntemme/clapgo/issues",
@@ -50,7 +50,7 @@
     },
     {
       "id": "clap.note-name",
-      "supported": false
+      "supported": true
     },
     {
       "id": "clap.latency",
@@ -62,6 +62,10 @@
     },
     {
       "id": "clap.timer-support",
+      "supported": true
+    },
+    {
+      "id": "clap.context-menu",
       "supported": true
     }
   ]

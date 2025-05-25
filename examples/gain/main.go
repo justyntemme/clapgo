@@ -2,6 +2,7 @@ package main
 
 // #cgo CFLAGS: -I../../include/clap/include
 // #include "../../include/clap/include/clap/clap.h"
+// #include "../../include/clap/include/clap/ext/remote-controls.h"
 // #include <stdlib.h>
 //
 // // Helper functions for CLAP event handling
@@ -411,6 +412,7 @@ type GainPlugin struct {
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
 	threadCheck  *api.ThreadChecker
+	contextMenuProvider *api.DefaultContextMenuProvider
 	
 	// Diagnostics
 	processCallCount uint64
@@ -452,6 +454,17 @@ func (p *GainPlugin) Init() bool {
 	// Initialize track info helper
 	if p.host != nil {
 		p.trackInfo = api.NewHostTrackInfo(p.host)
+	}
+	
+	// Initialize context menu provider
+	if p.host != nil {
+		p.contextMenuProvider = api.NewDefaultContextMenuProvider(
+			p.paramManager,
+			"Gain Plugin",
+			"1.0.0",
+			p.host,
+		)
+		p.contextMenuProvider.SetAboutMessage("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
 	}
 	
 	if p.logger != nil {
@@ -771,6 +784,160 @@ func (p *GainPlugin) OnTrackInfoChanged() {
 	// - Adjust default parameter values based on track type
 	// - Configure audio processing differently for bus/master tracks
 	// - Update GUI to show track information
+}
+
+// Context Menu Extension Methods
+
+// PopulateContextMenu builds the context menu for the plugin
+func (p *GainPlugin) PopulateContextMenu(target *api.ContextMenuTarget, builder *api.ContextMenuBuilder) bool {
+	// Check main thread (context menu is always on main thread)
+	api.DebugAssertMainThread("GainPlugin.PopulateContextMenu")
+	
+	if target != nil && target.Kind == api.ContextMenuTargetKindParam {
+		// Use helper for common parameter menu items
+		p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
+		
+		// Add gain-specific presets
+		if target.ID == 0 { // Gain parameter
+			api.AddParameterPresetSubmenu(builder, "Presets", []struct {
+				Label    string
+				Value    float64
+				ActionID uint64
+			}{
+				{"-6 dB", math.Pow(10, -6.0/20.0), 1001},
+				{"-3 dB", math.Pow(10, -3.0/20.0), 1002},
+				{"+3 dB", math.Pow(10, 3.0/20.0), 1003},
+				{"+6 dB", math.Pow(10, 6.0/20.0), 1004},
+			})
+		}
+	} else {
+		// Use helper for common global menu items
+		p.contextMenuProvider.PopulateGlobalMenu(builder)
+	}
+	
+	return true
+}
+
+// PerformContextMenuAction handles context menu actions
+func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, actionID uint64) bool {
+	// Check main thread (context menu is always on main thread)
+	api.DebugAssertMainThread("GainPlugin.PerformContextMenuAction")
+	
+	// Check for common actions first
+	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
+		// For gain parameter, also update atomic value
+		if paramID == 0 {
+			atomic.StoreInt64(&p.gain, int64(floatToBits(1.0)))
+		}
+		return p.contextMenuProvider.HandleResetParameter(paramID)
+	}
+	
+	if p.contextMenuProvider.IsAboutAction(actionID) {
+		if p.logger != nil {
+			p.logger.Info("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
+		}
+		return true
+	}
+	
+	// Handle gain preset actions
+	var value float64
+	switch actionID {
+	case 1001: // -6 dB
+		value = math.Pow(10, -6.0/20.0)
+	case 1002: // -3 dB
+		value = math.Pow(10, -3.0/20.0)
+	case 1003: // +3 dB
+		value = math.Pow(10, 3.0/20.0)
+	case 1004: // +6 dB
+		value = math.Pow(10, 6.0/20.0)
+	default:
+		return false
+	}
+	
+	// Apply preset value
+	p.paramManager.SetParameterValue(0, value)
+	atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
+	// TODO: Request parameter flush to notify host
+	return true
+}
+
+// Remote Controls Extension Methods
+
+// GetRemoteControlsPageCount returns the number of remote control pages
+func (p *GainPlugin) GetRemoteControlsPageCount() uint32 {
+	return 1 // Single page for gain control
+}
+
+// GetRemoteControlsPage returns the remote control page at the given index
+func (p *GainPlugin) GetRemoteControlsPage(pageIndex uint32) (*api.RemoteControlsPage, bool) {
+	if pageIndex != 0 {
+		return nil, false
+	}
+	
+	// Create a simple page with the gain parameter
+	page := &api.RemoteControlsPage{
+		SectionName: "Main",
+		PageID:      1,
+		PageName:    "Gain Control",
+		ParamIDs:    [api.RemoteControlsCount]uint32{0, 0, 0, 0, 0, 0, 0, 0}, // First slot has gain param
+		IsForPreset: false, // Device page, not preset-specific
+	}
+	
+	return page, true
+}
+
+// Param Indication Extension Methods
+
+// OnParamMappingSet is called when the host sets or clears a mapping indication
+func (p *GainPlugin) OnParamMappingSet(paramID uint32, hasMapping bool, color *api.Color, label string, description string) {
+	// Check main thread (param indication is always on main thread)
+	api.DebugAssertMainThread("GainPlugin.OnParamMappingSet")
+	
+	// Log the mapping change
+	if p.logger != nil {
+		if hasMapping {
+			p.logger.Info(fmt.Sprintf("Parameter %d mapped to %s: %s", paramID, label, description))
+			if color != nil {
+				p.logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
+			}
+		} else {
+			p.logger.Info(fmt.Sprintf("Parameter %d mapping cleared", paramID))
+		}
+	}
+	
+	// In a real plugin with GUI, you would update the visual indication here
+}
+
+// OnParamAutomationSet is called when the host sets or clears an automation indication
+func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32, color *api.Color) {
+	// Check main thread (param indication is always on main thread)
+	api.DebugAssertMainThread("GainPlugin.OnParamAutomationSet")
+	
+	// Log the automation state change
+	if p.logger != nil {
+		var stateStr string
+		switch automationState {
+		case api.ParamIndicationAutomationNone:
+			stateStr = "None"
+		case api.ParamIndicationAutomationPresent:
+			stateStr = "Present"
+		case api.ParamIndicationAutomationPlaying:
+			stateStr = "Playing"
+		case api.ParamIndicationAutomationRecording:
+			stateStr = "Recording"
+		case api.ParamIndicationAutomationOverriding:
+			stateStr = "Overriding"
+		default:
+			stateStr = "Unknown"
+		}
+		
+		p.logger.Info(fmt.Sprintf("Parameter %d automation state: %s", paramID, stateStr))
+		if color != nil {
+			p.logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
+		}
+	}
+	
+	// In a real plugin with GUI, you would update the visual indication here
 }
 
 // SaveState saves the plugin state to a stream
@@ -1100,6 +1267,107 @@ func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
 	}
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	p.OnTrackInfoChanged()
+}
+
+// Context Menu Extension Exports
+
+//export ClapGo_PluginContextMenuPopulate
+func ClapGo_PluginContextMenuPopulate(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, builder unsafe.Pointer) C.bool {
+	if plugin == nil || builder == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: uint32(targetKind),
+			ID:   uint64(targetID),
+		}
+	}
+	
+	// Create builder wrapper
+	menuBuilder := api.NewContextMenuBuilder(builder)
+	
+	return C.bool(p.PopulateContextMenu(target, menuBuilder))
+}
+
+//export ClapGo_PluginContextMenuPerform
+func ClapGo_PluginContextMenuPerform(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, actionID C.uint64_t) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: uint32(targetKind),
+			ID:   uint64(targetID),
+		}
+	}
+	
+	return C.bool(p.PerformContextMenuAction(target, uint64(actionID)))
+}
+
+// Remote Controls Extension Exports
+
+//export ClapGo_PluginRemoteControlsCount
+func ClapGo_PluginRemoteControlsCount(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	return C.uint32_t(p.GetRemoteControlsPageCount())
+}
+
+//export ClapGo_PluginRemoteControlsGet
+func ClapGo_PluginRemoteControlsGet(plugin unsafe.Pointer, pageIndex C.uint32_t, cPage unsafe.Pointer) C.bool {
+	if plugin == nil || cPage == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	page, ok := p.GetRemoteControlsPage(uint32(pageIndex))
+	if !ok {
+		return C.bool(false)
+	}
+	
+	// Convert Go page to C structure
+	api.RemoteControlsPageToC(page, cPage)
+	return C.bool(true)
+}
+
+// Param Indication Extension Exports
+
+//export ClapGo_PluginParamIndicationSetMapping
+func ClapGo_PluginParamIndicationSetMapping(plugin unsafe.Pointer, paramID C.uint64_t, hasMapping C.bool, color unsafe.Pointer, label *C.char, description *C.char) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	var labelStr, descStr string
+	if label != nil {
+		labelStr = C.GoString(label)
+	}
+	if description != nil {
+		descStr = C.GoString(description)
+	}
+	
+	p.OnParamMappingSet(uint32(paramID), bool(hasMapping), api.ColorFromC(color), labelStr, descStr)
+}
+
+//export ClapGo_PluginParamIndicationSetAutomation
+func ClapGo_PluginParamIndicationSetAutomation(plugin unsafe.Pointer, paramID C.uint64_t, automationState C.uint32_t, color unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	p.OnParamAutomationSet(uint32(paramID), uint32(automationState), api.ColorFromC(color))
 }
 
 func main() {

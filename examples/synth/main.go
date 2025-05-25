@@ -813,6 +813,7 @@ type SynthPlugin struct {
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
 	threadCheck  *api.ThreadChecker
+	contextMenuProvider *api.DefaultContextMenuProvider
 	
 	// Diagnostics
 	processCallCount uint64
@@ -894,6 +895,17 @@ func (p *SynthPlugin) Init() bool {
 		if len(presets) > 0 {
 			p.logger.Info(fmt.Sprintf("Available bundled presets: %v", presets))
 		}
+	}
+	
+	// Initialize context menu provider
+	if p.host != nil {
+		p.contextMenuProvider = api.NewDefaultContextMenuProvider(
+			p.paramManager,
+			"Simple Synth",
+			"1.0.0",
+			p.host,
+		)
+		p.contextMenuProvider.SetAboutMessage("Simple Synth v1.0.0 - A basic subtractive synthesizer")
 	}
 	
 	// Check initial track info
@@ -1619,6 +1631,136 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 	}
 }
 
+// Context Menu Extension Methods
+
+// PopulateContextMenu builds the context menu for the plugin
+func (p *SynthPlugin) PopulateContextMenu(target *api.ContextMenuTarget, builder *api.ContextMenuBuilder) bool {
+	// Check main thread (context menu is always on main thread)
+	api.DebugAssertMainThread("SynthPlugin.PopulateContextMenu")
+	
+	if target != nil && target.Kind == api.ContextMenuTargetKindParam {
+		// Use helper for common parameter menu items
+		p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
+		
+		// Add parameter-specific items
+		// No parameter-specific items for this synth currently
+	} else {
+		// Use helper for common global menu items
+		p.contextMenuProvider.PopulateGlobalMenu(builder)
+		
+		// Add synth-specific items
+		builder.AddItem(&api.ContextMenuSeparator{})
+		
+		// Voice management submenu
+		builder.AddItem(&api.ContextMenuSubmenu{
+			Label:     "Voice Management",
+			IsEnabled: true,
+		})
+		
+		// Show current voice count
+		activeVoices := 0
+		for _, voice := range p.voices {
+			if voice != nil && voice.IsActive {
+				activeVoices++
+			}
+		}
+		builder.AddItem(&api.ContextMenuEntry{
+			Label:     fmt.Sprintf("Active Voices: %d/%d", activeVoices, len(p.voices)),
+			IsEnabled: false, // Just informational
+			ActionID:  0,
+		})
+		
+		builder.AddItem(&api.ContextMenuSeparator{})
+		
+		builder.AddItem(&api.ContextMenuEntry{
+			Label:     "Kill All Voices",
+			IsEnabled: activeVoices > 0,
+			ActionID:  2001,
+		})
+		
+		builder.AddItem(&api.ContextMenuEndSubmenu{})
+	}
+	
+	return true
+}
+
+// PerformContextMenuAction handles context menu actions
+func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, actionID uint64) bool {
+	// Check main thread (context menu is always on main thread)
+	api.DebugAssertMainThread("SynthPlugin.PerformContextMenuAction")
+	
+	// Check for common actions first
+	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
+		// For synth parameters, also update atomic values
+		info, _ := p.paramManager.GetParameterInfo(paramID)
+		switch paramID {
+		case 1: // Volume
+			atomic.StoreInt64(&p.volume, int64(floatToBits(info.DefaultValue)))
+		case 2: // Waveform
+			atomic.StoreInt64(&p.waveform, int64(info.DefaultValue))
+		case 3: // Attack
+			atomic.StoreInt64(&p.attack, int64(floatToBits(info.DefaultValue)))
+		case 4: // Decay
+			atomic.StoreInt64(&p.decay, int64(floatToBits(info.DefaultValue)))
+		case 5: // Sustain
+			atomic.StoreInt64(&p.sustain, int64(floatToBits(info.DefaultValue)))
+		case 6: // Release
+			atomic.StoreInt64(&p.release, int64(floatToBits(info.DefaultValue)))
+		}
+		return p.contextMenuProvider.HandleResetParameter(paramID)
+	}
+	
+	if p.contextMenuProvider.IsAboutAction(actionID) {
+		if p.logger != nil {
+			p.logger.Info("Simple Synth v1.0.0 - A basic subtractive synthesizer")
+		}
+		return true
+	}
+	
+	// Handle synth-specific actions
+	switch actionID {
+	case 1101: // Sine wave preset
+		p.paramManager.SetParameterValue(2, 0.0)
+		atomic.StoreInt64(&p.waveform, 0)
+		if p.host != nil {
+			// TODO: Request parameter flush to notify host
+		}
+		return true
+		
+	case 1102: // Saw wave preset
+		p.paramManager.SetParameterValue(2, 1.0)
+		atomic.StoreInt64(&p.waveform, 1)
+		if p.host != nil {
+			// TODO: Request parameter flush to notify host
+		}
+		return true
+		
+	case 1103: // Square wave preset
+		p.paramManager.SetParameterValue(2, 2.0)
+		atomic.StoreInt64(&p.waveform, 2)
+		if p.host != nil {
+			// TODO: Request parameter flush to notify host
+		}
+		return true
+		
+	case 2001: // Kill all voices
+		for i := range p.voices {
+			if p.voices[i] != nil {
+				p.voices[i].IsActive = false
+				p.voices[i].Phase = 0.0
+				p.voices[i].EnvelopeValue = 0.0
+				p.voices[i].EnvelopePhase = 0
+			}
+		}
+		if p.logger != nil {
+			p.logger.Info("All voices killed")
+		}
+		return true
+	}
+	
+	return false
+}
+
 // GetAvailablePresets returns a list of available bundled preset names
 func (p *SynthPlugin) GetAvailablePresets() []string {
 	var presets []string
@@ -1770,6 +1912,81 @@ func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	p.OnTrackInfoChanged()
+}
+
+// Note Name Extension Exports
+
+//export ClapGo_PluginNoteNameCount
+func ClapGo_PluginNoteNameCount(plugin unsafe.Pointer) C.uint32_t {
+	if plugin == nil {
+		return 0
+	}
+	_ = cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Synth provides note names for all MIDI notes
+	return C.uint32_t(128) // All MIDI notes
+}
+
+//export ClapGo_PluginNoteNameGet
+func ClapGo_PluginNoteNameGet(plugin unsafe.Pointer, index C.uint32_t, noteName unsafe.Pointer) C.bool {
+	if plugin == nil || noteName == nil || index >= 128 {
+		return C.bool(false)
+	}
+	_ = cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Get standard note name for this index
+	noteNames := api.StandardNoteNames()
+	if int(index) >= len(noteNames) {
+		return C.bool(false)
+	}
+	
+	// Convert to C structure
+	api.NoteNameToC(&noteNames[index], noteName)
+	
+	return C.bool(true)
+}
+
+// Context Menu Extension Exports
+
+//export ClapGo_PluginContextMenuPopulate
+func ClapGo_PluginContextMenuPopulate(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, builder unsafe.Pointer) C.bool {
+	if plugin == nil || builder == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: uint32(targetKind),
+			ID:   uint64(targetID),
+		}
+	}
+	
+	// Create builder wrapper
+	menuBuilder := api.NewContextMenuBuilder(builder)
+	
+	return C.bool(p.PopulateContextMenu(target, menuBuilder))
+}
+
+//export ClapGo_PluginContextMenuPerform
+func ClapGo_PluginContextMenuPerform(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, actionID C.uint64_t) C.bool {
+	if plugin == nil {
+		return C.bool(false)
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: uint32(targetKind),
+			ID:   uint64(targetID),
+		}
+	}
+	
+	return C.bool(p.PerformContextMenuAction(target, uint64(actionID)))
 }
 
 func main() {

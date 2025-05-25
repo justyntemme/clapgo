@@ -62,6 +62,11 @@ typedef struct go_plugin_data {
     bool supports_preset_load;  // Has preset load export
     bool supports_track_info;   // Has track info export
     bool supports_param_indication; // Has param indication exports
+    bool supports_context_menu; // Has context menu exports
+    bool supports_remote_controls; // Has remote controls exports
+    bool supports_note_name; // Has note name exports
+    bool supports_ambisonic; // Has ambisonic exports
+    bool supports_audio_ports_activation; // Has audio ports activation exports
 } go_plugin_data_t;
 
 
