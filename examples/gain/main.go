@@ -470,49 +470,18 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	if plugin == nil || text == nil || value == nil {
 		return C.bool(false)
 	}
+	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
 	// Convert text to Go string
 	goText := C.GoString(text)
 	
-	// For gain parameter, parse dB value
+	// For gain parameter, use the ParameterValueParser
 	if uint32(paramID) == 0 {
-		// Handle special case for -∞ dB
-		if goText == "-∞ dB" || goText == "-inf dB" || goText == "-Inf dB" {
-			*value = C.double(0.0)
-			return C.bool(true)
-		}
-		
-		var db float64
-		// Try to parse with "dB" suffix
-		if _, err := fmt.Sscanf(goText, "%f dB", &db); err == nil {
-			// Convert from dB to linear
-			linear := math.Pow(10.0, db/20.0)
-			
-			// Clamp to valid range
-			if linear < 0.0 {
-				linear = 0.0
-			}
-			if linear > 2.0 {
-				linear = 2.0
-			}
-			
-			*value = C.double(linear)
-			return C.bool(true)
-		}
-		
-		// Try to parse without "dB" suffix
-		if _, err := fmt.Sscanf(goText, "%f", &db); err == nil {
-			// Convert from dB to linear
-			linear := math.Pow(10.0, db/20.0)
-			
-			// Clamp to valid range
-			if linear < 0.0 {
-				linear = 0.0
-			}
-			if linear > 2.0 {
-				linear = 2.0
-			}
-			
-			*value = C.double(linear)
+		parser := api.NewParameterValueParser(api.FormatDecibel)
+		if parsedValue, err := parser.ParseValue(goText); err == nil {
+			// Clamp to valid range for gain parameter
+			clamped := api.ClampValue(parsedValue, 0.0, 2.0)
+			*value = C.double(clamped)
 			return C.bool(true)
 		}
 	}
@@ -536,6 +505,8 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 
 // GainPlugin represents the gain plugin with atomic parameter storage
 type GainPlugin struct {
+	api.NoOpEventHandler // Embed to get default no-op implementations
+	
 	// Plugin state
 	sampleRate   float64
 	isActivated  bool
