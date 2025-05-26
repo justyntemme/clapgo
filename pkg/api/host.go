@@ -1,6 +1,7 @@
 package api
 
 // #include "../../include/clap/include/clap/clap.h"
+// #include "../../include/clap/include/clap/ext/draft/transport-control.h"
 // #include <stdlib.h>
 //
 // // Helper function to call host log
@@ -55,6 +56,36 @@ package api
 //     }
 // }
 //
+// // Helper function to notify host about audio ports config change
+// static void clap_host_audio_ports_config_rescan_helper(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_audio_ports_config_t* config_ext = (const clap_host_audio_ports_config_t*)host->get_extension(host, CLAP_EXT_AUDIO_PORTS_CONFIG);
+//         if (config_ext && config_ext->rescan) {
+//             config_ext->rescan(host);
+//         }
+//     }
+// }
+//
+// // Helper function to notify host about surround change
+// static void clap_host_surround_changed_helper(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_surround_t* surround_ext = (const clap_host_surround_t*)host->get_extension(host, CLAP_EXT_SURROUND);
+//         if (surround_ext && surround_ext->changed) {
+//             surround_ext->changed(host);
+//         }
+//     }
+// }
+//
+// // Helper function to notify host about voice info change
+// static void clap_host_voice_info_changed_helper(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_voice_info_t* voice_info_ext = (const clap_host_voice_info_t*)host->get_extension(host, CLAP_EXT_VOICE_INFO);
+//         if (voice_info_ext && voice_info_ext->changed) {
+//             voice_info_ext->changed(host);
+//         }
+//     }
+// }
+//
 // // Helper function to get track info from host
 // static bool clap_host_get_track_info_helper(const clap_host_t* host, clap_track_info_t* info) {
 //     if (host && host->get_extension && info) {
@@ -64,6 +95,106 @@ package api
 //         }
 //     }
 //     return false;
+// }
+//
+// // Transport control helper functions
+// static void clap_host_transport_request_start(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_start) {
+//             transport->request_start(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_stop(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_stop) {
+//             transport->request_stop(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_continue(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_continue) {
+//             transport->request_continue(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_pause(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_pause) {
+//             transport->request_pause(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_toggle_play(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_toggle_play) {
+//             transport->request_toggle_play(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_jump(const clap_host_t* host, double position) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_jump) {
+//             transport->request_jump(host, position);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_loop_region(const clap_host_t* host, double start, double duration) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_loop_region) {
+//             transport->request_loop_region(host, start, duration);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_toggle_loop(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_toggle_loop) {
+//             transport->request_toggle_loop(host);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_enable_loop(const clap_host_t* host, bool is_enabled) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_enable_loop) {
+//             transport->request_enable_loop(host, is_enabled);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_record(const clap_host_t* host, bool is_recording) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_record) {
+//             transport->request_record(host, is_recording);
+//         }
+//     }
+// }
+//
+// static void clap_host_transport_request_toggle_record(const clap_host_t* host) {
+//     if (host && host->get_extension) {
+//         const clap_host_transport_control_t* transport = (const clap_host_transport_control_t*)host->get_extension(host, "clap.transport-control/1");
+//         if (transport && transport->request_toggle_record) {
+//             transport->request_toggle_record(host);
+//         }
+//     }
 // }
 import "C"
 import (
@@ -262,7 +393,7 @@ func (n *HostAudioPortsConfigNotifier) NotifyRescan() {
 		return
 	}
 	
-	// Host notification not yet implemented
+	C.clap_host_audio_ports_config_rescan_helper((*C.clap_host_t)(n.host))
 }
 
 // HostSurroundNotifier notifies the host about surround changes
@@ -281,7 +412,7 @@ func (n *HostSurroundNotifier) NotifySurroundChanged() {
 		return
 	}
 	
-	// Host notification not yet implemented
+	C.clap_host_surround_changed_helper((*C.clap_host_t)(n.host))
 }
 
 // HostVoiceInfoNotifier notifies the host about voice info changes
@@ -300,7 +431,7 @@ func (n *HostVoiceInfoNotifier) NotifyVoiceInfoChanged() {
 		return
 	}
 	
-	// Host notification not yet implemented
+	C.clap_host_voice_info_changed_helper((*C.clap_host_t)(n.host))
 }
 
 // HostTrackInfo provides track information from the host
@@ -353,4 +484,102 @@ func (t *HostTrackInfo) GetTrackInfo() (*TrackInfo, bool) {
 	}
 	
 	return info, true
+}
+
+// HostTransportControl provides transport control functionality to request transport changes from the host
+type HostTransportControl struct {
+	host unsafe.Pointer
+}
+
+// NewHostTransportControl creates a new host transport control
+func NewHostTransportControl(host unsafe.Pointer) *HostTransportControl {
+	return &HostTransportControl{host: host}
+}
+
+// RequestStart jumps back to the start point and starts the transport
+func (t *HostTransportControl) RequestStart() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_start((*C.clap_host_t)(t.host))
+}
+
+// RequestStop stops the transport and jumps to the start point
+func (t *HostTransportControl) RequestStop() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_stop((*C.clap_host_t)(t.host))
+}
+
+// RequestContinue starts the transport from its current position (if not playing)
+func (t *HostTransportControl) RequestContinue() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_continue((*C.clap_host_t)(t.host))
+}
+
+// RequestPause stops the transport at the current position (if playing)
+func (t *HostTransportControl) RequestPause() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_pause((*C.clap_host_t)(t.host))
+}
+
+// RequestTogglePlay equivalent to "space bar" in most DAWs
+func (t *HostTransportControl) RequestTogglePlay() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_toggle_play((*C.clap_host_t)(t.host))
+}
+
+// RequestJump jumps the transport to the given position (in beats)
+func (t *HostTransportControl) RequestJump(position float64) {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_jump((*C.clap_host_t)(t.host), C.double(position))
+}
+
+// RequestLoopRegion sets the loop region
+func (t *HostTransportControl) RequestLoopRegion(start, duration float64) {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_loop_region((*C.clap_host_t)(t.host), C.double(start), C.double(duration))
+}
+
+// RequestToggleLoop toggles looping on/off
+func (t *HostTransportControl) RequestToggleLoop() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_toggle_loop((*C.clap_host_t)(t.host))
+}
+
+// RequestEnableLoop enables or disables looping
+func (t *HostTransportControl) RequestEnableLoop(enable bool) {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_enable_loop((*C.clap_host_t)(t.host), C.bool(enable))
+}
+
+// RequestRecord enables or disables recording
+func (t *HostTransportControl) RequestRecord(record bool) {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_record((*C.clap_host_t)(t.host), C.bool(record))
+}
+
+// RequestToggleRecord toggles recording on/off
+func (t *HostTransportControl) RequestToggleRecord() {
+	if t.host == nil {
+		return
+	}
+	C.clap_host_transport_request_toggle_record((*C.clap_host_t)(t.host))
 }

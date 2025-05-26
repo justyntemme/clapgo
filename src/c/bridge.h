@@ -48,8 +48,12 @@ typedef struct go_plugin_data {
     // For manifest-loaded plugins, store the manifest index
     int manifest_index;
     
+    // Store the host pointer for logging
+    const clap_host_t* host;
+    
     // Extension support flags - determined at plugin creation
     bool supports_params;      // Has param-related exports
+    bool supports_audio_ports; // Has audio port exports
     bool supports_note_ports;  // Has note port exports
     bool supports_state;       // Has state save/load exports
     bool supports_latency;     // Has latency export
@@ -61,6 +65,7 @@ typedef struct go_plugin_data {
     bool supports_state_context; // Has state context exports
     bool supports_preset_load;  // Has preset load export
     bool supports_track_info;   // Has track info export
+    bool supports_tuning;       // Has tuning export
     bool supports_param_indication; // Has param indication exports
     bool supports_context_menu; // Has context menu exports
     bool supports_remote_controls; // Has remote controls exports
@@ -74,11 +79,15 @@ typedef struct go_plugin_data {
 } go_plugin_data_t;
 
 
-// Forward declaration
-struct manifest_plugin_entry_t;
-
+// Simplified manifest plugin entry for self-contained plugins
+typedef struct {
+    plugin_manifest_t manifest;
+    const clap_plugin_descriptor_t* descriptor;
+    bool loaded;
+} manifest_plugin_entry_t;
 
 // Manifest plugin registry - external declarations
+extern manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
 extern int manifest_plugin_count;
 
 // Initialize the bridge - loads the Go library and initializes the plugin

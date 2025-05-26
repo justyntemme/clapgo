@@ -1,5 +1,10 @@
 {
   "name": "Unity Gain",
   "description": "0dB gain - no change to signal",
-  "gain": 1.0
+  "plugin_ids": ["com.clapgo.gain"],
+  "creators": ["ClapGo Team"],
+  "features": ["utility", "gain"],
+  "preset_data": {
+    "gain": 1.0
+  }
 }

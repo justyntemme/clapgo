@@ -1,5 +1,10 @@
 {
   "name": "6dB Boost",
   "description": "Boost signal by 6dB",
-  "gain": 2.0
+  "plugin_ids": ["com.clapgo.gain"],
+  "creators": ["ClapGo Team"],
+  "features": ["utility", "gain"],
+  "preset_data": {
+    "gain": 2.0
+  }
 }

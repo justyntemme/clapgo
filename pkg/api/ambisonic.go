@@ -26,26 +26,11 @@ const (
 	PortAmbisonicID    = "ambisonic"
 )
 
-// Ambisonic ordering schemes
+// Additional ambisonic normalization schemes not in configurable_audio_ports.go
 const (
-	AmbisonicOrderingFuMa = 0 // FuMa channel ordering
-	AmbisonicOrderingACN  = 1 // ACN channel ordering
-)
-
-// Ambisonic normalization schemes
-const (
-	AmbisonicNormalizationMaxN = 0
-	AmbisonicNormalizationSN3D = 1
-	AmbisonicNormalizationN3D  = 2
 	AmbisonicNormalizationSN2D = 3
 	AmbisonicNormalizationN2D  = 4
 )
-
-// AmbisonicConfig represents the ambisonic configuration for a port
-type AmbisonicConfig struct {
-	Ordering      uint32 // One of the AmbisonicOrdering constants
-	Normalization uint32 // One of the AmbisonicNormalization constants
-}
 
 // AmbisonicProvider is an extension for plugins that support ambisonic audio
 type AmbisonicProvider interface {

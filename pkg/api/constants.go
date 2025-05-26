@@ -33,8 +33,9 @@ const (
 	ExtContextMenu          = "clap.context-menu"
 	
 	// Draft extensions
-	ExtResourceDirectory    = "clap.ext.draft.resource-directory"
-	ExtTransportControl     = "clap.ext.draft.transport-control"
+	ExtResourceDirectory    = "clap.resource-directory.draft/1"
+	ExtTransportControl     = "clap.transport-control/1"
+	ExtTuning              = "clap.tuning/2"
 )
 
 // Event types

@@ -1,7 +1,36 @@
 package api
 
 /*
+#include <stdlib.h>
 #include "../../include/clap/include/clap/ext/posix-fd-support.h"
+
+static inline const void* clap_host_get_extension_helper(const clap_host_t* host, const char* id) {
+    if (host && host->get_extension) {
+        return host->get_extension(host, id);
+    }
+    return NULL;
+}
+
+static inline bool clap_host_posix_fd_support_register_fd(const clap_host_posix_fd_support_t* ext, const clap_host_t* host, int fd, clap_posix_fd_flags_t flags) {
+    if (ext && ext->register_fd) {
+        return ext->register_fd(host, fd, flags);
+    }
+    return false;
+}
+
+static inline bool clap_host_posix_fd_support_modify_fd(const clap_host_posix_fd_support_t* ext, const clap_host_t* host, int fd, clap_posix_fd_flags_t flags) {
+    if (ext && ext->modify_fd) {
+        return ext->modify_fd(host, fd, flags);
+    }
+    return false;
+}
+
+static inline bool clap_host_posix_fd_support_unregister_fd(const clap_host_posix_fd_support_t* ext, const clap_host_t* host, int fd) {
+    if (ext && ext->unregister_fd) {
+        return ext->unregister_fd(host, fd);
+    }
+    return false;
+}
 */
 import "C"
 import (
@@ -40,10 +69,11 @@ func NewPosixFDSupportHost(host unsafe.Pointer) *PosixFDSupportHost {
 	}
 
 	cHost := (*C.clap_host_t)(host)
-	cExtID := C.CString(C.CLAP_EXT_POSIX_FD_SUPPORT)
+	
+	cExtID := C.CString("clap.posix-fd-support")
 	defer C.free(unsafe.Pointer(cExtID))
 	
-	ext := C.clap_host_get_extension(cHost, cExtID)
+	ext := C.clap_host_get_extension_helper(cHost, cExtID)
 	if ext == nil {
 		return nil
 	}
@@ -64,7 +94,7 @@ func (h *PosixFDSupportHost) RegisterFD(fd int, flags uint32) bool {
 	}
 
 	cHost := (*C.clap_host_t)(h.host)
-	return bool(h.extension.register_fd(cHost, C.int(fd), C.clap_posix_fd_flags_t(flags)))
+	return bool(C.clap_host_posix_fd_support_register_fd(h.extension, cHost, C.int(fd), C.clap_posix_fd_flags_t(flags)))
 }
 
 // ModifyFD modifies the event mask for a registered file descriptor.
@@ -79,7 +109,7 @@ func (h *PosixFDSupportHost) ModifyFD(fd int, flags uint32) bool {
 	}
 
 	cHost := (*C.clap_host_t)(h.host)
-	return bool(h.extension.modify_fd(cHost, C.int(fd), C.clap_posix_fd_flags_t(flags)))
+	return bool(C.clap_host_posix_fd_support_modify_fd(h.extension, cHost, C.int(fd), C.clap_posix_fd_flags_t(flags)))
 }
 
 // UnregisterFD unregisters a file descriptor from the host's event loop.
@@ -91,7 +121,7 @@ func (h *PosixFDSupportHost) UnregisterFD(fd int) bool {
 	}
 
 	cHost := (*C.clap_host_t)(h.host)
-	return bool(h.extension.unregister_fd(cHost, C.int(fd)))
+	return bool(C.clap_host_posix_fd_support_unregister_fd(h.extension, cHost, C.int(fd)))
 }
 
 // PosixFDManager provides a convenient interface for managing file descriptors

@@ -3,6 +3,20 @@ package api
 /*
 #include "../../include/clap/include/clap/ext/event-registry.h"
 #include <stdlib.h>
+
+static inline const void* clap_host_get_extension_helper(const clap_host_t* host, const char* id) {
+    if (host && host->get_extension) {
+        return host->get_extension(host, id);
+    }
+    return NULL;
+}
+
+static inline bool clap_host_event_registry_query(const clap_host_event_registry_t* ext, const clap_host_t* host, const char* space_name, uint16_t* space_id) {
+    if (ext && ext->query) {
+        return ext->query(host, space_name, space_id);
+    }
+    return false;
+}
 */
 import "C"
 import (
@@ -24,7 +38,11 @@ func NewEventRegistryHost(host unsafe.Pointer) *EventRegistryHost {
 	}
 
 	cHost := (*C.clap_host_t)(host)
-	ext := C.clap_host_get_extension(cHost, C.CString(C.CLAP_EXT_EVENT_REGISTRY))
+	
+	extID := C.CString("clap.event-registry")
+	defer C.free(unsafe.Pointer(extID))
+	
+	ext := C.clap_host_get_extension_helper(cHost, extID)
 	if ext == nil {
 		return nil
 	}
@@ -49,7 +67,7 @@ func (e *EventRegistryHost) Query(spaceName string) (uint16, bool) {
 	var spaceID C.uint16_t
 	cHost := (*C.clap_host_t)(e.host)
 	
-	result := e.extension.query(cHost, cSpaceName, &spaceID)
+	result := C.clap_host_event_registry_query(e.extension, cHost, cSpaceName, &spaceID)
 	return uint16(spaceID), bool(result)
 }
 

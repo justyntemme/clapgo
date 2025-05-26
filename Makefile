@@ -51,7 +51,7 @@ CFLAGS += $(shell pkg-config --cflags json-c)
 LDFLAGS += $(shell pkg-config --libs json-c)
 
 # Bridge source files
-C_BRIDGE_SRCS := src/c/bridge.c src/c/plugin.c src/c/manifest.c
+C_BRIDGE_SRCS := src/c/bridge.c src/c/plugin.c src/c/manifest.c src/c/preset_discovery.c
 
 # Directories
 C_SRC_DIR := src/c
@@ -112,10 +112,14 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o: $(C_SRC_DIR)/manifest.c | $(EXAMPL
 	@echo "Compiling C manifest for $(1)..."
 	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/manifest.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
 
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o: $(C_SRC_DIR)/preset_discovery.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C preset discovery for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/preset_discovery.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o
+
 # Final CLAP plugin - linked with shared Go library
-$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o
 	@echo "Linking $(1).clap with shared library..."
-	$(LD) $(LDFLAGS) -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o -l$(1) $(shell pkg-config --libs json-c)
+	$(LD) $(LDFLAGS) -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o -l$(1) $(shell pkg-config --libs json-c)
 
 # Build target for each plugin
 build-$(1): build-go $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap
@@ -153,6 +157,14 @@ install: all
 				cp -f "$$plugin/$$plugin_name.json" "$$plugin_dir/$$plugin_name.json"; \
 				echo "    Copied $$plugin_name.json manifest"; \
 			fi; \
+			if [ -d "$$plugin/presets/factory" ]; then \
+				mkdir -p "$$plugin_dir/presets/factory"; \
+				cp "$$plugin/presets/factory"/*.json "$$plugin_dir/presets/factory/" 2>/dev/null || true; \
+				preset_count=$$(find "$$plugin_dir/presets/factory" -name "*.json" | wc -l); \
+				if [ $$preset_count -gt 0 ]; then \
+					echo "    Copied $$preset_count presets"; \
+				fi; \
+			fi; \
 		else \
 			echo "  Warning: $$plugin directory not found, skipping"; \
 		fi; \
@@ -163,11 +175,19 @@ install: all
 	@echo "  $(INSTALL_DIR)/gain/"
 	@echo "    ├── gain.clap"
 	@echo "    ├── libgain.so"
-	@echo "    └── gain.json"
+	@echo "    ├── gain.json"
+	@echo "    └── presets/"
+	@echo "        └── factory/"
+	@echo "            ├── boost.json"
+	@echo "            └── unity.json"
 	@echo "  $(INSTALL_DIR)/synth/"
 	@echo "    ├── synth.clap"
 	@echo "    ├── libsynth.so"
-	@echo "    └── synth.json"
+	@echo "    ├── synth.json"
+	@echo "    └── presets/"
+	@echo "        └── factory/"
+	@echo "            ├── lead.json"
+	@echo "            └── pad.json"
 
 # Remove installed plugins
 uninstall:

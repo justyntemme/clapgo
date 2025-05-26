@@ -6,16 +6,12 @@
 #include <math.h>    // For log10() and pow()
 #include <libgen.h>  // For dirname()
 #include <unistd.h>  // For access()
+#include <time.h>    // For time()
 
 // Include CLAP extension headers for constants
 #include "../../include/clap/include/clap/ext/audio-ports-activation.h"
-
-// Simplified manifest plugin entry for self-contained plugins
-typedef struct {
-    plugin_manifest_t manifest;
-    const clap_plugin_descriptor_t* descriptor;
-    bool loaded;
-} manifest_plugin_entry_t;
+#include "../../include/clap/include/clap/ext/log.h"
+#include "../../include/clap/include/clap/ext/draft/tuning.h"
 
 // Manifest plugin registry
 manifest_plugin_entry_t manifest_plugins[MAX_PLUGIN_MANIFESTS];
@@ -45,6 +41,10 @@ extern void ClapGo_PluginParamsFlush(void* plugin, void* in_events, void* out_ev
 // State extension Go exports
 extern bool ClapGo_PluginStateSave(void* plugin, void* stream);
 extern bool ClapGo_PluginStateLoad(void* plugin, void* stream);
+
+// Audio ports extension Go exports - weak symbols to allow optional implementation
+__attribute__((weak)) uint32_t ClapGo_PluginAudioPortsCount(void* plugin, bool is_input);
+__attribute__((weak)) bool ClapGo_PluginAudioPortsGet(void* plugin, uint32_t index, bool is_input, void* info);
 
 // Note ports extension Go exports - weak symbols to allow optional implementation
 __attribute__((weak)) uint32_t ClapGo_PluginNotePortsCount(void* plugin, bool is_input);
@@ -87,6 +87,9 @@ __attribute__((weak)) bool ClapGo_PluginPresetLoadFromLocation(void* plugin, uin
 
 // Track info extension
 __attribute__((weak)) void ClapGo_PluginTrackInfoChanged(void* plugin);
+
+// Tuning extension
+__attribute__((weak)) void ClapGo_PluginTuningChanged(void* plugin);
 
 // Param indication extension
 __attribute__((weak)) void ClapGo_PluginParamIndicationSetMapping(void* plugin, uint64_t param_id, bool has_mapping, void* color, char* label, char* description);
@@ -262,10 +265,48 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
         }
     }
     
+    // Debug logging before calling Go
+    FILE* init_log = fopen("/tmp/clapgo_plugin_init.log", "a");
+    if (init_log) {
+        fprintf(init_log, "\n[%ld] === ClapGo_CreatePlugin Call ===\n", time(NULL));
+        fprintf(init_log, "Plugin ID: %s\n", entry->manifest.plugin.id);
+        fprintf(init_log, "Host pointer: %p\n", host);
+        fprintf(init_log, "ClapGo_CreatePlugin function: %p\n", ClapGo_CreatePlugin);
+        fflush(init_log);
+    }
+    
+    // Log to host if available
+    if (host && host->get_extension) {
+        const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+        if (log_ext && log_ext->log) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[ClapGo] Creating plugin instance: %s", entry->manifest.plugin.id);
+            log_ext->log(host, CLAP_LOG_INFO, msg);
+        }
+    }
+    
     // Create the plugin instance using the statically linked Go function
     void* go_instance = ClapGo_CreatePlugin((void*)host, (char*)entry->manifest.plugin.id);
+    
+    if (init_log) {
+        fprintf(init_log, "ClapGo_CreatePlugin returned: %p\n", go_instance);
+        if (!go_instance) {
+            fprintf(init_log, "ERROR: Go instance is NULL!\n");
+        }
+        fclose(init_log);
+    }
+    
     if (!go_instance) {
         fprintf(stderr, "Error: Failed to create plugin instance\n");
+        
+        // Log error to host
+        if (host && host->get_extension) {
+            const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+            if (log_ext && log_ext->log) {
+                log_ext->log(host, CLAP_LOG_ERROR, "[ClapGo] Failed to create plugin instance");
+            }
+        }
+        
         return NULL;
     }
     
@@ -281,9 +322,30 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->descriptor = entry->descriptor;
     data->go_instance = go_instance;
     data->manifest_index = index;
+    data->host = (void*)host;  // Store host for later use
+    
+    // Add crash logging
+    FILE* crash_log = fopen("/tmp/clapgo_plugin_init.log", "a");
+    if (crash_log) {
+        fprintf(crash_log, "\n[%ld] === Plugin Creation Debug ===\n", time(NULL));
+        fprintf(crash_log, "Plugin ID: %s\n", entry->manifest.plugin.id);
+        fprintf(crash_log, "Host: %p\n", host);
+        fprintf(crash_log, "Data struct: %p\n", data);
+        fprintf(crash_log, "Go instance: %p\n", go_instance);
+        fprintf(crash_log, "About to check extension support...\n");
+        fflush(crash_log);
+    }
     
     // Determine extension support based on available exports
     data->supports_params = (ClapGo_PluginParamsCount != NULL);
+    
+    if (crash_log) {
+        fprintf(crash_log, "Params support check passed\n");
+        fflush(crash_log);
+    }
+    // Check for audio ports support (new)
+    data->supports_audio_ports = (ClapGo_PluginAudioPortsCount != NULL && 
+                                 ClapGo_PluginAudioPortsGet != NULL);
     data->supports_note_ports = (ClapGo_PluginNotePortsCount != NULL && 
                                  ClapGo_PluginNotePortsGet != NULL);
     data->supports_state = (ClapGo_PluginStateSave != NULL && 
@@ -300,7 +362,10 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->supports_state_context = (ClapGo_PluginStateSaveWithContext != NULL &&
                                    ClapGo_PluginStateLoadWithContext != NULL);
     data->supports_preset_load = (ClapGo_PluginPresetLoadFromLocation != NULL);
+    printf("DEBUG: ClapGo_PluginPresetLoadFromLocation = %p, supports_preset_load = %d\n", 
+           ClapGo_PluginPresetLoadFromLocation, data->supports_preset_load);
     data->supports_track_info = (ClapGo_PluginTrackInfoChanged != NULL);
+    data->supports_tuning = (ClapGo_PluginTuningChanged != NULL);
     data->supports_param_indication = (ClapGo_PluginParamIndicationSetMapping != NULL &&
                                       ClapGo_PluginParamIndicationSetAutomation != NULL);
     data->supports_context_menu = (ClapGo_PluginContextMenuPopulate != NULL &&
@@ -319,6 +384,11 @@ const clap_plugin_t* clapgo_create_plugin_from_manifest(const clap_host_t* host,
     data->supports_render = (ClapGo_PluginRenderHasHardRealtimeRequirement != NULL &&
                             ClapGo_PluginRenderSet != NULL);
     data->supports_thread_pool = (ClapGo_PluginThreadPoolExec != NULL);
+    
+    if (crash_log) {
+        fprintf(crash_log, "All extension support checks completed\n");
+        fclose(crash_log);
+    }
     
     // Allocate a CLAP plugin structure
     clap_plugin_t* plugin = calloc(1, sizeof(clap_plugin_t));
@@ -460,8 +530,32 @@ bool clapgo_plugin_init(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data || !data->go_instance) return false;
     
+    // Log to host
+    const clap_host_t* host = data->host;
+    if (host && host->get_extension) {
+        const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+        if (log_ext && log_ext->log) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[ClapGo] Initializing plugin: %s", plugin->desc->id);
+            log_ext->log(host, CLAP_LOG_DEBUG, msg);
+        }
+    }
+    
     // Call into Go code to initialize the plugin instance
-    return ClapGo_PluginInit(data->go_instance);
+    bool result = ClapGo_PluginInit(data->go_instance);
+    
+    // Log result
+    if (host && host->get_extension) {
+        const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+        if (log_ext && log_ext->log) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[ClapGo] Plugin init %s: %s", 
+                     result ? "succeeded" : "failed", plugin->desc->id);
+            log_ext->log(host, result ? CLAP_LOG_INFO : CLAP_LOG_ERROR, msg);
+        }
+    }
+    
+    return result;
 }
 
 // Destroy a plugin instance
@@ -471,9 +565,28 @@ void clapgo_plugin_destroy(const clap_plugin_t* plugin) {
     go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
     if (!data) return;
     
+    // Log to host
+    const clap_host_t* host = data->host;
+    if (host && host->get_extension) {
+        const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+        if (log_ext && log_ext->log) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "[ClapGo] Destroying plugin: %s", plugin->desc->id);
+            log_ext->log(host, CLAP_LOG_DEBUG, msg);
+        }
+    }
+    
     // Call into Go code to clean up the plugin instance
     if (data->go_instance) {
         ClapGo_PluginDestroy(data->go_instance);
+    }
+    
+    // Log completion
+    if (host && host->get_extension) {
+        const clap_host_log_t* log_ext = (const clap_host_log_t*)host->get_extension(host, CLAP_EXT_LOG);
+        if (log_ext && log_ext->log) {
+            log_ext->log(host, CLAP_LOG_INFO, "[ClapGo] Plugin instance destroyed");
+        }
     }
     
     // Free the plugin data
@@ -674,6 +787,14 @@ static const clap_plugin_track_info_t s_track_info_extension = {
     .changed = clapgo_track_info_changed
 };
 
+// Forward declaration for tuning extension
+static void clapgo_tuning_changed(const clap_plugin_t* plugin);
+
+// Tuning extension structure
+static const clap_plugin_tuning_t s_tuning_extension = {
+    .changed = clapgo_tuning_changed
+};
+
 // Forward declarations for param indication extension
 static void clapgo_param_indication_set_mapping(const clap_plugin_t* plugin, clap_id param_id, bool has_mapping, const clap_color_t* color, const char* label, const char* description);
 static void clapgo_param_indication_set_automation(const clap_plugin_t* plugin, clap_id param_id, uint32_t automation_state, const clap_color_t* color);
@@ -772,19 +893,33 @@ static const clap_plugin_thread_pool_t s_thread_pool_extension = {
 
 // Get the number of audio ports
 uint32_t clapgo_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
-    (void)plugin; // Suppress unused parameter warning
-    (void)is_input; // Suppress unused parameter warning
+    if (!plugin || !plugin->plugin_data) return 0;
     
-    // Return 1 audio port (stereo in and out)
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    
+    // If plugin implements audio ports, call the Go function
+    if (data->supports_audio_ports && ClapGo_PluginAudioPortsCount) {
+        return ClapGo_PluginAudioPortsCount(data->go_instance, is_input);
+    }
+    
+    // Default: 1 stereo port (in and out)
     return 1;
 }
 
 // Get audio port info
 bool clapgo_audio_ports_info(const clap_plugin_t* plugin, uint32_t index, bool is_input,
                             clap_audio_port_info_t* info) {
-    (void)plugin; // Suppress unused parameter warning
+    if (!plugin || !plugin->plugin_data || !info) return false;
     
-    if (index != 0 || !info) {
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    
+    // If plugin implements audio ports, call the Go function
+    if (data->supports_audio_ports && ClapGo_PluginAudioPortsGet) {
+        return ClapGo_PluginAudioPortsGet(data->go_instance, index, is_input, info);
+    }
+    
+    // Default implementation: single stereo port
+    if (index != 0) {
         return false;
     }
     
@@ -928,7 +1063,14 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
     }
     
     // Check if this is the preset load extension
-    if (strcmp(id, CLAP_EXT_PRESET_LOAD) == 0) {
+    if (strcmp(id, CLAP_EXT_PRESET_LOAD) == 0 || 
+        strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) {
+        FILE* log = fopen("/tmp/clapgo_factory_calls.log", "a");
+        if (log) {
+            fprintf(log, "[%ld] Plugin extension requested: %s\n", time(NULL), id);
+            fprintf(log, "  supports_preset_load = %d\n", data->supports_preset_load);
+            fclose(log);
+        }
         if (data->supports_preset_load) {
             printf("DEBUG: preset load extension requested and supported\n");
             return &s_preset_load_extension;
@@ -944,6 +1086,16 @@ const void* clapgo_plugin_get_extension(const clap_plugin_t* plugin, const char*
             return &s_track_info_extension;
         }
         printf("DEBUG: track info extension requested but not supported\n");
+        return NULL;
+    }
+    
+    // Check if this is the tuning extension
+    if (strcmp(id, CLAP_EXT_TUNING) == 0) {
+        if (data->supports_tuning) {
+            printf("DEBUG: tuning extension requested and supported\n");
+            return &s_tuning_extension;
+        }
+        printf("DEBUG: tuning extension requested but not supported\n");
         return NULL;
     }
     
@@ -1420,6 +1572,21 @@ static void clapgo_track_info_changed(const clap_plugin_t* plugin) {
     }
     
     ClapGo_PluginTrackInfoChanged(data->go_instance);
+}
+
+// Tuning extension implementation
+static void clapgo_tuning_changed(const clap_plugin_t* plugin) {
+    if (!plugin) return;
+    
+    go_plugin_data_t* data = (go_plugin_data_t*)plugin->plugin_data;
+    if (!data || !data->go_instance) return;
+    
+    // Check if the function exists
+    if (!ClapGo_PluginTuningChanged) {
+        return;
+    }
+    
+    ClapGo_PluginTuningChanged(data->go_instance);
 }
 
 // Param indication extension implementation

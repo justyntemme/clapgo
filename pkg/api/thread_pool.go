@@ -1,7 +1,22 @@
 package api
 
 /*
+#include <stdlib.h>
 #include "../../include/clap/include/clap/ext/thread-pool.h"
+
+static inline const void* clap_host_get_extension_helper(const clap_host_t* host, const char* id) {
+    if (host && host->get_extension) {
+        return host->get_extension(host, id);
+    }
+    return NULL;
+}
+
+static inline bool clap_host_thread_pool_request_exec(const clap_host_thread_pool_t* ext, const clap_host_t* host, uint32_t num_tasks) {
+    if (ext && ext->request_exec) {
+        return ext->request_exec(host, num_tasks);
+    }
+    return false;
+}
 */
 import "C"
 import (
@@ -36,10 +51,14 @@ func NewThreadPoolHost(host unsafe.Pointer) *ThreadPoolHost {
 	}
 
 	cHost := (*C.clap_host_t)(host)
-	cExtID := C.CString(C.CLAP_EXT_THREAD_POOL)
+	if cHost.get_extension == nil {
+		return nil
+	}
+	
+	cExtID := C.CString("clap.thread-pool")
 	defer C.free(unsafe.Pointer(cExtID))
 	
-	ext := C.clap_host_get_extension(cHost, cExtID)
+	ext := C.clap_host_get_extension_helper(cHost, cExtID)
 	if ext == nil {
 		return nil
 	}
@@ -61,7 +80,7 @@ func (h *ThreadPoolHost) RequestExec(numTasks uint32) bool {
 	}
 
 	cHost := (*C.clap_host_t)(h.host)
-	return bool(h.extension.request_exec(cHost, C.uint32_t(numTasks)))
+	return bool(C.clap_host_thread_pool_request_exec(h.extension, cHost, C.uint32_t(numTasks)))
 }
 
 // ThreadPoolHelper provides convenient methods for parallel processing

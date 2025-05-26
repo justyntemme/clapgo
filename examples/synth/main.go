@@ -114,7 +114,12 @@ func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
 		return C.bool(false)
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.Init())
+	if p.Init() {
+		// Register as voice info provider after successful init
+		api.RegisterVoiceInfoProvider(plugin, p)
+		return C.bool(true)
+	}
+	return C.bool(false)
 }
 
 //export ClapGo_PluginDestroy
@@ -124,6 +129,8 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 	}
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*SynthPlugin)
+	// Unregister voice info provider before destroying
+	api.UnregisterVoiceInfoProvider(plugin)
 	p.Destroy()
 	handle.Delete()
 }
@@ -770,6 +777,9 @@ type Voice struct {
 	IsActive     bool
 	ReleasePhase float64
 	
+	// Tuning support
+	TuningID     uint64  // ID of tuning to use (0 for equal temperament)
+	
 	// Per-voice parameter values (for polyphonic modulation)
 	// These override the global values when non-zero
 	VolumeModulation   float64  // Additional volume modulation (0.0 = no change)
@@ -813,6 +823,8 @@ type SynthPlugin struct {
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
 	threadCheck  *api.ThreadChecker
+	transportControl *api.HostTransportControl
+	tuning       *api.HostTuning
 	contextMenuProvider *api.DefaultContextMenuProvider
 	
 	// Diagnostics
@@ -887,6 +899,30 @@ func (p *SynthPlugin) Init() bool {
 		p.trackInfo = api.NewHostTrackInfo(p.host)
 	}
 	
+	// Initialize transport control
+	if p.host != nil {
+		p.transportControl = api.NewHostTransportControl(p.host)
+		if p.logger != nil {
+			p.logger.Info("Transport control extension initialized")
+		}
+	}
+	
+	// Initialize tuning support
+	if p.host != nil {
+		p.tuning = api.NewHostTuning(p.host)
+		if p.logger != nil {
+			p.logger.Info("Tuning extension initialized")
+			// Log available tunings
+			tunings := p.tuning.GetAllTunings()
+			if len(tunings) > 0 {
+				for _, t := range tunings {
+					p.logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)", 
+						t.Name, t.TuningID, t.IsDynamic))
+				}
+			}
+		}
+	}
+	
 	if p.logger != nil {
 		p.logger.Debug("Synth plugin initialized")
 		
@@ -913,12 +949,16 @@ func (p *SynthPlugin) Init() bool {
 		p.OnTrackInfoChanged()
 	}
 	
+	// Register as voice info provider
+	// Note: The plugin pointer is the cgo.Handle value returned by CreatePlugin
+	// We can't access it here, so registration will happen externally
+	
 	return true
 }
 
 // Destroy cleans up plugin resources
 func (p *SynthPlugin) Destroy() {
-	// Nothing to clean up
+	// Cleanup is handled externally
 }
 
 // Activate prepares the plugin for processing
@@ -1013,6 +1053,14 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			
 			// Calculate frequency for this note with pitch bend
 			baseFreq := noteToFrequency(int(voice.Key))
+			
+			// Apply tuning if available
+			if p.tuning != nil && voice.TuningID != 0 {
+				// Apply tuning at the start of the frame
+				baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID, 
+					int32(voice.Channel), int32(voice.Key), 0)
+			}
+			
 			// Apply pitch bend (in semitones)
 			freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
 			
@@ -1195,6 +1243,15 @@ func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent, time uint32) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
+	}
+	
+	// Special transport control: C0 (MIDI note 24) toggles play/pause
+	if noteEvent.Key == 24 && p.transportControl != nil {
+		p.transportControl.RequestTogglePlay()
+		if p.logger != nil {
+			p.logger.Info("Transport toggle play requested via C0")
+		}
+		return // Don't play the note
 	}
 	
 	// Ensure velocity is positive
@@ -1631,6 +1688,25 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 	}
 }
 
+// OnTuningChanged is called when tunings are added or removed
+func (p *SynthPlugin) OnTuningChanged() {
+	if p.tuning == nil {
+		return
+	}
+	
+	if p.logger != nil {
+		p.logger.Info("Tuning pool changed, refreshing available tunings")
+		
+		// Log all available tunings
+		tunings := p.tuning.GetAllTunings()
+		p.logger.Info(fmt.Sprintf("Available tunings: %d", len(tunings)))
+		for _, t := range tunings {
+			p.logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)", 
+				t.Name, t.TuningID, t.IsDynamic))
+		}
+	}
+}
+
 // Context Menu Extension Methods
 
 // PopulateContextMenu builds the context menu for the plugin
@@ -1886,22 +1962,8 @@ func ClapGo_PluginOnTimer(plugin unsafe.Pointer, timerID C.uint64_t) {
 	p.OnTimer(uint64(timerID))
 }
 
-//export ClapGo_PluginVoiceInfoGet
-func ClapGo_PluginVoiceInfoGet(plugin unsafe.Pointer, info unsafe.Pointer) C.bool {
-	if plugin == nil || info == nil {
-		return false
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	voiceInfo := p.GetVoiceInfo()
-	
-	// Convert to C struct
-	cInfo := (*C.clap_voice_info_t)(info)
-	cInfo.voice_count = C.uint32_t(voiceInfo.VoiceCount)
-	cInfo.voice_capacity = C.uint32_t(voiceInfo.VoiceCapacity)
-	cInfo.flags = C.uint64_t(voiceInfo.Flags)
-	
-	return true
-}
+// Voice info implementation is now in pkg/api/voice_info.go
+// The synth plugin implements VoiceInfoProvider interface
 
 // Phase 7 Extension Exports
 
@@ -1912,6 +1974,17 @@ func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	p.OnTrackInfoChanged()
+}
+
+// Tuning Extension Export
+
+//export ClapGo_PluginTuningChanged
+func ClapGo_PluginTuningChanged(plugin unsafe.Pointer) {
+	if plugin == nil {
+		return
+	}
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	p.OnTuningChanged()
 }
 
 // Note Name Extension Exports

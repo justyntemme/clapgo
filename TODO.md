@@ -1,500 +1,271 @@
 # ClapGo Implementation TODO
 
-This document outlines the remaining implementation work for ClapGo's CLAP feature support.
+This document outlines the remaining CLAP extensions and functionality that need to be implemented in ClapGo's Go library to provide complete CLAP support to plugin developers.
 
 ## Executive Summary
 
-ClapGo has achieved **professional-grade real-time audio compliance** with 100% allocation-free processing in all critical paths. The core architecture is complete and validated.
+ClapGo has achieved professional-grade real-time audio compliance with a solid foundation of core CLAP functionality. The remaining work focuses on implementing additional CLAP extensions that are currently missing from our Go API layer.
 
-### ✅ What's Complete
+### ✅ What's Already Complete
 - **Core Plugin System**: Full CLAP compliance with manifest-driven architecture
-- **Zero-Allocation Processing**: Event pools, fixed arrays, buffer pools - VERIFIED with benchmarks
-- **Polyphonic Support**: Complete with voice management and MPE
-- **All Essential Extensions**: Audio ports, params, state, latency, tail, log, timer support
-- **All Advanced Audio Features**: Surround, audio configs, voice info, track info, ambisonic, audio ports activation
-- **All Host Integration Extensions**: Context menu, remote controls, param indication, note name
-- **Core Extensions**: Event registry, configurable audio ports, POSIX FD support, render, thread pool
-- **Performance Validation**: Allocation tracking, benchmarks, profiling tools with thread safety validation
+- **Zero-Allocation Processing**: Event pools, fixed arrays, buffer pools
+- **Essential Extensions**: Params, Note Ports, Context Menu, Remote Controls, Param Indication, Note Name
+- **Advanced Audio**: Ambisonic, Audio Ports Activation, Configurable Audio Ports
+- **Core Utilities**: Event Registry, POSIX FD Support, Render, Thread Pool
+- **Partial Implementations**: Basic interfaces exist for Audio Ports, State, Latency, Tail, etc.
 
-## 🚨 Current Priority: Preset Discovery Factory
+## 🚨 Priority 1: Complete Partial Implementations
 
-The Preset Discovery Factory extension is now our highest priority implementation target. This factory-level extension enables hosts to discover and index presets across the system, providing centralized preset browsing capabilities.
+These extensions have basic interfaces defined but need full implementation:
+### 1. Audio Ports Extension (CLAP_EXT_AUDIO_PORTS)
+**Status**: ✅ Implemented
+- Full Go exports and C bridge support
+- Port type constants and flags
+- In-place processing pair support
+- Channel mapping functionality
 
-### Why Preset Discovery is Important
-- Allows users to browse presets from one central location consistently
-- Users can browse presets without committing to a particular plugin first
-- Enables fast indexing and searching within the host's browser
-- Provides metadata for intelligent categorization and tagging
+### 2. State Extension (CLAP_EXT_STATE)
+**Current State**: `StateProvider` interface exists
+**Missing**:
+- Complete stream wrapper implementation
+- Proper error handling and validation
+- Integration with host state management
+- Example implementations in gain/synth plugins
 
-### Implementation Requirements
+### 3. State Context Extension (CLAP_EXT_STATE_CONTEXT)
+**Current State**: `StateContextProvider` interface exists
+**Missing**:
+- Context-aware save/load implementation
+- Proper handling of preset vs project vs duplicate contexts
+- Integration with state extension
 
-**Architecture Considerations:**
-- This is a **factory-level** extension, not a plugin extension
-- Lives at the plugin entry level, not individual plugin instances
-- Must be FAST - the whole indexing process needs to be performant
-- Must be NON-INTERACTIVE - no dialogs, windows, or user input
-- Zero-allocation design for metadata scanning operations
+### 4. Latency Extension (CLAP_EXT_LATENCY)
+**Current State**: `LatencyProvider` interface exists
+**Missing**:
+- Host callback for latency changes
+- C bridge implementation
+- Example usage in plugins
 
-**Key Components to Implement:**
-1. **Preset Discovery Factory** (`clap_preset_discovery_factory_t`)
-   - Factory interface in plugin entry
-   - Creates preset discovery providers
+### 5. Tail Extension (CLAP_EXT_TAIL)
+**Current State**: `TailProvider` interface exists
+**Missing**:
+- Host callback for tail changes
+- C bridge implementation
+- Example usage in reverb/delay scenarios
 
-2. **Preset Discovery Provider** (`clap_preset_discovery_provider_t`)
-   - Declares supported file types
-   - Declares preset locations
-   - Provides metadata extraction
+### 6. Log Extension (CLAP_EXT_LOG)
+**Current State**: `LogProvider` interface exists
+**Missing**:
+- Complete host-side implementation
+- Thread-safe logging
+- Integration with Go's standard logging
 
-3. **Preset Discovery Indexer** (host-side interface)
-   - Receives declarations from provider
-   - Handles metadata callbacks
+### 7. Timer Support Extension (CLAP_EXT_TIMER_SUPPORT)
+**Current State**: `TimerSupportProvider` interface exists
+**Missing**:
+- Timer registration/unregistration
+- C bridge for timer callbacks
+- Thread-safe timer management
 
-4. **Metadata Structures**
-   - Preset metadata with plugin IDs, names, features
-   - Soundpack information
-   - File type associations
+### 8. Preset Load Extension (CLAP_EXT_PRESET_LOAD)
+**Current State**: `PresetLoader` interface exists
+**Missing**:
+- File loading implementation
+- Integration with preset discovery
+- Bundled preset support
 
-**Implementation Strategy:**
-Following the manifest system approach for consistency:
-1. **C-Native Implementation**: Build preset discovery entirely in C using json-c like the manifest system
-2. Add factory support to plugin entry (not individual plugins)
-3. Use json-c for preset file parsing (consistent with manifest.c)
-4. Store preset metadata in C structures with fixed allocations
-5. Support both file-based and bundled presets
-6. Integrate with existing C bridge architecture
+### 9. Audio Ports Config Extension (CLAP_EXT_AUDIO_PORTS_CONFIG)
+**Status**: ✅ Implemented
+- Complete configuration switching with Go exports
+- Host callbacks for config changes
+- C bridge implementation
 
-**Why C Implementation:**
-- Consistent with manifest system architecture
-- Zero allocation guarantees using json-c memory management
-- Better DAW compatibility with predictable C interfaces
-- Simpler architecture without Go/C boundary overhead
-- Matches CLAP performance requirements for fast scanning
+### 10. Surround Extension (CLAP_EXT_SURROUND)
+**Status**: ✅ Implemented
+- Complete channel mapping implementation
+- Go exports with channel mask support
+- Helper functions for standard surround formats
 
-**Performance Requirements:**
-- Pre-allocated buffers for metadata
-- No string allocations during scanning
-- Efficient file I/O patterns
-- Caching strategies for repeated scans
+### 11. Voice Info Extension (CLAP_EXT_VOICE_INFO)
+**Status**: ✅ Implemented
+- Complete Go exports and registry
+- VoiceManager helper for voice tracking
+- Integration with synth example
 
-## 📋 Not Planned (Out of Scope)
+### 12. Track Info Extension (CLAP_EXT_TRACK_INFO)
+**Current State**: `TrackInfoProvider` interface exists
+**Missing**:
+- Host-side track info provision
+- Proper color and name handling
+- Track type detection
 
-### GUI Extension
-- **Status**: WILL NOT BE IMPLEMENTED
-- **Reason**: GUI examples are explicitly forbidden per guardrails
-- All GUI-related work is out of scope for ClapGo
+## 🎯 Priority 2: Missing Core Extensions
 
-## 🔮 Future Extensions (After Preset Discovery)
+These extensions are completely missing and should be implemented:
 
-### Draft Extensions (Lower Priority)
-These experimental extensions may be implemented after preset discovery is complete:
+### 1. GUI Extension (CLAP_EXT_GUI) - Will not DO 
+**Purpose**: Plugin GUI creation and management
+*Note**: Implementation forbidden per guardrails for example plugins
 
-#### Tuning Extension (CLAP_EXT_TUNING)
-- Microtuning table support
-- Fixed-size tuning arrays
-- Pre-calculated frequency tables
+## 🔮 Priority 3: Draft/Experimental Extensions
 
-#### Transport Control Extension (CLAP_EXT_TRANSPORT_CONTROL)
-- Transport state callbacks
-- Lock-free transport info updates
-- Host transport synchronization
+These are experimental CLAP extensions that could be valuable:
 
-#### Undo Extension (CLAP_EXT_UNDO)
-- State delta tracking
-- Fixed-size undo buffer
-- Parameter change history
+### 1. Transport Control (CLAP_EXT_TRANSPORT_CONTROL)
+**Purpose**: Let plugins control host transport
+**Features**:
+- Play/pause/stop control
+- Jump to position
+- Loop control
+- Tempo changes
 
-#### Other Draft Extensions
-- Resource Directory
-- Triggers
-- Scratch Memory
-- Mini Curve Display
-- Gain Adjustment Metering
-- Extensible Audio Ports
-- Project Location
+### 2. Tuning (CLAP_EXT_TUNING)
+**Purpose**: Microtuning and alternative temperaments
+**Features**:
+- Load tuning tables
+- Dynamic tuning changes
+- Note-specific tuning
+
+### 3. Undo (CLAP_EXT_UNDO)
+**Purpose**: Integrate with host undo system
+**Features**:
+- Register undo steps
+- Merge with host history
+- Undo/redo callbacks
+
+### 4. Triggers (CLAP_EXT_TRIGGERS)
+**Purpose**: Trigger/gate functionality
+**Features**:
+- Trigger registration
+- Trigger state changes
+- MIDI mapping
+
+### 5. Resource Directory (CLAP_EXT_RESOURCE_DIRECTORY)
+**Purpose**: Access plugin resources
+**Features**:
+- Resource file paths
+- Shared resource access
+- Platform-specific paths
+
+### 6. Scratch Memory (CLAP_EXT_SCRATCH_MEMORY)
+**Purpose**: Temporary memory from host
+**Features**:
+- Pre-allocated buffers
+- Zero-allocation processing
+- Size negotiation
+
+### 7. Project Location (CLAP_EXT_PROJECT_LOCATION)
+**Purpose**: Get project file information
+**Features**:
+- Project path
+- Project name
+- Relative file resolution
+
+### 8. Extensible Audio Ports (CLAP_EXT_EXTENSIBLE_AUDIO_PORTS)
+**Purpose**: Dynamic audio port configurations
+**Features**:
+- Add/remove ports dynamically
+- Complex routing scenarios
+- Modular configurations
+
+### 9. Gain Adjustment Metering (CLAP_EXT_GAIN_ADJUSTMENT_METERING)
+**Purpose**: Report gain reduction (compressors/limiters)
+**Features**:
+- Real-time gain reporting
+- VU meter data
+- Peak/RMS values
+
+### 10. Mini Curve Display (CLAP_EXT_MINI_CURVE_DISPLAY)
+**Purpose**: Display parameter automation
+**Features**:
+- Curve rendering
+- Automation feedback
+- Visual parameter state
+
+## 📋 Factory Extensions Status
+
+### 1. Plugin Factory (CLAP_PLUGIN_FACTORY)
+**Status**: ✅ Implemented in C bridge
+
+### 2. Preset Discovery Factory (CLAP_PRESET_DISCOVERY_FACTORY)
+**Status**: ✅ Implemented in C (src/c/preset_discovery.c)
+
+### 3. Plugin Invalidation Factory (CLAP_PLUGIN_INVALIDATION_FACTORY)
+**Status**: ❌ Not implemented
+**Purpose**: Notify when plugins become invalid/outdated
+
+### 4. Plugin State Converter Factory (CLAP_PLUGIN_STATE_CONVERTER_FACTORY)
+**Status**: ❌ Not implemented
+**Purpose**: Convert between state format versions
+
+## 🛠️ Implementation Strategy
+
+### Phase 1: Complete Partial Implementations (High Priority)
+1. **Audio Ports**: Full implementation with proper channel mapping
+2. **State/State Context**: Complete save/load with stream wrappers
+3. **Latency/Tail**: Host callbacks and proper reporting
+4. **Log**: Thread-safe logging integration
+5. **Timer Support**: Timer registration and callbacks
+6. **Voice Info/Track Info**: Host integration and callbacks
+
+### Phase 2: Core Missing Extensions (Medium Priority)
+1. **Transport Control**: DAW transport integration
+2. **Tuning**: Microtuning support for electronic music
+3. **Undo**: Host undo system integration
+
+### Phase 3: Experimental Extensions (Low Priority)
+1. **Resource Directory**: Plugin resource management
+2. **Scratch Memory**: Zero-allocation helpers
+3. **Project Location**: Project-aware plugins
+4. **Triggers**: Advanced MIDI/automation
+
+## 🧹 Post-Implementation: Code Deduplication
+
+After completing the remaining CLAP functionality, review example projects for duplicate code that could be abstracted into helper functions in the `pkg/` library:
+
+### Areas to Review:
+1. **Parameter Management Boilerplate**
+   - Common parameter creation patterns
+   - Standard parameter ranges and defaults
+   - Parameter update handling
+
+2. **Event Processing Patterns**
+   - Common event handling loops
+   - Note processing utilities
+   - MIDI CC handling
+
+3. **State Management**
+   - JSON serialization/deserialization helpers
+   - Common state structures
+   - Version migration utilities
+
+4. **Audio Processing Utilities**
+   - Buffer management helpers
+   - Common DSP operations
+   - Channel routing utilities
+
+5. **Extension Boilerplate**
+   - Common extension registration patterns
+   - Default extension implementations
+   - Extension capability helpers
+
+### Goals:
+- Reduce cognitive load for plugin developers
+- Provide sensible defaults while maintaining flexibility
+- Create reusable components without hiding CLAP concepts
+- Maintain zero-allocation guarantees in processing paths
 
 ## Development Guidelines
 
-### Architecture Principles (MUST FOLLOW)
-1. **Factory Extensions Are Different**
-   - Live at plugin entry level, not plugin instance
-   - No weak symbols on plugin methods
-   - Factory creation happens before plugin instantiation
+1. **Maintain Zero-Allocation Design**: All real-time paths must be allocation-free
+2. **Follow Established Patterns**: Use existing extension implementations as reference
+3. **Complete Features Only**: No placeholders or partial implementations
+4. **Thread Safety**: All shared state must be properly synchronized
+5. **Example Usage**: Each extension should have example usage in gain or synth plugins
 
-2. **Maintain Zero-Allocation Design**
-   - Pre-allocate all buffers for scanning
-   - Use fixed-size structures for metadata
-   - Avoid string operations in hot paths
 
-3. **Follow Established Patterns**
-   - C bridge owns all CLAP interfaces
-   - Go provides implementation only
-   - No wrapper types or simplifications
-
-### Plugin-Agnostic Preset Discovery Implementation
-
-**Core Philosophy: Dynamic, Manifest-Driven Discovery**
-- Presets live in `~/.clap/<plugin_id>/presets/` (plugin_id from manifest)
-- C bridge dynamically discovers plugins from loaded manifests
-- No hardcoded plugin names or features in C code
-- Features and metadata come from preset JSON files
-
-**Architecture Overview:**
-```
-1. Factory enumerates plugins from loaded manifests
-2. Provider declares location based on manifest plugin ID
-3. Host scans declared directories for JSON files
-4. Provider parses files and extracts ALL metadata from JSON
-```
-
-**Phase 1: Plugin-Agnostic C Implementation**
-```c
-// src/c/preset_discovery.c - Generic implementation
-typedef struct {
-    char plugin_id[256];        // From manifest
-    char plugin_name[256];      // From manifest
-    char vendor[256];           // From manifest
-    const clap_preset_discovery_indexer_t* indexer;
-} provider_data_t;
-
-static bool provider_init(const clap_preset_discovery_provider_t* provider) {
-    provider_data_t* data = (provider_data_t*)provider->provider_data;
-    
-    // Step 1: Declare JSON filetype
-    clap_preset_discovery_filetype_t filetype = {
-        .name = "JSON Preset",
-        .description = "ClapGo JSON preset format",
-        .file_extension = "json"
-    };
-    if (!data->indexer->declare_filetype(data->indexer, &filetype)) {
-        return false;
-    }
-    
-    // Step 2: Declare preset location based on plugin ID
-    char preset_path[512];
-    const char* home = getenv("HOME");
-    if (!home) {
-        home = "/tmp";  // Fallback
-    }
-    
-    // Extract simple plugin name from ID (e.g., "com.clapgo.gain" -> "gain")
-    const char* simple_name = strrchr(data->plugin_id, '.');
-    simple_name = simple_name ? simple_name + 1 : data->plugin_id;
-    
-    snprintf(preset_path, sizeof(preset_path), "%s/.clap/%s/presets", home, simple_name);
-    
-    clap_preset_discovery_location_t location = {
-        .flags = CLAP_PRESET_DISCOVERY_IS_USER_CONTENT,
-        .name = "User Presets",
-        .kind = CLAP_PRESET_DISCOVERY_LOCATION_FILE,
-        .location = preset_path
-    };
-    
-    return data->indexer->declare_location(data->indexer, &location);
-}
-
-static bool provider_get_metadata(
-    const clap_preset_discovery_provider_t* provider,
-    uint32_t location_kind,
-    const char* location,
-    const clap_preset_discovery_metadata_receiver_t* receiver) {
-    
-    provider_data_t* data = (provider_data_t*)provider->provider_data;
-    
-    // Parse JSON file
-    struct json_object* root = json_object_from_file(location);
-    if (!root) {
-        return false;
-    }
-    
-    // Extract name (required)
-    struct json_object* name_obj;
-    if (!json_object_object_get_ex(root, "name", &name_obj)) {
-        json_object_put(root);
-        return false;
-    }
-    
-    if (!receiver->begin_preset(receiver, json_object_get_string(name_obj), NULL)) {
-        json_object_put(root);
-        return false;
-    }
-    
-    // Add plugin ID (from manifest or JSON)
-    struct json_object* plugin_ids_obj;
-    if (json_object_object_get_ex(root, "plugin_ids", &plugin_ids_obj) && 
-        json_object_is_type(plugin_ids_obj, json_type_array)) {
-        // Use plugin IDs from preset
-        int count = json_object_array_length(plugin_ids_obj);
-        for (int i = 0; i < count; i++) {
-            struct json_object* id_obj = json_object_array_get_idx(plugin_ids_obj, i);
-            if (id_obj) {
-                clap_universal_plugin_id_t plugin_id = {
-                    .abi = "clap",
-                    .id = ""
-                };
-                strncpy(plugin_id.id, json_object_get_string(id_obj), sizeof(plugin_id.id) - 1);
-                receiver->add_plugin_id(receiver, &plugin_id);
-            }
-        }
-    } else {
-        // Fallback to manifest plugin ID
-        clap_universal_plugin_id_t plugin_id = {
-            .abi = "clap",
-            .id = ""
-        };
-        strncpy(plugin_id.id, data->plugin_id, sizeof(plugin_id.id) - 1);
-        receiver->add_plugin_id(receiver, &plugin_id);
-    }
-    
-    // Extract ALL other metadata from JSON (no hardcoding)
-    struct json_object* obj;
-    
-    // Description
-    if (json_object_object_get_ex(root, "description", &obj)) {
-        receiver->set_description(receiver, json_object_get_string(obj));
-    }
-    
-    // Creators
-    if (json_object_object_get_ex(root, "creators", &obj) && 
-        json_object_is_type(obj, json_type_array)) {
-        int count = json_object_array_length(obj);
-        for (int i = 0; i < count; i++) {
-            struct json_object* creator = json_object_array_get_idx(obj, i);
-            if (creator) {
-                receiver->add_creator(receiver, json_object_get_string(creator));
-            }
-        }
-    }
-    
-    // Features (from JSON, not hardcoded)
-    if (json_object_object_get_ex(root, "features", &obj) && 
-        json_object_is_type(obj, json_type_array)) {
-        int count = json_object_array_length(obj);
-        for (int i = 0; i < count; i++) {
-            struct json_object* feature = json_object_array_get_idx(obj, i);
-            if (feature) {
-                receiver->add_feature(receiver, json_object_get_string(feature));
-            }
-        }
-    }
-    
-    // Flags
-    if (json_object_object_get_ex(root, "is_favorite", &obj)) {
-        if (json_object_get_boolean(obj)) {
-            receiver->set_flags(receiver, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT | 
-                                        CLAP_PRESET_DISCOVERY_IS_FAVORITE);
-        }
-    } else {
-        receiver->set_flags(receiver, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT);
-    }
-    
-    json_object_put(root);
-    return true;
-}
-```
-
-**Phase 2: Manifest-Driven Factory Implementation**
-```c
-// src/c/preset_discovery.c - Dynamic factory using manifest system
-#include "manifest.h"
-
-// Check if plugin has preset directory
-static bool plugin_has_presets(const char* plugin_id) {
-    char preset_path[512];
-    const char* home = getenv("HOME");
-    if (!home) home = "/tmp";
-    
-    const char* simple_name = strrchr(plugin_id, '.');
-    simple_name = simple_name ? simple_name + 1 : plugin_id;
-    
-    snprintf(preset_path, sizeof(preset_path), "%s/.clap/%s/presets", home, simple_name);
-    
-    struct stat st;
-    return (stat(preset_path, &st) == 0 && S_ISDIR(st.st_mode));
-}
-
-static uint32_t factory_count(const clap_preset_discovery_factory_t* factory) {
-    // Count plugins with preset directories from loaded manifests
-    uint32_t count = 0;
-    for (int i = 0; i < manifest_plugin_count; i++) {
-        if (plugin_has_presets(manifest_plugins[i].manifest.plugin.id)) {
-            count++;
-        }
-    }
-    return count;
-}
-
-static const clap_preset_discovery_provider_descriptor_t* factory_get_descriptor(
-    const clap_preset_discovery_factory_t* factory, uint32_t index) {
-    
-    // Find Nth plugin with presets
-    uint32_t current = 0;
-    for (int i = 0; i < manifest_plugin_count; i++) {
-        if (plugin_has_presets(manifest_plugins[i].manifest.plugin.id)) {
-            if (current == index) {
-                // Generate descriptor from manifest data
-                static clap_preset_discovery_provider_descriptor_t desc;
-                desc.clap_version = CLAP_VERSION_INIT;
-                
-                snprintf(desc.id, sizeof(desc.id), "%s.presets", 
-                        manifest_plugins[i].manifest.plugin.id);
-                snprintf(desc.name, sizeof(desc.name), "%s Presets",
-                        manifest_plugins[i].manifest.plugin.name);
-                strncpy(desc.vendor, manifest_plugins[i].manifest.plugin.vendor, 
-                       sizeof(desc.vendor) - 1);
-                
-                return &desc;
-            }
-            current++;
-        }
-    }
-    return NULL;
-}
-
-static const clap_preset_discovery_provider_t* factory_create(
-    const clap_preset_discovery_factory_t* factory,
-    const clap_preset_discovery_indexer_t* indexer,
-    const char* provider_id) {
-    
-    // Find matching plugin from manifests
-    for (int i = 0; i < manifest_plugin_count; i++) {
-        char expected_id[512];
-        snprintf(expected_id, sizeof(expected_id), "%s.presets", 
-                manifest_plugins[i].manifest.plugin.id);
-        
-        if (strcmp(provider_id, expected_id) == 0) {
-            // Create provider
-            clap_preset_discovery_provider_t* provider = 
-                calloc(1, sizeof(clap_preset_discovery_provider_t));
-            provider_data_t* data = calloc(1, sizeof(provider_data_t));
-            
-            // Copy data from manifest
-            strncpy(data->plugin_id, manifest_plugins[i].manifest.plugin.id, 
-                   sizeof(data->plugin_id) - 1);
-            strncpy(data->plugin_name, manifest_plugins[i].manifest.plugin.name,
-                   sizeof(data->plugin_name) - 1);
-            strncpy(data->vendor, manifest_plugins[i].manifest.plugin.vendor,
-                   sizeof(data->vendor) - 1);
-            data->indexer = indexer;
-            
-            provider->desc = factory_get_descriptor(factory, i);
-            provider->provider_data = data;
-            provider->init = provider_init;
-            provider->destroy = provider_destroy;
-            provider->get_metadata = provider_get_metadata;
-            provider->get_extension = NULL;
-            
-            return provider;
-        }
-    }
-    
-    return NULL;
-}
-```
-
-**Phase 3: Entry Point Integration**
-```c
-// src/c/plugin.c - Add factory to entry point
-static const void *clapgo_entry_get_factory(const char *factory_id) {
-    if (strcmp(factory_id, CLAP_PLUGIN_FACTORY_ID) == 0) {
-        return &clapgo_factory;
-    }
-    
-    if (strcmp(factory_id, CLAP_PRESET_DISCOVERY_FACTORY_ID) == 0 ||
-        strcmp(factory_id, CLAP_PRESET_DISCOVERY_FACTORY_ID_COMPAT) == 0) {
-        return preset_discovery_get_factory();
-    }
-    
-    return NULL;
-}
-```
-
-**Phase 4: Preset Installation Script**
-```bash
-#!/bin/bash
-# install_presets.sh - Copy presets to user directory
-
-# Create preset directories
-mkdir -p ~/.clap/gain/presets
-mkdir -p ~/.clap/synth/presets
-
-# Copy gain presets
-cp examples/gain/presets/factory/*.json ~/.clap/gain/presets/
-
-# Copy synth presets  
-cp examples/synth/presets/factory/*.json ~/.clap/synth/presets/
-
-echo "Presets installed to ~/.clap/"
-```
-
-### Plugin-Agnostic Implementation Checklist
-
-**Phase 1: Remove Plugin-Specific Code from Library**
-- [ ] **Audit src/c/ directory** - Ensure no "gain" or "synth" references
-- [ ] **Audit pkg/ directory** - Ensure no plugin-specific imports or logic
-- [ ] **Check for hardcoded plugin IDs** - Remove any "com.clapgo.gain" or "com.clapgo.synth" strings
-- [ ] **Document findings** - Update pluginSpecificCodeIssues.md with any new findings
-
-**Phase 2: Create Plugin-Agnostic C Implementation**
-- [ ] **Create src/c/preset_discovery.h** - Generic header with provider_data_t structure
-- [ ] **Create src/c/preset_discovery.c** - Manifest-driven implementation (~300 lines)
-- [ ] **Import manifest.h** - Use existing manifest system for plugin discovery
-- [ ] **Include sys/stat.h** - For directory existence checking
-
-**Phase 3: Implement Provider Functions**
-- [ ] **Implement provider_init()** - Declare filetype and location based on manifest data
-- [ ] **Implement provider_get_metadata()** - Extract ALL metadata from JSON (no hardcoding)
-- [ ] **Implement provider_destroy()** - Free allocated memory
-- [ ] **Extract plugin name from ID** - Handle "com.clapgo.gain" → "gain" conversion
-
-**Phase 4: Implement Manifest-Driven Factory**
-- [ ] **Implement plugin_has_presets()** - Check if ~/.clap/<plugin>/presets exists
-- [ ] **Implement factory_count()** - Count manifest plugins with preset directories
-- [ ] **Implement factory_get_descriptor()** - Generate descriptors from manifest data
-- [ ] **Implement factory_create()** - Match provider_id and create from manifest
-
-**Phase 5: Update Preset JSON Format**
-- [ ] **Add features to gain presets** - Add `"features": ["utility", "gain"]` to JSON
-- [ ] **Add features to synth presets** - Add `"features": ["instrument", "synthesizer"]` to JSON
-- [ ] **Add creators field** - Add `"creators": ["ClapGo Team"]` where missing
-- [ ] **Document preset schema** - Create preset-schema.md with expected fields
-
-**Phase 6: Entry Point Integration**
-- [ ] **Update src/c/plugin.c** - Add preset factory check in clapgo_entry_get_factory
-- [ ] **Include preset_discovery.h** - Add include to plugin.c
-- [ ] **Link to manifest system** - Ensure access to manifest_plugins array
-
-**Phase 7: Build System Integration**
-- [ ] **Update Makefile** - Add preset_discovery.c to C_BRIDGE_SRCS
-- [ ] **Update CMakeLists.txt** - Add preset_discovery.c to clapgo-wrapper
-- [ ] **Test compilation** - Ensure no undefined references
-
-**Phase 8: Preset Installation System**
-- [ ] **Create scripts/install_presets.sh** - Script to copy presets to ~/.clap/
-- [ ] **Make script plugin-agnostic** - Discover plugins from examples/*/presets/
-- [ ] **Add to Makefile install** - Run preset installation during make install
-- [ ] **Handle missing directories** - Create ~/.clap structure if needed
-
-**Phase 9: Testing Plugin-Agnostic Design**
-- [ ] **Add hypothetical plugin test** - Create examples/test/test.json manifest
-- [ ] **Verify dynamic discovery** - Ensure test plugin appears without C changes
-- [ ] **Test with clap-validator** - Verify all discovered plugins work
-- [ ] **Remove plugin test** - Ensure graceful handling of plugin removal
-
-**Phase 10: Documentation Updates**
-- [ ] **Update README.md** - Document ~/.clap/ preset structure
-- [ ] **Update ARCHITECTURE.md** - Note plugin-agnostic preset discovery
-- [ ] **Create PRESETS.md** - Document preset format and discovery
-- [ ] **Update plugin template** - Include preset support in new plugin guide
-
-**Success Metrics:**
-- Zero hardcoded plugin names in C/Go library code
-- New plugins work without modifying library
-- All metadata comes from JSON files, not C code
-- Manifest system drives all plugin discovery
-
-## Success Criteria
-- Preset discovery factory properly integrated at entry level
-- Fast, non-interactive preset scanning
-- Zero allocations during metadata extraction
-- Support for multiple preset locations and formats
-- Clean integration with existing ClapGo architecture
+### Next Phase
+After doing all of this work we will begin the next phase that improves the codebase usability.
+1. Document the makefille and it's build systems. All of the linking is confusing and we need to specify how each modules gets built, where, why, and how.
+2. Document where the library could improve itself by hiding underlying C code without sacrificing the need to keep exported functions in the example project in order to allow the proper function handlers to work correctly calling the Go code
+3. Review the state of the go-generate compabilities that should help a developer create a new plugin. I want to erase the last effort to do this and restart fresh. i first want to create a new markdown file to discuss this strategy, as i want to review all plugin types to ensure we have enough templates to cover use cases. in the end if someone chooses to generate a new gain plugin using our system. the output should be identifical to the example gain plugin we currently have in the examples/ directory. But first we need to discuss implementation strategy after deleting the old system. we need to think how to make this usable for go developers

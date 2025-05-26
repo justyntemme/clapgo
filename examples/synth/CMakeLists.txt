@@ -17,6 +17,7 @@ add_clap_plugin(synth
         ${CMAKE_SOURCE_DIR}/src/c/plugin.c
         ${CMAKE_SOURCE_DIR}/src/c/bridge.c
         ${CMAKE_SOURCE_DIR}/src/c/manifest.c
+        ${CMAKE_SOURCE_DIR}/src/c/preset_discovery.c
     LINK_LIBRARIES
         synth-go
         ${JSON_C_LIBRARIES}

@@ -65,7 +65,16 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 		
 		// Create a CGO handle to safely pass the Go object to C
 		handle := cgo.NewHandle(gainPlugin)
-		fmt.Printf("Created plugin instance: %s\n", id)
+		fmt.Printf("Created plugin instance: %s, handle: %v\n", id, handle)
+		
+		// Log handle creation
+		if gainPlugin.logger != nil {
+			gainPlugin.logger.Debug(fmt.Sprintf("[ClapGo_CreatePlugin] Created handle: %v", handle))
+		}
+		
+		// Register as audio ports provider
+		api.RegisterAudioPortsProvider(unsafe.Pointer(handle), gainPlugin)
+		
 		return unsafe.Pointer(handle)
 	}
 	
@@ -114,21 +123,67 @@ func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 
 //export ClapGo_PluginInit
 func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginInit: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return C.bool(false)
 	}
+	
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.Init())
+	
+	// Log the init call
+	if p.logger != nil {
+		p.logger.Debug("[ClapGo_PluginInit] Starting plugin initialization")
+	}
+	
+	result := p.Init()
+	
+	// Log the result
+	if p.logger != nil {
+		if result {
+			p.logger.Info("[ClapGo_PluginInit] Plugin initialization successful")
+		} else {
+			p.logger.Error("[ClapGo_PluginInit] Plugin initialization failed")
+		}
+	}
+	
+	return C.bool(result)
 }
 
 //export ClapGo_PluginDestroy
 func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginDestroy: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return
 	}
+	
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*GainPlugin)
+	
+	// Log the destroy call
+	if p.logger != nil {
+		p.logger.Debug(fmt.Sprintf("[ClapGo_PluginDestroy] Destroying plugin instance, handle: %v", handle))
+	}
+	
 	p.Destroy()
+	
+	// Unregister from audio ports provider
+	api.UnregisterAudioPortsProvider(plugin)
+	
+	// Log completion
+	if p.logger != nil {
+		p.logger.Info("[ClapGo_PluginDestroy] Plugin instance destroyed successfully")
+	}
+	
 	handle.Delete()
 }
 
@@ -138,16 +193,52 @@ func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames
 		return C.bool(false)
 	}
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+	
+	// Log the activate call
+	if p.logger != nil {
+		p.logger.Debug(fmt.Sprintf("[ClapGo_PluginActivate] Activating plugin - SR: %.0f, frames: %d-%d", 
+			float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+	}
+	
+	result := p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
+	
+	// Log result
+	if p.logger != nil {
+		if result {
+			p.logger.Info("[ClapGo_PluginActivate] Plugin activation successful")
+		} else {
+			p.logger.Error("[ClapGo_PluginActivate] Plugin activation failed")
+		}
+	}
+	
+	return C.bool(result)
 }
 
 //export ClapGo_PluginDeactivate
 func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginDeactivate: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return
 	}
+	
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Log the deactivate call
+	if p.logger != nil {
+		p.logger.Debug("[ClapGo_PluginDeactivate] Deactivating plugin")
+	}
+	
 	p.Deactivate()
+	
+	// Log completion
+	if p.logger != nil {
+		p.logger.Info("[ClapGo_PluginDeactivate] Plugin deactivation successful")
+	}
 }
 
 //export ClapGo_PluginStartProcessing
@@ -156,11 +247,35 @@ func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
 	
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginStartProcessing: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return C.bool(false)
 	}
+	
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.StartProcessing())
+	
+	// Log the start processing call
+	if p.logger != nil {
+		p.logger.Debug("[ClapGo_PluginStartProcessing] Starting audio processing")
+	}
+	
+	result := p.StartProcessing()
+	
+	// Log result
+	if p.logger != nil {
+		if result {
+			p.logger.Info("[ClapGo_PluginStartProcessing] Audio processing started successfully")
+		} else {
+			p.logger.Error("[ClapGo_PluginStartProcessing] Failed to start audio processing")
+		}
+	}
+	
+	return C.bool(result)
 }
 
 //export ClapGo_PluginStopProcessing
@@ -169,20 +284,56 @@ func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
 	
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginStopProcessing: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return
 	}
+	
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Log the stop processing call
+	if p.logger != nil {
+		p.logger.Debug("[ClapGo_PluginStopProcessing] Stopping audio processing")
+	}
+	
 	p.StopProcessing()
+	
+	// Log completion
+	if p.logger != nil {
+		p.logger.Info("[ClapGo_PluginStopProcessing] Audio processing stopped successfully")
+	}
 }
 
 //export ClapGo_PluginReset
 func ClapGo_PluginReset(plugin unsafe.Pointer) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginReset: %v\n", r)
+		}
+	}()
+	
 	if plugin == nil {
 		return
 	}
+	
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
+	
+	// Log the reset call
+	if p.logger != nil {
+		p.logger.Debug("[ClapGo_PluginReset] Resetting plugin state")
+	}
+	
 	p.Reset()
+	
+	// Log completion
+	if p.logger != nil {
+		p.logger.Info("[ClapGo_PluginReset] Plugin reset successful")
+	}
 }
 
 //export ClapGo_PluginProcess
@@ -190,6 +341,12 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 	// Mark this thread as audio thread for debug builds
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
+	
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC in ClapGo_PluginProcess: %v\n", r)
+		}
+	}()
 	
 	if plugin == nil || process == nil {
 		return C.int32_t(api.ProcessError)
@@ -487,7 +644,7 @@ func (p *GainPlugin) Destroy() {
 		p.threadCheck.AssertMainThread("GainPlugin.Destroy")
 	}
 	
-	// Nothing to clean up
+	// Nothing to clean up in the plugin itself
 }
 
 // Activate prepares the plugin for processing
@@ -694,7 +851,15 @@ func (p *GainPlugin) HandleMIDI2(event *api.MIDI2Event, time uint32) {
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
 	// Extensions are handled by the C bridge layer
 	// The bridge provides params, state, and audio ports extensions
-	return nil
+	// Preset load is handled in Go
+	switch id {
+	case api.ExtPresetLoad:
+		// Return a non-nil pointer to indicate support
+		// The actual implementation is in LoadPresetFromLocation
+		return unsafe.Pointer(&p)
+	default:
+		return nil
+	}
 }
 
 // GetPluginInfo returns information about the plugin
@@ -1102,19 +1267,21 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 			return false
 		}
 		
-		// Load the preset state
-		if gainValue, ok := state["gain"].(float64); ok {
-			atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
-			p.paramManager.SetParameterValue(0, gainValue)
-			
-			if p.logger != nil {
-				p.logger.Info(fmt.Sprintf("Preset loaded: gain = %.2f", gainValue))
+		// Load the preset state from preset_data field
+		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
+			if gainValue, ok := presetData["gain"].(float64); ok {
+				atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+				p.paramManager.SetParameterValue(0, gainValue)
+				
+				if p.logger != nil {
+					p.logger.Info(fmt.Sprintf("Preset loaded: gain = %.2f", gainValue))
+				}
+				return true
 			}
-			return true
 		}
 		
 		if p.logger != nil {
-			p.logger.Error("Invalid preset format: missing gain value")
+			p.logger.Error("Invalid preset format: missing preset_data.gain value")
 		}
 		return false
 		
@@ -1140,19 +1307,21 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 			return false
 		}
 		
-		// Load the preset state
-		if gainValue, ok := state["gain"].(float64); ok {
-			atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
-			p.paramManager.SetParameterValue(0, gainValue)
-			
-			if p.logger != nil {
-				p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", loadKey, gainValue))
+		// Load the preset state from preset_data field
+		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
+			if gainValue, ok := presetData["gain"].(float64); ok {
+				atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+				p.paramManager.SetParameterValue(0, gainValue)
+				
+				if p.logger != nil {
+					p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", loadKey, gainValue))
+				}
+				return true
 			}
-			return true
 		}
 		
 		if p.logger != nil {
-			p.logger.Error("Invalid preset format: missing gain value")
+			p.logger.Error("Invalid preset format: missing preset_data.gain value")
 		}
 		return false
 		
@@ -1168,6 +1337,50 @@ func floatToBits(f float64) uint64 {
 
 func floatFromBits(b uint64) float64 {
 	return *(*float64)(unsafe.Pointer(&b))
+}
+
+// AudioPortsProvider implementation
+// This demonstrates custom audio port configuration
+
+// GetAudioPortCount returns the number of audio ports
+func (p *GainPlugin) GetAudioPortCount(isInput bool) uint32 {
+	// Gain plugin has 1 stereo input and 1 stereo output
+	return 1
+}
+
+// GetAudioPortInfo returns information about an audio port
+func (p *GainPlugin) GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo {
+	if index != 0 {
+		// Return invalid port info for out-of-range index
+		return api.AudioPortInfo{
+			ID: api.InvalidID,
+		}
+	}
+	
+	// Create stereo port info
+	name := "Stereo Input"
+	if !isInput {
+		name = "Stereo Output"
+	}
+	
+	return api.CreateStereoPort(0, name, true)
+}
+
+// SurroundProvider implementation (optional - demonstrates surround support)
+
+// IsChannelMaskSupported checks if the plugin supports a given channel mask
+func (p *GainPlugin) IsChannelMaskSupported(channelMask uint64) bool {
+	// For this example, we only support stereo
+	return channelMask == api.ChannelMaskStereo
+}
+
+// GetChannelMap returns the channel map for a given port
+func (p *GainPlugin) GetChannelMap(isInput bool, portIndex uint32) []uint8 {
+	// For stereo, return FL and FR channel identifiers
+	if portIndex == 0 {
+		return api.CreateStereoChannelMap()
+	}
+	return nil
 }
 
 //export ClapGo_PluginStateSave
