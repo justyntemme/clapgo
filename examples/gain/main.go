@@ -433,29 +433,8 @@ func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info un
 		return C.bool(false)
 	}
 	
-	// Convert to C struct
-	cInfo := (*C.clap_param_info_t)(info)
-	cInfo.id = C.clap_id(paramInfo.ID)
-	cInfo.flags = C.CLAP_PARAM_IS_AUTOMATABLE | C.CLAP_PARAM_IS_MODULATABLE
-	cInfo.cookie = nil
-	
-	// Copy name
-	nameBytes := []byte(paramInfo.Name)
-	if len(nameBytes) >= C.CLAP_NAME_SIZE {
-		nameBytes = nameBytes[:C.CLAP_NAME_SIZE-1]
-	}
-	for i, b := range nameBytes {
-		cInfo.name[i] = C.char(b)
-	}
-	cInfo.name[len(nameBytes)] = 0
-	
-	// Clear module path
-	cInfo.module[0] = 0
-	
-	// Set range
-	cInfo.min_value = C.double(paramInfo.MinValue)
-	cInfo.max_value = C.double(paramInfo.MaxValue)
-	cInfo.default_value = C.double(paramInfo.DefaultValue)
+	// Convert to C struct using helper
+	api.ParamInfoToC(paramInfo, info)
 	
 	return C.bool(true)
 }
@@ -470,7 +449,7 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 	// Get current value - read atomically from our gain storage
 	if uint32(paramID) == 0 {
 		gainBits := atomic.LoadInt64(&p.gain)
-		*value = C.double(floatFromBits(uint64(gainBits)))
+		*value = C.double(api.FloatFromBits(uint64(gainBits)))
 		return C.bool(true)
 	}
 	
@@ -484,21 +463,10 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 	}
 	// For gain parameter, format as dB
 	if uint32(paramID) == 0 {
-		db := 20.0 * math.Log10(float64(value))
-		text := fmt.Sprintf("%.1f dB", db)
+		text := api.FormatParameterValue(float64(value), api.FormatDecibel)
 		
-		// Copy to C buffer
-		textBytes := []byte(text)
-		maxLen := int(size) - 1
-		if len(textBytes) > maxLen {
-			textBytes = textBytes[:maxLen]
-		}
-		
-		cBuffer := (*[1 << 30]C.char)(unsafe.Pointer(buffer))
-		for i, b := range textBytes {
-			cBuffer[i] = C.char(b)
-		}
-		cBuffer[len(textBytes)] = 0
+		// Copy to C buffer using helper
+		api.CopyStringToCBuffer(text, unsafe.Pointer(buffer), int(size))
 		
 		return C.bool(true)
 	}
@@ -574,6 +542,9 @@ type GainPlugin struct {
 	// Diagnostics
 	processCallCount uint64
 	lastEventPoolDump uint64
+	
+	// Latency in samples (for this example, gain has no latency)
+	latency uint32
 }
 
 // NewGainPlugin creates a new gain plugin instance
@@ -586,10 +557,10 @@ func NewGainPlugin() *GainPlugin {
 	}
 	
 	// Set default gain to 1.0 (0dB)
-	atomic.StoreInt64(&plugin.gain, int64(floatToBits(1.0)))
+	atomic.StoreInt64(&plugin.gain, int64(api.FloatToBits(1.0)))
 	
-	// Register parameters using our new abstraction
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(0, "Gain", 0.0, 2.0, 1.0))
+	// Register parameters using helper function
+	plugin.paramManager.RegisterParameter(api.CreateVolumeParameter(0, "Gain"))
 	plugin.paramManager.SetParameterValue(0, 1.0)
 	
 	return plugin
@@ -693,7 +664,7 @@ func (p *GainPlugin) StopProcessing() {
 // Reset resets the plugin state
 func (p *GainPlugin) Reset() {
 	// Reset gain to default
-	atomic.StoreInt64(&p.gain, int64(floatToBits(1.0)))
+	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(1.0)))
 }
 
 // Process processes audio data using the new abstractions
@@ -716,7 +687,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	
 	// Get current gain value atomically
 	gainBits := atomic.LoadInt64(&p.gain)
-	gain := floatFromBits(uint64(gainBits))
+	gain := api.FloatFromBits(uint64(gainBits))
 	
 	// If no audio inputs or outputs, nothing to do
 	if len(audioIn) == 0 || len(audioOut) == 0 {
@@ -773,7 +744,7 @@ func (p *GainPlugin) HandleParamValue(event *api.ParamValueEvent, time uint32) {
 		if value > 2.0 {
 			value = 2.0
 		}
-		atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
+		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 		
 		// Update parameter manager
 		p.paramManager.SetParameterValue(event.ParamID, value)
@@ -889,8 +860,13 @@ func (p *GainPlugin) GetPluginID() string {
 
 // GetLatency returns the plugin's latency in samples
 func (p *GainPlugin) GetLatency() uint32 {
-	// Gain plugin has no latency
-	return 0
+	// Check main thread (latency is queried on main thread)
+	api.DebugAssertMainThread("GainPlugin.GetLatency")
+	
+	// For this simple gain plugin, we have no latency
+	// In a real plugin with lookahead or FFT processing, this would return
+	// the actual latency in samples
+	return p.latency
 }
 
 // GetTail returns the plugin's tail length in samples
@@ -992,7 +968,7 @@ func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, act
 	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
 		// For gain parameter, also update atomic value
 		if paramID == 0 {
-			atomic.StoreInt64(&p.gain, int64(floatToBits(1.0)))
+			atomic.StoreInt64(&p.gain, int64(api.FloatToBits(1.0)))
 		}
 		return p.contextMenuProvider.HandleResetParameter(paramID)
 	}
@@ -1021,7 +997,7 @@ func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, act
 	
 	// Apply preset value
 	p.paramManager.SetParameterValue(0, value)
-	atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
+	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 	// TODO: Request parameter flush to notify host
 	return true
 }
@@ -1177,7 +1153,7 @@ func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 		
 		// Update internal state if this is the gain parameter
 		if paramID == 0 {
-			atomic.StoreInt64(&p.gain, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 		}
 	}
 	
@@ -1270,7 +1246,7 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 		// Load the preset state from preset_data field
 		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
 			if gainValue, ok := presetData["gain"].(float64); ok {
-				atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+				atomic.StoreInt64(&p.gain, int64(api.FloatToBits(gainValue)))
 				p.paramManager.SetParameterValue(0, gainValue)
 				
 				if p.logger != nil {
@@ -1310,7 +1286,7 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 		// Load the preset state from preset_data field
 		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
 			if gainValue, ok := presetData["gain"].(float64); ok {
-				atomic.StoreInt64(&p.gain, int64(floatToBits(gainValue)))
+				atomic.StoreInt64(&p.gain, int64(api.FloatToBits(gainValue)))
 				p.paramManager.SetParameterValue(0, gainValue)
 				
 				if p.logger != nil {
@@ -1331,13 +1307,6 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 }
 
 // Helper functions for atomic float64 operations
-func floatToBits(f float64) uint64 {
-	return *(*uint64)(unsafe.Pointer(&f))
-}
-
-func floatFromBits(b uint64) float64 {
-	return *(*float64)(unsafe.Pointer(&b))
-}
 
 // AudioPortsProvider implementation
 // This demonstrates custom audio port configuration
@@ -1445,12 +1414,12 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 // Phase 3 Extension Exports
 
 //export ClapGo_PluginLatencyGet
-func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) C.uint32_t {
+func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) uint32 {
 	if plugin == nil {
 		return 0
 	}
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.uint32_t(p.GetLatency())
+	return p.GetLatency()
 }
 
 //export ClapGo_PluginTailGet

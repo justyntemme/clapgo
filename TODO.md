@@ -2,17 +2,38 @@
 
 This document outlines the remaining CLAP extensions and functionality that need to be implemented in ClapGo's Go library to provide complete CLAP support to plugin developers.
 
+## 📊 Current Status Summary
+
+After a thorough review of the codebase, most extensions previously marked as "partial" or "missing" are actually **fully implemented**:
+
+### ✅ Fully Implemented (Previously thought incomplete):
+- **State & State Context**: Complete with stream wrappers and error handling
+- **Latency & Tail**: Full implementation with host callbacks  
+- **Log**: Thread-safe logging with zero-allocation design
+- **Timer Support**: Complete timer registration and callbacks
+- **Preset Load**: Full file loading and preset discovery integration
+- **Track Info**: Complete host-side track info provision
+- **Transport Control**: Full host-side implementation
+
+### ⚠️ Actually Missing/Incomplete:
+- **GUI Extension**: Forbidden per guardrails for example plugins
+- **Tuning Extension**: Host-side complete, missing plugin-side exports
+- **Undo Extension**: Not implemented (complex draft extension)
+- **Other Draft Extensions**: Various experimental features not yet implemented
+
 ## Executive Summary
 
-ClapGo has achieved professional-grade real-time audio compliance with a solid foundation of core CLAP functionality. The remaining work focuses on implementing additional CLAP extensions that are currently missing from our Go API layer.
+ClapGo has achieved professional-grade real-time audio compliance with a comprehensive implementation of core CLAP functionality. Most extensions listed as "partial" or "missing" have actually been fully implemented.
 
 ### ✅ What's Already Complete
 - **Core Plugin System**: Full CLAP compliance with manifest-driven architecture
 - **Zero-Allocation Processing**: Event pools, fixed arrays, buffer pools
 - **Essential Extensions**: Params, Note Ports, Context Menu, Remote Controls, Param Indication, Note Name
-- **Advanced Audio**: Ambisonic, Audio Ports Activation, Configurable Audio Ports
+- **Advanced Audio**: Ambisonic, Audio Ports, Audio Ports Activation, Configurable Audio Ports, Surround
+- **State Management**: State, State Context with full stream support
+- **Plugin Lifecycle**: Latency, Tail, Voice Info, Track Info
+- **Host Integration**: Log, Timer Support, Preset Load, Transport Control
 - **Core Utilities**: Event Registry, POSIX FD Support, Render, Thread Pool
-- **Partial Implementations**: Basic interfaces exist for Audio Ports, State, Latency, Tail, etc.
 
 ## 🚨 Priority 1: Complete Partial Implementations
 
@@ -25,54 +46,47 @@ These extensions have basic interfaces defined but need full implementation:
 - Channel mapping functionality
 
 ### 2. State Extension (CLAP_EXT_STATE)
-**Current State**: `StateProvider` interface exists
-**Missing**:
-- Complete stream wrapper implementation
-- Proper error handling and validation
-- Integration with host state management
-- Example implementations in gain/synth plugins
+**Status**: ✅ Implemented
+- Full stream wrapper implementation in pkg/api/stream.go
+- Go exports and C bridge support
+- Complete error handling and validation
+- Example implementation in gain/synth plugins
 
 ### 3. State Context Extension (CLAP_EXT_STATE_CONTEXT)
-**Current State**: `StateContextProvider` interface exists
-**Missing**:
-- Context-aware save/load implementation
+**Status**: ✅ Implemented
+- Full context-aware save/load implementation
 - Proper handling of preset vs project vs duplicate contexts
-- Integration with state extension
+- Go exports and C bridge support
 
 ### 4. Latency Extension (CLAP_EXT_LATENCY)
-**Current State**: `LatencyProvider` interface exists
-**Missing**:
-- Host callback for latency changes
-- C bridge implementation
-- Example usage in plugins
+**Status**: ✅ Implemented
+- Full Go exports and C bridge support
+- Host callback for latency changes via HostLatencyNotifier
+- Example implementation in gain plugin
 
 ### 5. Tail Extension (CLAP_EXT_TAIL)
-**Current State**: `TailProvider` interface exists
-**Missing**:
-- Host callback for tail changes
-- C bridge implementation
-- Example usage in reverb/delay scenarios
+**Status**: ✅ Implemented
+- Full Go exports and C bridge support
+- Host callback for tail changes via HostTailNotifier
+- Example implementation in gain plugin
 
 ### 6. Log Extension (CLAP_EXT_LOG)
-**Current State**: `LogProvider` interface exists
-**Missing**:
-- Complete host-side implementation
-- Thread-safe logging
-- Integration with Go's standard logging
+**Status**: ✅ Implemented
+- Complete host-side implementation with HostLogger
+- Thread-safe logging with buffer pools
+- Zero-allocation logging for real-time use
 
 ### 7. Timer Support Extension (CLAP_EXT_TIMER_SUPPORT)
-**Current State**: `TimerSupportProvider` interface exists
-**Missing**:
-- Timer registration/unregistration
-- C bridge for timer callbacks
-- Thread-safe timer management
+**Status**: ✅ Implemented
+- Full timer registration/unregistration via HostTimerSupport
+- Go exports and C bridge for timer callbacks
+- Example implementation in gain plugin
 
 ### 8. Preset Load Extension (CLAP_EXT_PRESET_LOAD)
-**Current State**: `PresetLoader` interface exists
-**Missing**:
-- File loading implementation
-- Integration with preset discovery
-- Bundled preset support
+**Status**: ✅ Implemented
+- Full file loading implementation
+- Integration with preset discovery factory
+- Support for both file and plugin-bundled presets
 
 ### 9. Audio Ports Config Extension (CLAP_EXT_AUDIO_PORTS_CONFIG)
 **Status**: ✅ Implemented
@@ -93,11 +107,10 @@ These extensions have basic interfaces defined but need full implementation:
 - Integration with synth example
 
 ### 12. Track Info Extension (CLAP_EXT_TRACK_INFO)
-**Current State**: `TrackInfoProvider` interface exists
-**Missing**:
-- Host-side track info provision
+**Status**: ✅ Implemented
+- Full host-side track info provision via HostTrackInfo
 - Proper color and name handling
-- Track type detection
+- Go exports and C bridge support
 
 ## 🎯 Priority 2: Missing Core Extensions
 
@@ -112,26 +125,30 @@ These extensions are completely missing and should be implemented:
 These are experimental CLAP extensions that could be valuable:
 
 ### 1. Transport Control (CLAP_EXT_TRANSPORT_CONTROL)
-**Purpose**: Let plugins control host transport
-**Features**:
-- Play/pause/stop control
-- Jump to position
-- Loop control
-- Tempo changes
+**Status**: ✅ Implemented
+- Full host-side implementation via HostTransportControl
+- All transport control functions available
+- No plugin-side interface needed (host-only extension)
 
 ### 2. Tuning (CLAP_EXT_TUNING)
-**Purpose**: Microtuning and alternative temperaments
+**Status**: Partially Implemented
+- Host-side implementation complete via HostTuning in pkg/api/tuning.go
+- C bridge support exists but no Go exports implemented
+- Missing plugin-side implementation (OnTuningChanged callback)
 **Features**:
-- Load tuning tables
-- Dynamic tuning changes
-- Note-specific tuning
+- Get relative tuning in semitones
+- Check if notes should play
+- Query available tunings
+- Apply tuning to frequencies
 
 ### 3. Undo (CLAP_EXT_UNDO)
+**Status**: ❌ Not Implemented
 **Purpose**: Integrate with host undo system
-**Features**:
-- Register undo steps
-- Merge with host history
-- Undo/redo callbacks
+**Features Needed**:
+- Begin/cancel/complete change tracking
+- Delta-based undo/redo
+- Context updates (can undo/redo, step names)
+- Integration with host undo history
 
 ### 4. Triggers (CLAP_EXT_TRIGGERS)
 **Purpose**: Trigger/gate functionality

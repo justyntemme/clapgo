@@ -271,29 +271,8 @@ func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info un
 		return C.bool(false)
 	}
 	
-	// Convert to C struct
-	cInfo := (*C.clap_param_info_t)(info)
-	cInfo.id = C.clap_id(paramInfo.ID)
-	cInfo.flags = C.CLAP_PARAM_IS_AUTOMATABLE | C.CLAP_PARAM_IS_MODULATABLE
-	cInfo.cookie = nil
-	
-	// Copy name
-	nameBytes := []byte(paramInfo.Name)
-	if len(nameBytes) >= C.CLAP_NAME_SIZE {
-		nameBytes = nameBytes[:C.CLAP_NAME_SIZE-1]
-	}
-	for i, b := range nameBytes {
-		cInfo.name[i] = C.char(b)
-	}
-	cInfo.name[len(nameBytes)] = 0
-	
-	// Clear module path
-	cInfo.module[0] = 0
-	
-	// Set range
-	cInfo.min_value = C.double(paramInfo.MinValue)
-	cInfo.max_value = C.double(paramInfo.MaxValue)
-	cInfo.default_value = C.double(paramInfo.DefaultValue)
+	// Convert to C struct using helper
+	api.ParamInfoToC(paramInfo, info)
 	
 	return C.bool(true)
 }
@@ -321,7 +300,7 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 	var text string
 	switch uint32(paramID) {
 	case 1: // Volume
-		text = fmt.Sprintf("%.1f %%", float64(value) * 100.0)
+		text = api.FormatParameterValue(float64(value), api.FormatPercentage)
 	case 2: // Waveform
 		switch int(math.Round(float64(value))) {
 		case 0:
@@ -334,25 +313,15 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 			text = "Unknown"
 		}
 	case 3, 4, 6: // Attack, Decay, Release
-		text = fmt.Sprintf("%.0f ms", float64(value) * 1000.0)
+		text = api.FormatParameterValue(float64(value), api.FormatMilliseconds)
 	case 5: // Sustain
-		text = fmt.Sprintf("%.1f %%", float64(value) * 100.0)
+		text = api.FormatParameterValue(float64(value), api.FormatPercentage)
 	default:
-		text = fmt.Sprintf("%.3f", float64(value))
+		text = api.FormatParameterValue(float64(value), api.FormatDefault)
 	}
 	
-	// Copy to C buffer
-	textBytes := []byte(text)
-	maxLen := int(size) - 1
-	if len(textBytes) > maxLen {
-		textBytes = textBytes[:maxLen]
-	}
-	
-	cBuffer := (*[1 << 30]C.char)(unsafe.Pointer(buffer))
-	for i, b := range textBytes {
-		cBuffer[i] = C.char(b)
-	}
-	cBuffer[len(textBytes)] = 0
+	// Copy to C buffer using helper
+	api.CopyStringToCBuffer(text, unsafe.Pointer(buffer), int(size))
 	
 	return C.bool(true)
 }
@@ -545,17 +514,17 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		// Update internal state
 		switch paramID {
 		case 1: // Volume
-			atomic.StoreInt64(&p.volume, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(value)))
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
 		case 3: // Attack
-			atomic.StoreInt64(&p.attack, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(value)))
 		case 4: // Decay
-			atomic.StoreInt64(&p.decay, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(value)))
 		case 5: // Sustain
-			atomic.StoreInt64(&p.sustain, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(value)))
 		case 6: // Release
-			atomic.StoreInt64(&p.release, int64(floatToBits(value)))
+			atomic.StoreInt64(&p.release, int64(api.FloatToBits(value)))
 		}
 	}
 	
@@ -860,20 +829,23 @@ func NewSynthPlugin() *SynthPlugin {
 	}
 	
 	// Set default values atomically
-	atomic.StoreInt64(&plugin.volume, int64(floatToBits(0.7)))      // -3dB
+	atomic.StoreInt64(&plugin.volume, int64(api.FloatToBits(0.7)))      // -3dB
 	atomic.StoreInt64(&plugin.waveform, 0)                          // sine
-	atomic.StoreInt64(&plugin.attack, int64(floatToBits(0.01)))     // 10ms
-	atomic.StoreInt64(&plugin.decay, int64(floatToBits(0.1)))       // 100ms
-	atomic.StoreInt64(&plugin.sustain, int64(floatToBits(0.7)))     // 70%
-	atomic.StoreInt64(&plugin.release, int64(floatToBits(0.3)))     // 300ms
+	atomic.StoreInt64(&plugin.attack, int64(api.FloatToBits(0.01)))     // 10ms
+	atomic.StoreInt64(&plugin.decay, int64(api.FloatToBits(0.1)))       // 100ms
+	atomic.StoreInt64(&plugin.sustain, int64(api.FloatToBits(0.7)))     // 70%
+	atomic.StoreInt64(&plugin.release, int64(api.FloatToBits(0.3)))     // 300ms
 	
 	// Register parameters using our new abstraction
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(1, "Volume", 0.0, 1.0, 0.7))
+	plugin.paramManager.RegisterParameter(api.CreatePercentParameter(1, "Volume", 70.0))
 	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(2, "Waveform", 0.0, 2.0, 0.0))
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(3, "Attack", 0.001, 2.0, 0.01))
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(4, "Decay", 0.001, 2.0, 0.1))
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(5, "Sustain", 0.0, 1.0, 0.7))
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(6, "Release", 0.001, 5.0, 0.3))
+	
+	// Register ADSR parameters using helper
+	adsr := api.CreateADSRParameters(3, "")
+	plugin.paramManager.RegisterParameter(adsr.Attack)
+	plugin.paramManager.RegisterParameter(adsr.Decay)
+	plugin.paramManager.RegisterParameter(adsr.Sustain)
+	plugin.paramManager.RegisterParameter(adsr.Release)
 	
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(api.CreateDefaultInstrumentPort())
@@ -1023,12 +995,12 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	}
 	
 	// Get current parameter values atomically
-	volume := floatFromBits(uint64(atomic.LoadInt64(&p.volume)))
+	volume := api.FloatFromBits(uint64(atomic.LoadInt64(&p.volume)))
 	waveform := int(atomic.LoadInt64(&p.waveform))
-	attack := floatFromBits(uint64(atomic.LoadInt64(&p.attack)))
-	decay := floatFromBits(uint64(atomic.LoadInt64(&p.decay)))
-	sustain := floatFromBits(uint64(atomic.LoadInt64(&p.sustain)))
-	release := floatFromBits(uint64(atomic.LoadInt64(&p.release)))
+	attack := api.FloatFromBits(uint64(atomic.LoadInt64(&p.attack)))
+	decay := api.FloatFromBits(uint64(atomic.LoadInt64(&p.decay)))
+	sustain := api.FloatFromBits(uint64(atomic.LoadInt64(&p.sustain)))
+	release := api.FloatFromBits(uint64(atomic.LoadInt64(&p.release)))
 	
 	// Get the number of output channels
 	numChannels := len(audioOut)
@@ -1183,22 +1155,22 @@ func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
-		atomic.StoreInt64(&p.volume, int64(floatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.volume, int64(api.FloatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 2: // Waveform
 		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
-		atomic.StoreInt64(&p.attack, int64(floatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 4: // Decay
-		atomic.StoreInt64(&p.decay, int64(floatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 5: // Sustain
-		atomic.StoreInt64(&p.sustain, int64(floatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 6: // Release
-		atomic.StoreInt64(&p.release, int64(floatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.release, int64(api.FloatToBits(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	}
 }
@@ -1586,10 +1558,10 @@ func (p *SynthPlugin) SaveState() map[string]interface{} {
 	return map[string]interface{}{
 		"plugin_version": "1.0.0",
 		"waveform":      atomic.LoadInt64(&p.waveform),
-		"attack":        floatFromBits(uint64(atomic.LoadInt64(&p.attack))),
-		"decay":         floatFromBits(uint64(atomic.LoadInt64(&p.decay))),
-		"sustain":       floatFromBits(uint64(atomic.LoadInt64(&p.sustain))),
-		"release":       floatFromBits(uint64(atomic.LoadInt64(&p.release))),
+		"attack":        api.FloatFromBits(uint64(atomic.LoadInt64(&p.attack))),
+		"decay":         api.FloatFromBits(uint64(atomic.LoadInt64(&p.decay))),
+		"sustain":       api.FloatFromBits(uint64(atomic.LoadInt64(&p.sustain))),
+		"release":       api.FloatFromBits(uint64(atomic.LoadInt64(&p.release))),
 	}
 }
 
@@ -1602,16 +1574,16 @@ func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	
 	// Load ADSR
 	if attack, ok := data["attack"].(float64); ok {
-		atomic.StoreInt64(&p.attack, int64(floatToBits(attack)))
+		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(attack)))
 	}
 	if decay, ok := data["decay"].(float64); ok {
-		atomic.StoreInt64(&p.decay, int64(floatToBits(decay)))
+		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(decay)))
 	}
 	if sustain, ok := data["sustain"].(float64); ok {
-		atomic.StoreInt64(&p.sustain, int64(floatToBits(sustain)))
+		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(sustain)))
 	}
 	if release, ok := data["release"].(float64); ok {
-		atomic.StoreInt64(&p.release, int64(floatToBits(release)))
+		atomic.StoreInt64(&p.release, int64(api.FloatToBits(release)))
 	}
 }
 
@@ -1624,7 +1596,7 @@ func (p *SynthPlugin) GetLatency() uint32 {
 // GetTail returns the plugin's tail length in samples
 func (p *SynthPlugin) GetTail() uint32 {
 	// Get release time
-	release := floatFromBits(uint64(atomic.LoadInt64(&p.release)))
+	release := api.FloatFromBits(uint64(atomic.LoadInt64(&p.release)))
 	
 	// Convert to samples
 	tailSamples := uint32(release * p.sampleRate)
@@ -1771,17 +1743,17 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 		info, _ := p.paramManager.GetParameterInfo(paramID)
 		switch paramID {
 		case 1: // Volume
-			atomic.StoreInt64(&p.volume, int64(floatToBits(info.DefaultValue)))
+			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(info.DefaultValue)))
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(info.DefaultValue))
 		case 3: // Attack
-			atomic.StoreInt64(&p.attack, int64(floatToBits(info.DefaultValue)))
+			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(info.DefaultValue)))
 		case 4: // Decay
-			atomic.StoreInt64(&p.decay, int64(floatToBits(info.DefaultValue)))
+			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(info.DefaultValue)))
 		case 5: // Sustain
-			atomic.StoreInt64(&p.sustain, int64(floatToBits(info.DefaultValue)))
+			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(info.DefaultValue)))
 		case 6: // Release
-			atomic.StoreInt64(&p.release, int64(floatToBits(info.DefaultValue)))
+			atomic.StoreInt64(&p.release, int64(api.FloatToBits(info.DefaultValue)))
 		}
 		return p.contextMenuProvider.HandleResetParameter(paramID)
 	}
@@ -1911,10 +1883,10 @@ func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) 
 	
 	// Update synth parameters
 	atomic.StoreInt64(&p.waveform, int64(preset.Waveform))
-	atomic.StoreInt64(&p.attack, int64(floatToBits(preset.Attack)))
-	atomic.StoreInt64(&p.decay, int64(floatToBits(preset.Decay)))
-	atomic.StoreInt64(&p.sustain, int64(floatToBits(preset.Sustain)))
-	atomic.StoreInt64(&p.release, int64(floatToBits(preset.Release)))
+	atomic.StoreInt64(&p.attack, int64(api.FloatToBits(preset.Attack)))
+	atomic.StoreInt64(&p.decay, int64(api.FloatToBits(preset.Decay)))
+	atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(preset.Sustain)))
+	atomic.StoreInt64(&p.release, int64(api.FloatToBits(preset.Release)))
 	
 	// Load any additional state data
 	if preset.StateData != nil {
@@ -1925,13 +1897,6 @@ func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) 
 }
 
 // Helper functions for atomic float64 operations
-func floatToBits(f float64) uint64 {
-	return *(*uint64)(unsafe.Pointer(&f))
-}
-
-func floatFromBits(b uint64) float64 {
-	return *(*float64)(unsafe.Pointer(&b))
-}
 
 // Phase 3 Extension Exports
 
