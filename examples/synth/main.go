@@ -210,22 +210,14 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
-	// Set logger on the event pool for diagnostics
-	if pool := eventHandler.GetEventPool(); pool != nil && p.logger != nil {
-		pool.SetLogger(p.logger)
-	}
+	// Setup event pool logging
+	api.SetupPoolLogging(eventHandler, p.logger)
 	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
 	
-	// Periodically log event pool diagnostics (every 1000 process calls)
-	p.processCallCount++
-	if p.processCallCount % 1000 == 0 && p.processCallCount != p.lastEventPoolDump {
-		p.lastEventPoolDump = p.processCallCount
-		if pool := eventHandler.GetEventPool(); pool != nil {
-			pool.LogDiagnostics()
-		}
-	}
+	// Log event pool diagnostics periodically (every 1000 calls)
+	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
 	
 	return C.int32_t(result)
 }
@@ -508,23 +500,21 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 			return false
 		}
 		
-		// Set parameter value
-		p.paramManager.SetParameterValue(paramID, value)
-		
-		// Update internal state
+		// Update parameter using helper
 		switch paramID {
 		case 1: // Volume
-			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(value)))
+			api.UpdateParameterAtomic(&p.volume, value, p.paramManager, paramID)
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
+			p.paramManager.SetParameterValue(paramID, value)
 		case 3: // Attack
-			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(value)))
+			api.UpdateParameterAtomic(&p.attack, value, p.paramManager, paramID)
 		case 4: // Decay
-			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(value)))
+			api.UpdateParameterAtomic(&p.decay, value, p.paramManager, paramID)
 		case 5: // Sustain
-			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(value)))
+			api.UpdateParameterAtomic(&p.sustain, value, p.paramManager, paramID)
 		case 6: // Release
-			atomic.StoreInt64(&p.release, int64(api.FloatToBits(value)))
+			api.UpdateParameterAtomic(&p.release, value, p.paramManager, paramID)
 		}
 	}
 	
@@ -796,9 +786,8 @@ type SynthPlugin struct {
 	tuning       *api.HostTuning
 	contextMenuProvider *api.DefaultContextMenuProvider
 	
-	// Diagnostics
-	processCallCount uint64
-	lastEventPoolDump uint64
+	// Event pool diagnostics
+	poolDiagnostics api.EventPoolDiagnostics
 }
 
 // TransportInfo holds host transport information
@@ -995,12 +984,12 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	}
 	
 	// Get current parameter values atomically
-	volume := api.FloatFromBits(uint64(atomic.LoadInt64(&p.volume)))
+	volume := api.LoadParameterAtomic(&p.volume)
 	waveform := int(atomic.LoadInt64(&p.waveform))
-	attack := api.FloatFromBits(uint64(atomic.LoadInt64(&p.attack)))
-	decay := api.FloatFromBits(uint64(atomic.LoadInt64(&p.decay)))
-	sustain := api.FloatFromBits(uint64(atomic.LoadInt64(&p.sustain)))
-	release := api.FloatFromBits(uint64(atomic.LoadInt64(&p.release)))
+	attack := api.LoadParameterAtomic(&p.attack)
+	decay := api.LoadParameterAtomic(&p.decay)
+	sustain := api.LoadParameterAtomic(&p.sustain)
+	release := api.LoadParameterAtomic(&p.release)
 	
 	// Get the number of output channels
 	numChannels := len(audioOut)
@@ -1155,23 +1144,18 @@ func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
 	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
-		atomic.StoreInt64(&p.volume, int64(api.FloatToBits(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		api.UpdateParameterAtomic(&p.volume, paramEvent.Value, p.paramManager, paramEvent.ParamID)
 	case 2: // Waveform
 		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
 		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
-		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		api.UpdateParameterAtomic(&p.attack, paramEvent.Value, p.paramManager, paramEvent.ParamID)
 	case 4: // Decay
-		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		api.UpdateParameterAtomic(&p.decay, paramEvent.Value, p.paramManager, paramEvent.ParamID)
 	case 5: // Sustain
-		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		api.UpdateParameterAtomic(&p.sustain, paramEvent.Value, p.paramManager, paramEvent.ParamID)
 	case 6: // Release
-		atomic.StoreInt64(&p.release, int64(api.FloatToBits(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		api.UpdateParameterAtomic(&p.release, paramEvent.Value, p.paramManager, paramEvent.ParamID)
 	}
 }
 

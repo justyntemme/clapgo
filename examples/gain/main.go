@@ -372,22 +372,14 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
-	// Set logger on the event pool for diagnostics
-	if pool := eventHandler.GetEventPool(); pool != nil && p.logger != nil {
-		pool.SetLogger(p.logger)
-	}
+	// Setup event pool logging
+	api.SetupPoolLogging(eventHandler, p.logger)
 	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
 	
-	// Periodically log event pool diagnostics (every 1000 process calls)
-	p.processCallCount++
-	if p.processCallCount % 1000 == 0 && p.processCallCount != p.lastEventPoolDump {
-		p.lastEventPoolDump = p.processCallCount
-		if pool := eventHandler.GetEventPool(); pool != nil {
-			pool.LogDiagnostics()
-		}
-	}
+	// Log event pool diagnostics periodically (every 1000 calls)
+	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
 	
 	return C.int32_t(result)
 }
@@ -448,8 +440,7 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 	
 	// Get current value - read atomically from our gain storage
 	if uint32(paramID) == 0 {
-		gainBits := atomic.LoadInt64(&p.gain)
-		*value = C.double(api.FloatFromBits(uint64(gainBits)))
+		*value = C.double(api.LoadParameterAtomic(&p.gain))
 		return C.bool(true)
 	}
 	
@@ -484,7 +475,31 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	
 	// For gain parameter, parse dB value
 	if uint32(paramID) == 0 {
+		// Handle special case for -∞ dB
+		if goText == "-∞ dB" || goText == "-inf dB" || goText == "-Inf dB" {
+			*value = C.double(0.0)
+			return C.bool(true)
+		}
+		
 		var db float64
+		// Try to parse with "dB" suffix
+		if _, err := fmt.Sscanf(goText, "%f dB", &db); err == nil {
+			// Convert from dB to linear
+			linear := math.Pow(10.0, db/20.0)
+			
+			// Clamp to valid range
+			if linear < 0.0 {
+				linear = 0.0
+			}
+			if linear > 2.0 {
+				linear = 2.0
+			}
+			
+			*value = C.double(linear)
+			return C.bool(true)
+		}
+		
+		// Try to parse without "dB" suffix
 		if _, err := fmt.Sscanf(goText, "%f", &db); err == nil {
 			// Convert from dB to linear
 			linear := math.Pow(10.0, db/20.0)
@@ -539,9 +554,8 @@ type GainPlugin struct {
 	threadCheck  *api.ThreadChecker
 	contextMenuProvider *api.DefaultContextMenuProvider
 	
-	// Diagnostics
-	processCallCount uint64
-	lastEventPoolDump uint64
+	// Event pool diagnostics
+	poolDiagnostics api.EventPoolDiagnostics
 	
 	// Latency in samples (for this example, gain has no latency)
 	latency uint32
@@ -686,8 +700,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	}
 	
 	// Get current gain value atomically
-	gainBits := atomic.LoadInt64(&p.gain)
-	gain := api.FloatFromBits(uint64(gainBits))
+	gain := api.LoadParameterAtomic(&p.gain)
 	
 	// If no audio inputs or outputs, nothing to do
 	if len(audioIn) == 0 || len(audioOut) == 0 {
@@ -737,17 +750,10 @@ func (p *GainPlugin) HandleParamValue(event *api.ParamValueEvent, time uint32) {
 	switch event.ParamID {
 	case 0: // Gain parameter
 		// Clamp value to valid range
-		value := event.Value
-		if value < 0.0 {
-			value = 0.0
-		}
-		if value > 2.0 {
-			value = 2.0
-		}
-		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
+		value := api.ClampValue(event.Value, 0.0, 2.0)
 		
-		// Update parameter manager
-		p.paramManager.SetParameterValue(event.ParamID, value)
+		// Update both atomic storage and parameter manager
+		api.UpdateParameterAtomic(&p.gain, value, p.paramManager, event.ParamID)
 		
 		// Log the parameter change
 		if p.logger != nil {

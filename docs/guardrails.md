@@ -1,339 +1,87 @@
 # ClapGo Development Guardrails
 
-This document provides critical constraints and guidelines for maintaining architectural integrity while developing ClapGo. These guardrails prevent common anti-patterns and ensure decisions align with our chosen manifest-driven, C bridge architecture.
+Critical constraints for maintaining architectural integrity in ClapGo development.
 
-## 🚫 Architecture Anti-Patterns to NEVER Implement
+## 🚫 Architecture Anti-Patterns (NEVER)
 
-### 1. Registration Systems in Go
-**❌ FORBIDDEN:**
-```go
-// NEVER create Go-side registration interfaces
-type PluginRegistrar interface {
-    Register(info PluginInfo, creator func() Plugin)
-    GetPluginCount() uint32
-    CreatePlugin(id string) Plugin
-}
+### 1. Go-Side Registration Systems
+- No `RegisterPlugin()` functions or plugin registries in Go
+- No discovery interfaces in Go code
+- Use manifest files (JSON) + C bridge discovery only
 
-// NEVER create registration functions
-func RegisterPlugin(plugin Plugin) { /* ... */ }
-```
+### 2. "Simplified" APIs  
+- No wrapper APIs that hide CLAP concepts
+- No "easy" or "simple" interfaces
+- Implement full CLAP `Plugin` interface always
 
-**✅ CORRECT APPROACH:**
-- Plugin registration happens via **manifest files** (JSON)
-- C bridge handles discovery via `manifest_find_files()`
-- Plugins export standardized functions: `ClapGo_CreatePlugin`, `ClapGo_PluginInit`, etc.
+### 3. Placeholder Code
+- No TODO/FIXME comments
+- No incomplete implementations with placeholder comments
+- Either implement fully or return `nil` for unsupported extensions
 
-**WHY:** Registration is the C bridge's responsibility. Go plugins are discovered via manifest system, not Go interfaces.
-
-### 2. "Simplified" Examples or APIs
-**❌ FORBIDDEN:**
-```go
-// NEVER create "simplified" or "easy" APIs that bypass the architecture
-type SimplePlugin interface {
-    ProcessSimple(input, output []float32) // Wrong abstraction level
-}
-
-// NEVER create wrapper APIs that hide important complexity
-func EasyRegisterPlugin(name string, processFn func([]float32) []float32)
-```
-
-**✅ CORRECT APPROACH:**
-- Implement full CLAP `Plugin` interface
-- Use real parameter management via `ParameterManager`
-- Handle actual CLAP events through `EventHandler`
-- Expose extensions properly via `GetExtension()`
-
-**WHY:** "Simplified" APIs hide critical CLAP concepts and prevent real-world usage. ClapGo is a bridge, not a simplification.
-
-### 3. Placeholder Implementations
-**❌ FORBIDDEN:**
-```go
-// NEVER leave placeholder implementations
-func (p *Plugin) GetExtension(id string) unsafe.Pointer {
-    return nil // TODO: Implement proper parameter extension
-}
-
-// NEVER use placeholder comments
-// This is a placeholder for the actual CLAP API call
-// In a real implementation we would...
-// TODO: Implement this properly later
-```
-
-**✅ CORRECT APPROACH:**
-- Either implement the extension fully or remove the comment
-- If not implemented, return `nil` without TODO comments
-- Complete features or mark them as explicitly unsupported
-
-**WHY:** TODOs and placeholders indicate incomplete architecture. ClapGo is a real project, not a prototype.
-
-### 4. Backwards Compatibility Concerns
-**❌ FORBIDDEN:**
-```go
-// NEVER add backwards compatibility for deprecated patterns
-// DeprecatedRegisterPlugin maintains old API for compatibility
-func DeprecatedRegisterPlugin(plugin Plugin) {
-    // Keep old behavior...
-}
-
-// NEVER version APIs to maintain old ways
-type PluginV1 interface { /* old way */ }
-type PluginV2 interface { /* new way */ }
-```
-
-**✅ CORRECT APPROACH:**
-- Make breaking changes without deprecation periods
-- Remove old interfaces entirely when refactoring
-- Update examples to new patterns immediately
+### 4. Backwards Compatibility
 - No API versioning for internal changes
+- Make breaking changes without deprecation
+- Delete old code entirely when refactoring
 
-**WHY:** ClapGo is a POC/prototype. Breaking changes are encouraged to find the right architecture.
+## ✅ Required Patterns
 
-## ✅ Required Architecture Patterns
-
-### 1. Manifest-Driven Plugin Discovery
-**REQUIRED STRUCTURE:**
+### 1. Manifest-Driven Discovery
 ```
-plugin.clap                    # Final CLAP plugin file
-├── plugin.json               # Manifest with metadata
-├── libplugin.so              # Go shared library
-└── (C bridge linked in)      # src/c/ code
-```
-
-**REQUIRED FLOW:**
-```
-CLAP Host → C Bridge → Manifest Loading → Go Library → Plugin Instance
+plugin.clap
+├── plugin.json      # Metadata manifest
+├── libplugin.so     # Go shared library  
+└── (C bridge)       # Handles CLAP interface
 ```
 
 ### 2. Standardized Go Exports
-**REQUIRED EXPORTS (every plugin must have):**
-```go
-//export ClapGo_CreatePlugin
-func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer
+Every plugin must export:
+- `ClapGo_CreatePlugin`
+- `ClapGo_PluginInit`  
+- `ClapGo_PluginProcess`
+- `ClapGo_PluginGetExtension`
+- All lifecycle functions
 
-//export ClapGo_PluginInit
-func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool
+### 3. Complete Feature Implementation
+- Implement extensions fully or return `nil`
+- Use real `ParameterManager`, `EventHandler` interfaces
+- No demo/example-only code
 
-//export ClapGo_PluginProcess
-func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t
+### 4. Code Deduplication
+- Extract common patterns to `pkg/api` helpers
+- Minimize boilerplate in plugin examples
+- Use composition for shared functionality
 
-//export ClapGo_PluginGetExtension
-func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer
+## 🔒 Build & Development Standards
 
-// ... (all other lifecycle exports)
-```
+### Build System
+- Use `make install` exclusively (never CMake)
+- Test with `clap-validator`
+- Focus on `gain` and `synth` examples only (no GUI)
 
-### 3. Extension Implementation Pattern
-**REQUIRED APPROACH:**
-```go
-func (p *MyPlugin) GetExtension(id string) unsafe.Pointer {
-    switch id {
-    case api.ExtParams:
-        // Return actual C interface implementation
-        return createParameterExtension(p)
-    case api.ExtState:
-        // Return actual C interface implementation  
-        return createStateExtension(p)
-    default:
-        return nil // Extension not supported
-    }
-}
-```
+### Code Quality
+- No placeholder implementations
+- Complete error handling (no silent failures)
+- Thread-safe parameter access
 
-**NEVER return `nil` with TODO comments - either implement or don't support.**
-
-### 4. Real Parameter Management
-**REQUIRED USAGE:**
-```go
-// Use actual ParameterManager - never fake it
-paramManager := api.NewParameterManager()
-paramManager.RegisterParameter(api.CreateFloatParameter(0, "Gain", 0.0, 2.0, 1.0))
-
-// Thread-safe parameter access
-value := paramManager.GetParameterValue(paramID)
-paramManager.SetParameterValue(paramID, newValue)
-```
-
-## 🔒 Code Quality Standards
-
-### 1. No TODO/FIXME/Placeholder Comments
-**❌ NEVER WRITE:**
-```go
-// TODO: Implement this later
-// FIXME: This is broken
-// XXX: Hack for now
-// In a real app we would...
-// This is a placeholder...
-// Simplified version of...
-```
-
-**✅ ACCEPTABLE:**
-```go
-// Extension not yet supported
-return nil
-
-// Feature disabled in this version
-if featureEnabled {
-    // implementation
-}
-```
-
-### 2. Complete Feature Implementation
-**REQUIRED APPROACH:**
-- Implement extensions fully or don't claim to support them
-- Remove partial implementations that don't work
-- No demo/example-only code that wouldn't work in production
-
-### 3. Explicit Error Handling
-**REQUIRED PATTERN:**
-```go
-// Clear error returns, no silent failures
-func (p *Plugin) SetParameter(id uint32, value float64) error {
-    if !p.isValidParameter(id) {
-        return ErrInvalidParameter
-    }
-    // ... implementation
-    return nil
-}
-```
-
-## 📋 Development Checklist
-
-Before implementing any feature, verify:
-
-- [ ] **No Go-side registration** - uses manifest system only
-- [ ] **No "simplified" APIs** - implements full CLAP interfaces  
-- [ ] **No placeholder implementations** - complete or unsupported
-- [ ] **No backwards compatibility** - breaking changes are encouraged
-- [ ] **Follows manifest-driven architecture** - C bridge + JSON + Go exports
-- [ ] **Uses standardized exports** - `ClapGo_*` function naming
-- [ ] **Real extension implementations** - actual C interfaces or explicit nil
-- [ ] **Thread-safe parameter management** - uses `ParameterManager`
-- [ ] **Complete error handling** - no silent failures or undefined behavior
-
-### 5. POC Development Practices
-**❌ FORBIDDEN:**
-```go
-// NEVER keep old code when making breaking changes
-func (p *Plugin) OldMethod() { /* old implementation */ }
-func (p *Plugin) NewMethod() { /* new implementation */ }
-
-// NEVER create simplified examples to demo new features
-// examples/simple-plugin/  // Wrong - modify existing examples
-// examples/gain/          // Existing example to update
-```
-
-**✅ CORRECT APPROACH:**
+### POC Development
+- Breaking changes encouraged to find right architecture
+- Update existing examples instead of creating new ones
 - Delete old code entirely when refactoring
-- Update existing examples to demonstrate new features
-- Make breaking changes without hesitation
-- Modify production examples rather than creating demos
 
-**WHY:** This is a POC/prototype. Clean breaks reveal the right architecture faster than maintaining compatibility.
+## 🎯 Architecture Goals
 
-## 🎯 Architecture Goals Reinforcement
+**Primary**: ClapGo is a bridge (not framework) enabling Go CLAP plugins  
+**Secondary**: Zero plugin-specific C code required  
+**Anti-Goal**: Hiding CLAP concepts from developers
 
-### Primary Goal: C Bridge + Manifest System
-ClapGo is **NOT** a Go audio framework. It is a **bridge** that enables writing CLAP plugins in Go while maintaining full CLAP compliance.
+## 🚨 Red Flags - Stop If You See
 
-### Secondary Goal: Zero Plugin-Specific C Code
-Plugin developers write **only** Go code and JSON manifests. All CLAP interface complexity lives in the shared C bridge.
+1. Creating interfaces that compete with CLAP
+2. Adding Go registration when manifests exist  
+3. Writing TODO comments
+4. Worrying about backwards compatibility
+5. Creating "easy" versions of real interfaces
+6. Bypassing the C bridge
 
-### Anti-Goal: Hiding CLAP Concepts
-ClapGo does **NOT** simplify CLAP. It provides Go interfaces for CLAP concepts like parameters, extensions, and events.
-
-## 🚨 Red Flags - Stop Development If You See
-
-1. **Creating interfaces that compete with CLAP** - you're building the wrong abstraction
-2. **Adding Go registration when manifests exist** - you're duplicating discovery mechanisms  
-3. **Writing TODO comments** - you're not implementing complete features
-4. **Worrying about backwards compatibility** - you're not embracing prototype development
-5. **Creating "easy" or "simple" versions** - you're undermining the real architecture
-6. **Bypassing the C bridge** - you're breaking the chosen design
-
-## 💡 When In Doubt
-
-**Ask: "Does this align with manifest-driven, C bridge architecture?"**
-
-If the answer is no, don't implement it. If you're unsure, refer to:
-1. `ARCHITECTURE.md` - for the intended design
-2. `src/c/bridge.c` - for how the C bridge works  
-3. `examples/gain/gain.json` - for how manifests define plugins
-4. `examples/gain/main.go` - for proper Go plugin implementation
-
-Remember: **ClapGo is a bridge, not a framework. Stay true to CLAP while enabling Go development.**
-
-## 🎯 Build System and Examples Guidelines
-
-### Build System Requirements
-**❌ FORBIDDEN:**
-- NEVER worry about CMake configurations or files
-- NEVER modify CMakeLists.txt files
-- NEVER create CMake-based build instructions
-
-**✅ CORRECT APPROACH:**
-- Use `make` and the Makefile exclusively
-- All builds should be done via: `make examples`
-- Test with clap-validator using the testing scripts
-
-**WHY:** The CMake system is only for GUI work. The core ClapGo bridge uses Make.
-
-### Example Plugin Guidelines
-**❌ FORBIDDEN:**
-- NEVER work on GUI examples (gain-with-gui)
-- NEVER create simplified or demo versions of examples
-- NEVER create placeholder implementations
-- NEVER duplicate boilerplate code across plugins
-
-**✅ CORRECT APPROACH:**
-- Focus exclusively on `gain` and `synth` examples
-- Implement full, production-ready functionality
-- Keep code clean and readable while being complete
-- Extract common functionality into library helper functions
-- Minimize duplicated code across plugin examples
-
-**WHY:** Examples should demonstrate real-world usage, not simplified concepts. GUI examples are out of scope.
-
-### Code Duplication and Helper Functions
-**❌ FORBIDDEN:**
-- NEVER copy-paste boilerplate code between plugin examples
-- NEVER implement extension methods with duplicated logic
-- NEVER write repetitive export functions without abstraction
-
-**✅ CORRECT APPROACH:**
-- Create helper functions in the `pkg/api` package for common patterns
-- Use composition and embedding for shared plugin functionality
-- Provide default implementations that plugins can override
-- Keep plugin-specific code to the absolute minimum
-
-**Example of Good Practice:**
-```go
-// In pkg/api/context_menu_helpers.go
-type DefaultContextMenuProvider struct {
-    paramManager *ParameterManager
-    pluginName   string
-}
-
-func (d *DefaultContextMenuProvider) PopulateParameterMenu(paramID uint32, builder *ContextMenuBuilder) {
-    // Common parameter menu items like "Reset to Default"
-}
-
-// In plugin code - minimal implementation
-func (p *GainPlugin) PopulateContextMenu(target *ContextMenuTarget, builder *ContextMenuBuilder) bool {
-    helper := api.NewDefaultContextMenuProvider(p.paramManager, "Gain Plugin")
-    
-    if target != nil && target.Kind == api.ContextMenuTargetKindParam {
-        // Use helper for common items
-        helper.PopulateParameterMenu(target.ID, builder)
-        
-        // Add plugin-specific items only
-        if target.ID == 0 { // Gain parameter
-            builder.AddItem(&api.ContextMenuSubmenu{Label: "Presets", IsEnabled: true})
-            // ... specific presets
-            builder.AddItem(&api.ContextMenuEndSubmenu{})
-        }
-    }
-    return true
-}
-```
-
-**WHY:** This approach reduces maintenance burden, ensures consistency, and makes the API easier to use for plugin developers.
+**When in doubt**: Does this align with manifest-driven, C bridge architecture?
