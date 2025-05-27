@@ -22,10 +22,8 @@ package main
 import "C"
 import (
 	"embed"
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"runtime/cgo"
@@ -518,6 +516,9 @@ type GainPlugin struct {
 	// Parameter management using our new abstraction
 	paramManager *api.ParameterManager
 	
+	// State management
+	stateManager *api.StateManager
+	
 	// Host utilities
 	logger       *api.HostLogger
 	trackInfo    *api.HostTrackInfo
@@ -538,6 +539,7 @@ func NewGainPlugin() *GainPlugin {
 		isActivated:  false,
 		isProcessing: false,
 		paramManager: api.NewParameterManager(),
+		stateManager: api.NewStateManager(PluginID, PluginName, api.StateVersion1),
 	}
 	
 	// Set default gain to 1.0 (0dB)
@@ -1006,34 +1008,12 @@ func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32
 func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
 	out := api.NewOutputStream(stream)
 	
-	// Write state version
-	if err := out.WriteUint32(1); err != nil {
+	// Use state manager to save parameters
+	if err := p.stateManager.SaveParametersToStream(out, p.paramManager); err != nil {
+		if p.logger != nil {
+			p.logger.Error(fmt.Sprintf("Failed to save state: %v", err))
+		}
 		return false
-	}
-	
-	// Write parameter count
-	paramCount := p.paramManager.GetParameterCount()
-	if err := out.WriteUint32(paramCount); err != nil {
-		return false
-	}
-	
-	// Write each parameter ID and value
-	for i := uint32(0); i < paramCount; i++ {
-		info, err := p.paramManager.GetParameterInfoByIndex(i)
-		if err != nil {
-			return false
-		}
-		
-		// Write parameter ID
-		if err := out.WriteUint32(info.ID); err != nil {
-			return false
-		}
-		
-		// Write parameter value
-		value := p.paramManager.GetParameterValue(info.ID)
-		if err := out.WriteFloat64(value); err != nil {
-			return false
-		}
 	}
 	
 	return true
@@ -1043,40 +1023,17 @@ func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
 func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 	in := api.NewInputStream(stream)
 	
-	// Read state version
-	version, err := in.ReadUint32()
-	if err != nil || version != 1 {
+	// Use state manager to load parameters
+	if err := p.stateManager.LoadParametersFromStream(in, p.paramManager); err != nil {
+		if p.logger != nil {
+			p.logger.Error(fmt.Sprintf("Failed to load state: %v", err))
+		}
 		return false
 	}
 	
-	// Read parameter count
-	paramCount, err := in.ReadUint32()
-	if err != nil {
-		return false
-	}
-	
-	// Read each parameter ID and value
-	for i := uint32(0); i < paramCount; i++ {
-		// Read parameter ID
-		paramID, err := in.ReadUint32()
-		if err != nil {
-			return false
-		}
-		
-		// Read parameter value
-		value, err := in.ReadFloat64()
-		if err != nil {
-			return false
-		}
-		
-		// Set parameter value
-		p.paramManager.SetParameterValue(paramID, value)
-		
-		// Update internal state if this is the gain parameter
-		if paramID == 0 {
-			atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
-		}
-	}
+	// Update internal state for the gain parameter
+	value := p.paramManager.GetParameterValue(0)
+	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 	
 	return true
 }
@@ -1146,41 +1103,27 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 			return false
 		}
 		
-		// Read the preset file
-		presetData, err := os.ReadFile(location)
+		// Use state manager to load preset
+		metadata, customData, err := p.stateManager.LoadPresetFromFile(location, p.paramManager)
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
+				p.logger.Error(fmt.Sprintf("Failed to load preset file: %v", err))
 			}
 			return false
 		}
 		
-		// Parse the preset data
-		var state map[string]interface{}
-		if err := json.Unmarshal(presetData, &state); err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
-			}
-			return false
-		}
-		
-		// Load the preset state from preset_data field
-		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
-			if gainValue, ok := presetData["gain"].(float64); ok {
-				atomic.StoreInt64(&p.gain, int64(api.FloatToBits(gainValue)))
-				p.paramManager.SetParameterValue(0, gainValue)
-				
-				if p.logger != nil {
-					p.logger.Info(fmt.Sprintf("Preset loaded: gain = %.2f", gainValue))
-				}
-				return true
-			}
-		}
+		// Update internal state for the gain parameter
+		value := p.paramManager.GetParameterValue(0)
+		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 		
 		if p.logger != nil {
-			p.logger.Error("Invalid preset format: missing preset_data.gain value")
+			p.logger.Info(fmt.Sprintf("Preset '%s' loaded: gain = %.2f", metadata.Name, value))
 		}
-		return false
+		
+		// Handle any custom data if needed
+		_ = customData
+		
+		return true
 		
 	case api.PresetLocationPlugin:
 		// Load bundled preset from embedded files
@@ -1195,32 +1138,27 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 			return false
 		}
 		
-		// Parse the preset data
-		var state map[string]interface{}
-		if err := json.Unmarshal(presetData, &state); err != nil {
+		// Use state manager to load preset
+		metadata, customData, err := p.stateManager.LoadPreset(presetData, p.paramManager)
+		if err != nil {
 			if p.logger != nil {
 				p.logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
 			}
 			return false
 		}
 		
-		// Load the preset state from preset_data field
-		if presetData, ok := state["preset_data"].(map[string]interface{}); ok {
-			if gainValue, ok := presetData["gain"].(float64); ok {
-				atomic.StoreInt64(&p.gain, int64(api.FloatToBits(gainValue)))
-				p.paramManager.SetParameterValue(0, gainValue)
-				
-				if p.logger != nil {
-					p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", loadKey, gainValue))
-				}
-				return true
-			}
-		}
+		// Update internal state for the gain parameter
+		value := p.paramManager.GetParameterValue(0)
+		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
 		
 		if p.logger != nil {
-			p.logger.Error("Invalid preset format: missing preset_data.gain value")
+			p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", metadata.Name, value))
 		}
-		return false
+		
+		// Handle any custom data if needed
+		_ = customData
+		
+		return true
 		
 	default:
 		return false
