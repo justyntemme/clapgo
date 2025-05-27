@@ -508,6 +508,8 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 // GainPlugin represents the gain plugin
 type GainPlugin struct {
 	*plugin.PluginBase
+	*audio.StereoPortProvider
+	*audio.SurroundSupport
 	
 	// Plugin-specific parameters
 	gain param.AtomicFloat64
@@ -534,6 +536,8 @@ func NewGainPlugin() *GainPlugin {
 			Support:     "https://github.com/justyntemme/clapgo/issues",
 			Features:    []string{plugin.FeatureAudioEffect, plugin.FeatureStereo, plugin.FeatureUtility},
 		}),
+		StereoPortProvider: audio.NewStereoPortProvider(),
+		SurroundSupport:    audio.NewStereoSurroundSupport(),
 	}
 	
 	// Set default gain to 1.0 (0dB)
@@ -1065,49 +1069,7 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 
 // Helper functions for atomic float64 operations
 
-// AudioPortsProvider implementation
-// This demonstrates custom audio port configuration
-
-// GetAudioPortCount returns the number of audio ports
-func (p *GainPlugin) GetAudioPortCount(isInput bool) uint32 {
-	// Gain plugin has 1 stereo input and 1 stereo output
-	return 1
-}
-
-// GetAudioPortInfo returns information about an audio port
-func (p *GainPlugin) GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo {
-	if index != 0 {
-		// Return invalid port info for out-of-range index
-		return api.AudioPortInfo{
-			ID: api.InvalidID,
-		}
-	}
-	
-	// Create stereo port info
-	name := "Stereo Input"
-	if !isInput {
-		name = "Stereo Output"
-	}
-	
-	return api.CreateStereoPort(0, name, true)
-}
-
-// SurroundProvider implementation (optional - demonstrates surround support)
-
-// IsChannelMaskSupported checks if the plugin supports a given channel mask
-func (p *GainPlugin) IsChannelMaskSupported(channelMask uint64) bool {
-	// For this example, we only support stereo
-	return channelMask == api.ChannelMaskStereo
-}
-
-// GetChannelMap returns the channel map for a given port
-func (p *GainPlugin) GetChannelMap(isInput bool, portIndex uint32) []uint8 {
-	// For stereo, return FL and FR channel identifiers
-	if portIndex == 0 {
-		return api.CreateStereoChannelMap()
-	}
-	return nil
-}
+// Audio port configuration is provided by embedded StereoPortProvider and SurroundSupport
 
 //export ClapGo_PluginStateSave
 func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
