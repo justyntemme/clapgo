@@ -2,16 +2,17 @@
 
 This document outlines the remaining CLAP extensions and functionality that need to be implemented in ClapGo's Go library to provide complete CLAP support to plugin developers.
 
+## 🏗️ CRITICAL ARCHITECTURE DECISION: C Export Requirements
+
+**Important**: We previously attempted to remove all CGO code from plugin examples, but discovered that the ClapGo_* functions MUST be exported from the plugin's main package to be properly exposed in the shared library. This led to our hybrid approach:
+
+1. **Plugin main.go**: Contains minimal CGO exports that call into pure Go packages
+2. **Domain packages**: Pure Go implementation without CGO
+3. **Code generation**: For repetitive C export boilerplate
+
+This means our refactoring strategy must preserve the ability for plugins to export the required C functions while maximizing code reuse through domain packages.
+
 ## 📊 Current Status Summary
-
-After thorough review and implementation, ClapGo has achieved professional-grade real-time audio compliance with comprehensive CLAP functionality.
-
-### ✅ Recently Completed:
-- **Code Deduplication Phase 1**: Parameter management helpers (param_helpers.go)
-- **Code Deduplication Phase 2**: Event processing patterns (event_helpers.go)
-- **Code Deduplication Phase 3**: State management helpers (state_helpers.go)
-- **Tuning Extension**: Complete implementation with plugin-side exports
-- **Example Updates**: Both gain and synth examples updated to use new helper functions
 
 ### ⚠️ Actually Missing/Incomplete:
 - **Plugin Invalidation Factory**: Not implemented
@@ -42,6 +43,11 @@ After thorough review and implementation, ClapGo has achieved professional-grade
 
 ### Phase 3A: Package Reorganization with Aggressive Deduplication
 **Goal**: Refactor from generic "api" package to domain-specific packages while eliminating ALL duplication
+
+**Architecture Constraint**: Plugins MUST continue to export ClapGo_* functions from their main package. Our approach:
+1. Domain packages provide pure Go implementations
+2. Plugin main.go contains minimal CGO exports that delegate to domain packages
+3. Consider code generation for repetitive C export boilerplate
 
 #### `pkg/param/` - Parameter Domain
 ```go
