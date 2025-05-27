@@ -48,8 +48,6 @@ type GainPlugin struct {
 	*audio.SurroundSupport
 	
 	gain param.AtomicFloat64
-	
-	contextMenuProvider *api.DefaultContextMenuProvider
 }
 
 
@@ -64,8 +62,6 @@ func NewGainPlugin() *GainPlugin {
 	
 	p.ParamManager.Register(param.Volume(ParamGain, "Gain"))
 	p.ParamManager.SetValue(ParamGain, 1.0)
-	
-	p.contextMenuProvider = api.NewDefaultContextMenuProvider(nil, PluginName, PluginVersion, nil)
 	
 	return p
 }
@@ -243,38 +239,6 @@ func (p *GainPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
 	}
 }
 
-func (p *GainPlugin) PopulateContextMenuWithTarget(targetKind uint32, targetID uint64, builder unsafe.Pointer) bool {
-	if builder == nil {
-		return false
-	}
-	
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: targetKind,
-			ID:   targetID,
-		}
-	}
-	
-	// Create builder wrapper
-	menuBuilder := api.NewContextMenuBuilder(builder)
-	
-	return p.PopulateContextMenu(target, menuBuilder)
-}
-
-func (p *GainPlugin) PerformContextMenuActionWithTarget(targetKind uint32, targetID uint64, actionID uint64) bool {
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: targetKind,
-			ID:   targetID,
-		}
-	}
-	
-	return p.PerformContextMenuAction(target, actionID)
-}
 
 func (p *GainPlugin) GetRemoteControlsPageToC(pageIndex uint32, cPage unsafe.Pointer) bool {
 	if cPage == nil {
@@ -315,38 +279,6 @@ func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
 }
 
 
-func (p *GainPlugin) PopulateContextMenu(target *api.ContextMenuTarget, builder *api.ContextMenuBuilder) bool {
-	api.DebugAssertMainThread("GainPlugin.PopulateContextMenu")
-	
-	if target != nil && target.Kind == api.ContextMenuTargetKindParam {
-		p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
-		
-	} else {
-		p.contextMenuProvider.PopulateGlobalMenu(builder)
-	}
-	
-	return true
-}
-
-func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, actionID uint64) bool {
-	api.DebugAssertMainThread("GainPlugin.PerformContextMenuAction")
-	
-	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
-		if paramID == 0 {
-			p.gain.Store(1.0)
-		}
-		return p.contextMenuProvider.HandleResetParameter(paramID)
-	}
-	
-	if p.contextMenuProvider.IsAboutAction(actionID) {
-		if p.Logger != nil {
-			p.Logger.Info("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
-		}
-		return true
-	}
-	
-	return false
-}
 
 
 func (p *GainPlugin) GetRemoteControlsPageCount() uint32 {

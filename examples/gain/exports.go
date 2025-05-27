@@ -191,12 +191,14 @@ func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginContextMenuPopulate
 func ClapGo_PluginContextMenuPopulate(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, builder unsafe.Pointer) C.bool {
-	return C.bool(getPlugin(plugin).PopulateContextMenuWithTarget(uint32(targetKind), uint64(targetID), builder))
+	// Context menu not supported
+	return C.bool(false)
 }
 
 //export ClapGo_PluginContextMenuPerform
 func ClapGo_PluginContextMenuPerform(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, actionID C.uint64_t) C.bool {
-	return C.bool(getPlugin(plugin).PerformContextMenuActionWithTarget(uint32(targetKind), uint64(targetID), uint64(actionID)))
+	// Context menu not supported
+	return C.bool(false)
 }
 
 //export ClapGo_PluginRemoteControlsCount
