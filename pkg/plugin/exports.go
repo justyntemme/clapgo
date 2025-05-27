@@ -9,6 +9,7 @@ import (
 	"unsafe"
 	
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
 // Plugin is the interface that all plugins must implement
@@ -68,15 +69,15 @@ func (h *ExportHelpers) PluginDeactivate(plugin unsafe.Pointer) {
 
 // PluginStartProcessing implements ClapGo_PluginStartProcessing
 func (h *ExportHelpers) PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	return C.bool(h.GetPlugin(plugin).StartProcessing())
 }
 
 // PluginStopProcessing implements ClapGo_PluginStopProcessing
 func (h *ExportHelpers) PluginStopProcessing(plugin unsafe.Pointer) {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	h.GetPlugin(plugin).StopProcessing()
 }
 
@@ -87,8 +88,8 @@ func (h *ExportHelpers) PluginReset(plugin unsafe.Pointer) {
 
 // PluginProcess implements ClapGo_PluginProcess
 func (h *ExportHelpers) PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	
 	if p, ok := h.GetPlugin(plugin).(ProcessorWithHandle); ok {
 		return C.int32_t(p.ProcessWithHandle(process))

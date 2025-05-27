@@ -9,6 +9,7 @@ import (
 	"unsafe"
 	
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
 //export ClapGo_CreatePlugin
@@ -80,15 +81,15 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginStartProcessing
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	return C.bool(getPlugin(plugin).StartProcessing())
 }
 
 //export ClapGo_PluginStopProcessing
 func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	getPlugin(plugin).StopProcessing()
 }
 
@@ -99,8 +100,8 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.MarkAudioThread()
+	defer thread.UnmarkAudioThread()
 	return C.int32_t(getPlugin(plugin).ProcessWithHandle(process))
 }
 

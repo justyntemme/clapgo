@@ -8,6 +8,7 @@ import (
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/state"
+	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
 // PluginBase provides comprehensive base functionality for all plugins
@@ -68,7 +69,7 @@ func (b *PluginBase) InitWithHost(host unsafe.Pointer) {
 // CommonInit performs common initialization
 func (b *PluginBase) CommonInit() bool {
 	// Mark main thread for debug builds
-	api.DebugSetMainThread()
+	thread.SetMainThread()
 	
 	if b.Logger != nil {
 		b.Logger.Info(fmt.Sprintf("[%s] Plugin initialized", b.Info.Name))
@@ -81,7 +82,7 @@ func (b *PluginBase) CommonInit() bool {
 // CommonDestroy performs common cleanup
 func (b *PluginBase) CommonDestroy() {
 	// Assert main thread
-	api.DebugAssertMainThread("Plugin.Destroy")
+	thread.AssertMainThread("Plugin.Destroy")
 	if b.ThreadCheck != nil {
 		b.ThreadCheck.AssertMainThread("Plugin.Destroy")
 	}
@@ -94,7 +95,7 @@ func (b *PluginBase) CommonDestroy() {
 // CommonActivate performs common activation
 func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uint32) bool {
 	// Assert main thread
-	api.DebugAssertMainThread("Plugin.Activate")
+	thread.AssertMainThread("Plugin.Activate")
 	if b.ThreadCheck != nil {
 		b.ThreadCheck.AssertMainThread("Plugin.Activate")
 	}
@@ -113,7 +114,7 @@ func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uin
 // CommonDeactivate performs common deactivation
 func (b *PluginBase) CommonDeactivate() {
 	// Assert main thread
-	api.DebugAssertMainThread("Plugin.Deactivate")
+	thread.AssertMainThread("Plugin.Deactivate")
 	if b.ThreadCheck != nil {
 		b.ThreadCheck.AssertMainThread("Plugin.Deactivate")
 	}
@@ -181,7 +182,7 @@ func (b *PluginBase) GetPluginID() string {
 
 // GetLatency returns 0 by default (no latency)
 func (b *PluginBase) GetLatency() uint32 {
-	api.DebugAssertMainThread("PluginBase.GetLatency")
+	thread.AssertMainThread("PluginBase.GetLatency")
 	return 0
 }
 
@@ -373,7 +374,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 // OnParamMappingSet provides default parameter mapping indication with logging
 func (b *PluginBase) OnParamMappingSet(paramID uint32, hasMapping bool, color *api.Color, label string, description string) {
 	// Check main thread (param indication is always on main thread)
-	api.DebugAssertMainThread("PluginBase.OnParamMappingSet")
+	thread.AssertMainThread("PluginBase.OnParamMappingSet")
 	
 	// Log the mapping change
 	if b.Logger != nil {
@@ -391,7 +392,7 @@ func (b *PluginBase) OnParamMappingSet(paramID uint32, hasMapping bool, color *a
 // OnParamAutomationSet provides default parameter automation indication with logging
 func (b *PluginBase) OnParamAutomationSet(paramID uint32, automationState uint32, color *api.Color) {
 	// Check main thread (param indication is always on main thread)
-	api.DebugAssertMainThread("PluginBase.OnParamAutomationSet")
+	thread.AssertMainThread("PluginBase.OnParamAutomationSet")
 	
 	// Log the automation state change
 	if b.Logger != nil {

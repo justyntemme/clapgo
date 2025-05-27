@@ -11,6 +11,7 @@ import (
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
+	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
 
@@ -78,7 +79,7 @@ func (p *GainPlugin) CreateWithHost(host unsafe.Pointer) cgo.Handle {
 
 
 func (p *GainPlugin) StartProcessing() bool {
-	api.DebugAssertAudioThread("GainPlugin.StartProcessing")
+	thread.AssertAudioThread("GainPlugin.StartProcessing")
 	if p.ThreadCheck != nil {
 		p.ThreadCheck.AssertAudioThread("GainPlugin.StartProcessing")
 	}
@@ -92,7 +93,7 @@ func (p *GainPlugin) Reset() {
 }
 
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
-	api.DebugAssertAudioThread("GainPlugin.Process")
+	thread.AssertAudioThread("GainPlugin.Process")
 	if p.ThreadCheck != nil {
 		p.ThreadCheck.AssertAudioThread("GainPlugin.Process")
 	}
