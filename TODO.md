@@ -9,26 +9,15 @@ After thorough review and implementation, ClapGo has achieved professional-grade
 ### ✅ Recently Completed:
 - **Code Deduplication Phase 1**: Parameter management helpers (param_helpers.go)
 - **Code Deduplication Phase 2**: Event processing patterns (event_helpers.go)
+- **Tuning Extension**: Complete implementation with plugin-side exports
+- **Example Updates**: Both gain and synth examples updated to use new helper functions
 
 ### ⚠️ Actually Missing/Incomplete:
-- **Tuning Extension**: Host-side complete, missing plugin-side exports
 - **Plugin Invalidation Factory**: Not implemented
 - **Plugin State Converter Factory**: Not implemented
 - **GUI Extension**: Forbidden per guardrails for example plugins
 - **Undo Extension**: Not implemented (complex draft extension)
 - **Other Draft Extensions**: Various experimental features
-
-## 🚨 Priority 1: Complete Missing Plugin-Side Implementations
-
-### 1. Tuning Extension (CLAP_EXT_TUNING)
-**Status**: Partially Implemented
-- Host-side implementation complete via HostTuning in pkg/api/tuning.go
-- C bridge support exists but no Go exports implemented
-- Missing plugin-side implementation (OnTuningChanged callback)
-**Required**:
-- Add ClapGo_PluginOnTuningChanged export
-- Implement TuningProvider interface
-- Add example usage in synth plugin
 
 ## 🎯 Priority 2: Missing Factory Extensions
 

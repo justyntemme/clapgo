@@ -323,7 +323,45 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	if plugin == nil || text == nil || value == nil {
 		return C.bool(false)
 	}
-	// For now, just return false - proper implementation would parse the text
+	
+	// Convert text to Go string
+	goText := C.GoString(text)
+	
+	// Parse based on parameter type
+	switch uint32(paramID) {
+	case 1: // Volume (percentage)
+		parser := api.NewParameterValueParser(api.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(goText); err == nil {
+			*value = C.double(api.ClampValue(parsedValue, 0.0, 1.0))
+			return C.bool(true)
+		}
+	case 2: // Waveform
+		// Parse waveform names
+		switch goText {
+		case "Sine":
+			*value = C.double(0.0)
+			return C.bool(true)
+		case "Saw":
+			*value = C.double(1.0)
+			return C.bool(true)
+		case "Square":
+			*value = C.double(2.0)
+			return C.bool(true)
+		}
+	case 3, 4, 6: // Attack, Decay, Release (milliseconds)
+		parser := api.NewParameterValueParser(api.FormatMilliseconds)
+		if parsedValue, err := parser.ParseValue(goText); err == nil {
+			*value = C.double(api.ClampValue(parsedValue, 0.001, 5.0))
+			return C.bool(true)
+		}
+	case 5: // Sustain (percentage)
+		parser := api.NewParameterValueParser(api.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(goText); err == nil {
+			*value = C.double(api.ClampValue(parsedValue, 0.0, 1.0))
+			return C.bool(true)
+		}
+	}
+	
 	return C.bool(false)
 }
 
@@ -754,6 +792,8 @@ type Voice struct {
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
+	api.NoOpEventHandler // Embed to get default no-op implementations
+	
 	// Plugin state
 	voices       [16]*Voice  // Maximum 16 voices
 	sampleRate   float64
@@ -1098,46 +1138,16 @@ func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount ui
 		return
 	}
 	
-	// Process each event using our abstraction - NO MORE MANUAL C STRUCT PARSING!
-	eventCount := events.GetInputEventCount()
-	for i := uint32(0); i < eventCount; i++ {
-		event := events.GetInputEvent(i)
-		if event == nil {
-			continue
-		}
-		
-		// Handle each event type safely using our abstraction
-		switch event.Type {
-		case api.EventTypeParamValue:
-			if paramEvent, ok := event.Data.(api.ParamValueEvent); ok {
-				p.handleParameterChange(paramEvent)
-			}
-		case api.EventTypeNoteOn:
-			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
-				p.handleNoteOn(noteEvent, event.Time)
-			}
-		case api.EventTypeNoteOff:
-			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
-				p.handleNoteOff(noteEvent, event.Time)
-			}
-		case api.EventTypeNoteChoke:
-			if noteEvent, ok := event.Data.(api.NoteEvent); ok {
-				p.handleNoteChoke(noteEvent, event.Time)
-			}
-		case api.EventTypeNoteExpression:
-			if noteExprEvent, ok := event.Data.(api.NoteExpressionEvent); ok {
-				p.handleNoteExpression(noteExprEvent, event.Time)
-			}
-		}
-	}
+	// Use the zero-allocation ProcessTypedEvents method instead of ProcessAllEvents
+	events.ProcessTypedEvents(p)
 }
 
-// handleParameterChange processes a parameter change event
-func (p *SynthPlugin) handleParameterChange(paramEvent api.ParamValueEvent) {
+// HandleParamValue handles parameter value changes
+func (p *SynthPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint32) {
 	// Check if this is a polyphonic parameter event (targets specific note)
 	if paramEvent.NoteID >= 0 || paramEvent.Key >= 0 {
 		// This is a polyphonic parameter change - apply to specific voice(s)
-		p.handlePolyphonicParameter(paramEvent)
+		p.handlePolyphonicParameter(*paramEvent)
 		return
 	}
 	
@@ -1194,8 +1204,8 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent api.ParamValueEvent) 
 	}
 }
 
-// handleNoteOn processes a note on event
-func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent, time uint32) {
+// HandleNoteOn handles note on events
+func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
@@ -1235,8 +1245,8 @@ func (p *SynthPlugin) handleNoteOn(noteEvent api.NoteEvent, time uint32) {
 	}
 }
 
-// handleNoteOff processes a note off event
-func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent, time uint32) {
+// HandleNoteOff handles note off events
+func (p *SynthPlugin) HandleNoteOff(noteEvent *api.NoteEvent, time uint32) {
 	// Find the voice with this note ID or key/channel combination
 	for _, voice := range p.voices {
 		// Safety check
@@ -1254,8 +1264,8 @@ func (p *SynthPlugin) handleNoteOff(noteEvent api.NoteEvent, time uint32) {
 	}
 }
 
-// handleNoteChoke processes a note choke event (immediate stop)
-func (p *SynthPlugin) handleNoteChoke(noteEvent api.NoteEvent, time uint32) {
+// HandleNoteChoke handles note choke events (immediate stop)
+func (p *SynthPlugin) HandleNoteChoke(noteEvent *api.NoteEvent, time uint32) {
 	// Find the voice with this note ID or key/channel combination
 	for i, voice := range p.voices {
 		// Safety check
@@ -1273,8 +1283,8 @@ func (p *SynthPlugin) handleNoteChoke(noteEvent api.NoteEvent, time uint32) {
 	}
 }
 
-// handleNoteExpression processes note expression events (MPE)
-func (p *SynthPlugin) handleNoteExpression(noteExprEvent api.NoteExpressionEvent, time uint32) {
+// HandleNoteExpression handles note expression events (MPE)
+func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *api.NoteExpressionEvent, time uint32) {
 	// Find matching voices
 	for _, voice := range p.voices {
 		if voice == nil || !voice.IsActive {
@@ -1312,57 +1322,24 @@ func (p *SynthPlugin) handleNoteExpression(noteExprEvent api.NoteExpressionEvent
 	}
 }
 
-// handleMIDI processes MIDI 1.0 events
-func (p *SynthPlugin) handleMIDI(midiEvent api.MIDIEvent, time uint32) {
-	if len(midiEvent.Data) < 3 {
-		return
-	}
+// HandleMIDI handles MIDI 1.0 events
+func (p *SynthPlugin) HandleMIDI(midiEvent *api.MIDIEvent, time uint32) {
+	// Use the helper to process standard MIDI messages
+	api.ProcessStandardMIDI(midiEvent, p, time)
 	
-	status := midiEvent.Data[0] & 0xF0
-	channel := midiEvent.Data[0] & 0x0F
-	
-	switch status {
-	case 0x90: // Note On
-		if midiEvent.Data[2] > 0 { // Velocity > 0
-			noteEvent := api.NoteEvent{
-				NoteID:   -1,
-				Port:     midiEvent.Port,
-				Channel:  int16(channel),
-				Key:      int16(midiEvent.Data[1]),
-				Velocity: float64(midiEvent.Data[2]) / 127.0,
+	// Handle additional MIDI CC messages
+	if len(midiEvent.Data) >= 3 {
+		status := midiEvent.Data[0] & 0xF0
+		if status == 0xB0 { // Control Change
+			switch midiEvent.Data[1] {
+			case 7: // Volume
+				value := float64(midiEvent.Data[2]) / 127.0
+				paramEvent := api.ParamValueEvent{
+					ParamID: 1, // Volume parameter
+					Value:   value,
+				}
+				p.HandleParamValue(&paramEvent, time)
 			}
-			p.handleNoteOn(noteEvent, time)
-		} else { // Velocity = 0 is Note Off
-			noteEvent := api.NoteEvent{
-				NoteID:   -1,
-				Port:     midiEvent.Port,
-				Channel:  int16(channel),
-				Key:      int16(midiEvent.Data[1]),
-				Velocity: 0.0,
-			}
-			p.handleNoteOff(noteEvent, time)
-		}
-		
-	case 0x80: // Note Off
-		noteEvent := api.NoteEvent{
-			NoteID:   -1,
-			Port:     midiEvent.Port,
-			Channel:  int16(channel),
-			Key:      int16(midiEvent.Data[1]),
-			Velocity: float64(midiEvent.Data[2]) / 127.0,
-		}
-		p.handleNoteOff(noteEvent, time)
-		
-	case 0xB0: // Control Change
-		// Handle common CCs
-		switch midiEvent.Data[1] {
-		case 7: // Volume
-			value := float64(midiEvent.Data[2]) / 127.0
-			paramEvent := api.ParamValueEvent{
-				ParamID: 1, // Volume parameter
-				Value:   value,
-			}
-			p.handleParameterChange(paramEvent)
 		}
 	}
 }

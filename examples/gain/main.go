@@ -470,7 +470,6 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	if plugin == nil || text == nil || value == nil {
 		return C.bool(false)
 	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Convert text to Go string
 	goText := C.GoString(text)
@@ -735,65 +734,10 @@ func (p *GainPlugin) HandleParamValue(event *api.ParamValueEvent, time uint32) {
 	}
 }
 
-// HandleParamMod handles parameter modulation events
-func (p *GainPlugin) HandleParamMod(event *api.ParamModEvent, time uint32) {
-	// Gain plugin doesn't support parameter modulation
-}
-
-// HandleParamGestureBegin handles parameter gesture begin events
-func (p *GainPlugin) HandleParamGestureBegin(event *api.ParamGestureEvent, time uint32) {
-	// Could be used to start automation recording
-}
-
-// HandleParamGestureEnd handles parameter gesture end events
-func (p *GainPlugin) HandleParamGestureEnd(event *api.ParamGestureEvent, time uint32) {
-	// Could be used to end automation recording
-}
-
-// HandleNoteOn handles note on events
-func (p *GainPlugin) HandleNoteOn(event *api.NoteEvent, time uint32) {
-	// Gain plugin doesn't process notes
-}
-
-// HandleNoteOff handles note off events
-func (p *GainPlugin) HandleNoteOff(event *api.NoteEvent, time uint32) {
-	// Gain plugin doesn't process notes
-}
-
-// HandleNoteChoke handles note choke events
-func (p *GainPlugin) HandleNoteChoke(event *api.NoteEvent, time uint32) {
-	// Gain plugin doesn't process notes
-}
-
-// HandleNoteEnd handles note end events
-func (p *GainPlugin) HandleNoteEnd(event *api.NoteEvent, time uint32) {
-	// Gain plugin doesn't process notes
-}
-
-// HandleNoteExpression handles note expression events
-func (p *GainPlugin) HandleNoteExpression(event *api.NoteExpressionEvent, time uint32) {
-	// Gain plugin doesn't support note expression
-}
-
-// HandleTransport handles transport events
-func (p *GainPlugin) HandleTransport(event *api.TransportEvent, time uint32) {
-	// Gain plugin doesn't use transport information
-}
-
-// HandleMIDI handles MIDI events
-func (p *GainPlugin) HandleMIDI(event *api.MIDIEvent, time uint32) {
-	// Gain plugin doesn't process MIDI
-}
-
-// HandleMIDISysex handles MIDI sysex events
-func (p *GainPlugin) HandleMIDISysex(event *api.MIDISysexEvent, time uint32) {
-	// Gain plugin doesn't process sysex
-}
-
-// HandleMIDI2 handles MIDI 2.0 events
-func (p *GainPlugin) HandleMIDI2(event *api.MIDI2Event, time uint32) {
-	// Gain plugin doesn't process MIDI 2.0
-}
+// The following event handlers are inherited from api.NoOpEventHandler:
+// HandleParamMod, HandleParamGestureBegin, HandleParamGestureEnd,
+// HandleNoteOn, HandleNoteOff, HandleNoteChoke, HandleNoteEnd,
+// HandleNoteExpression, HandleTransport, HandleMIDI, HandleMIDISysex, HandleMIDI2
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
