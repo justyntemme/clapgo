@@ -16,4 +16,7 @@ const (
 	
 	// PluginDescription is a short description of the plugin
 	PluginDescription = "A simple gain plugin using ClapGo"
+	
+	// Parameter IDs
+	ParamGain = uint32(0)
 )

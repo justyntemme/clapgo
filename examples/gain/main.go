@@ -21,19 +21,18 @@ package main
 // }
 import "C"
 import (
-	"embed"
 	"fmt"
 	"math"
-	"path/filepath"
-	"github.com/justyntemme/clapgo/pkg/api"
 	"runtime/cgo"
-	"sync/atomic"
 	"unsafe"
+	
+	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/param"
+	"github.com/justyntemme/clapgo/pkg/plugin"
+	"github.com/justyntemme/clapgo/pkg/state"
 )
 
-// Embed factory presets
-//go:embed presets/factory/*.json
-var factoryPresets embed.FS
 
 // Global plugin instance
 var gainPlugin *GainPlugin
@@ -52,13 +51,12 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	fmt.Printf("Gain plugin - ClapGo_CreatePlugin with ID: %s\n", id)
 	
 	if id == PluginID {
-		// Store the host pointer and create utilities
-		gainPlugin.host = host
-		gainPlugin.logger = api.NewHostLogger(host)
+		// Initialize host-dependent features
+		gainPlugin.PluginBase.InitWithHost(host)
 		
 		// Log plugin creation
-		if gainPlugin.logger != nil {
-			gainPlugin.logger.Info("Creating gain plugin instance")
+		if gainPlugin.Logger != nil {
+			gainPlugin.Logger.Info("Creating gain plugin instance")
 		}
 		
 		// Create a CGO handle to safely pass the Go object to C
@@ -66,8 +64,8 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 		fmt.Printf("Created plugin instance: %s, handle: %v\n", id, handle)
 		
 		// Log handle creation
-		if gainPlugin.logger != nil {
-			gainPlugin.logger.Debug(fmt.Sprintf("[ClapGo_CreatePlugin] Created handle: %v", handle))
+		if gainPlugin.Logger != nil {
+			gainPlugin.Logger.Debug(fmt.Sprintf("[ClapGo_CreatePlugin] Created handle: %v", handle))
 		}
 		
 		// Register as audio ports provider
@@ -134,18 +132,18 @@ func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the init call
-	if p.logger != nil {
-		p.logger.Debug("[ClapGo_PluginInit] Starting plugin initialization")
+	if p.Logger != nil {
+		p.Logger.Debug("[ClapGo_PluginInit] Starting plugin initialization")
 	}
 	
 	result := p.Init()
 	
 	// Log the result
-	if p.logger != nil {
+	if p.Logger != nil {
 		if result {
-			p.logger.Info("[ClapGo_PluginInit] Plugin initialization successful")
+			p.Logger.Info("[ClapGo_PluginInit] Plugin initialization successful")
 		} else {
-			p.logger.Error("[ClapGo_PluginInit] Plugin initialization failed")
+			p.Logger.Error("[ClapGo_PluginInit] Plugin initialization failed")
 		}
 	}
 	
@@ -168,8 +166,8 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 	p := handle.Value().(*GainPlugin)
 	
 	// Log the destroy call
-	if p.logger != nil {
-		p.logger.Debug(fmt.Sprintf("[ClapGo_PluginDestroy] Destroying plugin instance, handle: %v", handle))
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("[ClapGo_PluginDestroy] Destroying plugin instance, handle: %v", handle))
 	}
 	
 	p.Destroy()
@@ -178,8 +176,8 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 	api.UnregisterAudioPortsProvider(plugin)
 	
 	// Log completion
-	if p.logger != nil {
-		p.logger.Info("[ClapGo_PluginDestroy] Plugin instance destroyed successfully")
+	if p.Logger != nil {
+		p.Logger.Info("[ClapGo_PluginDestroy] Plugin instance destroyed successfully")
 	}
 	
 	handle.Delete()
@@ -193,19 +191,19 @@ func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the activate call
-	if p.logger != nil {
-		p.logger.Debug(fmt.Sprintf("[ClapGo_PluginActivate] Activating plugin - SR: %.0f, frames: %d-%d", 
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("[ClapGo_PluginActivate] Activating plugin - SR: %.0f, frames: %d-%d", 
 			float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
 	}
 	
 	result := p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
 	
 	// Log result
-	if p.logger != nil {
+	if p.Logger != nil {
 		if result {
-			p.logger.Info("[ClapGo_PluginActivate] Plugin activation successful")
+			p.Logger.Info("[ClapGo_PluginActivate] Plugin activation successful")
 		} else {
-			p.logger.Error("[ClapGo_PluginActivate] Plugin activation failed")
+			p.Logger.Error("[ClapGo_PluginActivate] Plugin activation failed")
 		}
 	}
 	
@@ -227,15 +225,15 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the deactivate call
-	if p.logger != nil {
-		p.logger.Debug("[ClapGo_PluginDeactivate] Deactivating plugin")
+	if p.Logger != nil {
+		p.Logger.Debug("[ClapGo_PluginDeactivate] Deactivating plugin")
 	}
 	
 	p.Deactivate()
 	
 	// Log completion
-	if p.logger != nil {
-		p.logger.Info("[ClapGo_PluginDeactivate] Plugin deactivation successful")
+	if p.Logger != nil {
+		p.Logger.Info("[ClapGo_PluginDeactivate] Plugin deactivation successful")
 	}
 }
 
@@ -258,18 +256,18 @@ func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the start processing call
-	if p.logger != nil {
-		p.logger.Debug("[ClapGo_PluginStartProcessing] Starting audio processing")
+	if p.Logger != nil {
+		p.Logger.Debug("[ClapGo_PluginStartProcessing] Starting audio processing")
 	}
 	
 	result := p.StartProcessing()
 	
 	// Log result
-	if p.logger != nil {
+	if p.Logger != nil {
 		if result {
-			p.logger.Info("[ClapGo_PluginStartProcessing] Audio processing started successfully")
+			p.Logger.Info("[ClapGo_PluginStartProcessing] Audio processing started successfully")
 		} else {
-			p.logger.Error("[ClapGo_PluginStartProcessing] Failed to start audio processing")
+			p.Logger.Error("[ClapGo_PluginStartProcessing] Failed to start audio processing")
 		}
 	}
 	
@@ -295,15 +293,15 @@ func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the stop processing call
-	if p.logger != nil {
-		p.logger.Debug("[ClapGo_PluginStopProcessing] Stopping audio processing")
+	if p.Logger != nil {
+		p.Logger.Debug("[ClapGo_PluginStopProcessing] Stopping audio processing")
 	}
 	
 	p.StopProcessing()
 	
 	// Log completion
-	if p.logger != nil {
-		p.logger.Info("[ClapGo_PluginStopProcessing] Audio processing stopped successfully")
+	if p.Logger != nil {
+		p.Logger.Info("[ClapGo_PluginStopProcessing] Audio processing stopped successfully")
 	}
 }
 
@@ -322,15 +320,15 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Log the reset call
-	if p.logger != nil {
-		p.logger.Debug("[ClapGo_PluginReset] Resetting plugin state")
+	if p.Logger != nil {
+		p.Logger.Debug("[ClapGo_PluginReset] Resetting plugin state")
 	}
 	
 	p.Reset()
 	
 	// Log completion
-	if p.logger != nil {
-		p.logger.Info("[ClapGo_PluginReset] Plugin reset successful")
+	if p.Logger != nil {
+		p.Logger.Info("[ClapGo_PluginReset] Plugin reset successful")
 	}
 }
 
@@ -371,7 +369,7 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 	)
 	
 	// Setup event pool logging
-	api.SetupPoolLogging(eventHandler, p.logger)
+	api.SetupPoolLogging(eventHandler, p.Logger)
 	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
@@ -407,7 +405,7 @@ func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
 		return 0
 	}
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.uint32_t(p.paramManager.GetParameterCount())
+	return C.uint32_t(p.ParamManager.Count())
 }
 
 //export ClapGo_PluginParamsGetInfo
@@ -418,13 +416,13 @@ func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info un
 	p := cgo.Handle(plugin).Value().(*GainPlugin)
 	
 	// Get parameter info from manager
-	paramInfo, err := p.paramManager.GetParameterInfoByIndex(uint32(index))
+	paramInfo, err := p.ParamManager.GetInfoByIndex(uint32(index))
 	if err != nil {
 		return C.bool(false)
 	}
 	
 	// Convert to C struct using helper
-	api.ParamInfoToC(paramInfo, info)
+	param.InfoToC(paramInfo, info)
 	
 	return C.bool(true)
 }
@@ -438,7 +436,7 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 	
 	// Get current value - read atomically from our gain storage
 	if uint32(paramID) == 0 {
-		*value = C.double(api.LoadParameterAtomic(&p.gain))
+		*value = C.double(p.gain.Load())
 		return C.bool(true)
 	}
 	
@@ -452,10 +450,17 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 	}
 	// For gain parameter, format as dB
 	if uint32(paramID) == 0 {
-		text := api.FormatParameterValue(float64(value), api.FormatDecibel)
+		text := param.FormatValue(float64(value), param.FormatDecibel)
 		
-		// Copy to C buffer using helper
-		api.CopyStringToCBuffer(text, unsafe.Pointer(buffer), int(size))
+		// Copy to C buffer manually
+		bytes := []byte(text)
+		if len(bytes) >= int(size) {
+			bytes = bytes[:size-1]
+		}
+		for i, b := range bytes {
+			*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
+		}
+		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
 		
 		return C.bool(true)
 	}
@@ -474,10 +479,10 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	
 	// For gain parameter, use the ParameterValueParser
 	if uint32(paramID) == 0 {
-		parser := api.NewParameterValueParser(api.FormatDecibel)
+		parser := param.NewParser(param.FormatDecibel)
 		if parsedValue, err := parser.ParseValue(goText); err == nil {
 			// Clamp to valid range for gain parameter
-			clamped := api.ClampValue(parsedValue, 0.0, 2.0)
+			clamped := param.ClampValue(parsedValue, 0.0, 2.0)
 			*value = C.double(clamped)
 			return C.bool(true)
 		}
@@ -500,93 +505,56 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 	}
 }
 
-// GainPlugin represents the gain plugin with atomic parameter storage
+// GainPlugin represents the gain plugin
 type GainPlugin struct {
-	api.NoOpEventHandler // Embed to get default no-op implementations
+	*plugin.PluginBase
 	
-	// Plugin state
-	sampleRate   float64
-	isActivated  bool
-	isProcessing bool
-	host         unsafe.Pointer
+	// Plugin-specific parameters
+	gain param.AtomicFloat64
 	
-	// Parameters with atomic storage for thread safety
-	gain         int64  // atomic storage for gain value
-	
-	// Parameter management using our new abstraction
-	paramManager *api.ParameterManager
-	
-	// State management
-	stateManager *api.StateManager
-	
-	// Host utilities
-	logger       *api.HostLogger
-	trackInfo    *api.HostTrackInfo
-	threadCheck  *api.ThreadChecker
+	// Legacy fields (to be removed in future phases)
 	contextMenuProvider *api.DefaultContextMenuProvider
-	
-	// Event pool diagnostics
-	poolDiagnostics api.EventPoolDiagnostics
-	
-	// Latency in samples (for this example, gain has no latency)
-	latency uint32
+	poolDiagnostics     api.EventPoolDiagnostics
+	latency             uint32
 }
+
 
 // NewGainPlugin creates a new gain plugin instance
 func NewGainPlugin() *GainPlugin {
-	plugin := &GainPlugin{
-		sampleRate:   44100.0,
-		isActivated:  false,
-		isProcessing: false,
-		paramManager: api.NewParameterManager(),
-		stateManager: api.NewStateManager(PluginID, PluginName, api.StateVersion1),
+	// Create plugin with base
+	p := &GainPlugin{
+		PluginBase: plugin.NewPluginBase(plugin.Info{
+			ID:          PluginID,
+			Name:        PluginName,
+			Vendor:      PluginVendor,
+			Version:     PluginVersion,
+			Description: PluginDescription,
+			URL:         "https://github.com/justyntemme/clapgo",
+			Manual:      "https://github.com/justyntemme/clapgo",
+			Support:     "https://github.com/justyntemme/clapgo/issues",
+			Features:    []string{plugin.FeatureAudioEffect, plugin.FeatureStereo, plugin.FeatureUtility},
+		}),
 	}
 	
 	// Set default gain to 1.0 (0dB)
-	atomic.StoreInt64(&plugin.gain, int64(api.FloatToBits(1.0)))
+	p.gain.Store(1.0)
 	
-	// Register parameters using helper function
-	plugin.paramManager.RegisterParameter(api.CreateVolumeParameter(0, "Gain"))
-	plugin.paramManager.SetParameterValue(0, 1.0)
+	// Register gain parameter
+	p.ParamManager.Register(param.Volume(ParamGain, "Gain"))
+	p.ParamManager.SetValue(ParamGain, 1.0)
 	
-	return plugin
+	return p
 }
 
 // Init initializes the plugin
 func (p *GainPlugin) Init() bool {
-	// Mark this as main thread for debug builds
-	api.DebugSetMainThread()
-	
-	// Initialize thread checker
-	if p.host != nil {
-		p.threadCheck = api.NewThreadChecker(p.host)
-		if p.threadCheck.IsAvailable() && p.logger != nil {
-			p.logger.Info("Thread Check extension available - thread safety validation enabled")
-		}
-	}
-	
-	// Initialize track info helper
-	if p.host != nil {
-		p.trackInfo = api.NewHostTrackInfo(p.host)
-	}
-	
-	// Initialize context menu provider
-	if p.host != nil {
-		p.contextMenuProvider = api.NewDefaultContextMenuProvider(
-			p.paramManager,
-			"Gain Plugin",
-			"1.0.0",
-			p.host,
-		)
-		p.contextMenuProvider.SetAboutMessage("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
-	}
-	
-	if p.logger != nil {
-		p.logger.Debug("Gain plugin initialized")
+	// Initialize base functionality
+	if !p.PluginBase.CommonInit() {
+		return false
 	}
 	
 	// Check initial track info
-	if p.trackInfo != nil {
+	if p.TrackInfo != nil {
 		p.OnTrackInfoChanged()
 	}
 	
@@ -595,74 +563,52 @@ func (p *GainPlugin) Init() bool {
 
 // Destroy cleans up plugin resources
 func (p *GainPlugin) Destroy() {
-	// Assert main thread
-	api.DebugAssertMainThread("GainPlugin.Destroy")
-	if p.threadCheck != nil {
-		p.threadCheck.AssertMainThread("GainPlugin.Destroy")
-	}
-	
-	// Nothing to clean up in the plugin itself
+	p.PluginBase.CommonDestroy()
 }
 
 // Activate prepares the plugin for processing
 func (p *GainPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
-	// Assert main thread
-	api.DebugAssertMainThread("GainPlugin.Activate")
-	if p.threadCheck != nil {
-		p.threadCheck.AssertMainThread("GainPlugin.Activate")
-	}
-	
-	p.sampleRate = sampleRate
-	p.isActivated = true
-	
-	if p.logger != nil {
-		p.logger.Info(fmt.Sprintf("Plugin activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
-	}
-	
-	return true
+	return p.PluginBase.CommonActivate(sampleRate, minFrames, maxFrames)
 }
 
 // Deactivate stops the plugin from processing
 func (p *GainPlugin) Deactivate() {
-	p.isActivated = false
+	p.PluginBase.CommonDeactivate()
 }
 
 // StartProcessing begins audio processing
 func (p *GainPlugin) StartProcessing() bool {
 	// Assert audio thread
 	api.DebugAssertAudioThread("GainPlugin.StartProcessing")
-	if p.threadCheck != nil {
-		p.threadCheck.AssertAudioThread("GainPlugin.StartProcessing")
+	if p.ThreadCheck != nil {
+		p.ThreadCheck.AssertAudioThread("GainPlugin.StartProcessing")
 	}
 	
-	if !p.isActivated {
-		return false
-	}
-	p.isProcessing = true
-	return true
+	return p.PluginBase.CommonStartProcessing()
 }
 
 // StopProcessing ends audio processing
 func (p *GainPlugin) StopProcessing() {
-	p.isProcessing = false
+	p.PluginBase.CommonStopProcessing()
 }
 
 // Reset resets the plugin state
 func (p *GainPlugin) Reset() {
+	p.PluginBase.CommonReset()
 	// Reset gain to default
-	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(1.0)))
+	p.gain.Store(1.0)
 }
 
 // Process processes audio data using the new abstractions
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
 	// Assert audio thread
 	api.DebugAssertAudioThread("GainPlugin.Process")
-	if p.threadCheck != nil {
-		p.threadCheck.AssertAudioThread("GainPlugin.Process")
+	if p.ThreadCheck != nil {
+		p.ThreadCheck.AssertAudioThread("GainPlugin.Process")
 	}
 	
 	// Check if we're in a valid state for processing
-	if !p.isActivated || !p.isProcessing {
+	if !p.IsActivated || !p.IsProcessing {
 		return api.ProcessError
 	}
 	
@@ -672,33 +618,14 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	}
 	
 	// Get current gain value atomically
-	gain := api.LoadParameterAtomic(&p.gain)
+	gain := float32(p.gain.Load())
 	
-	// If no audio inputs or outputs, nothing to do
-	if len(audioIn) == 0 || len(audioOut) == 0 {
-		return api.ProcessContinue
-	}
-	
-	// Get the number of channels (use min of input and output)
-	numChannels := len(audioIn)
-	if len(audioOut) < numChannels {
-		numChannels = len(audioOut)
-	}
-	
-	// Process audio - apply gain to each sample
-	for ch := 0; ch < numChannels; ch++ {
-		inChannel := audioIn[ch]
-		outChannel := audioOut[ch]
-		
-		// Make sure we have enough buffer space
-		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			continue // Skip this channel if buffer is too small
+	// Process audio using new audio package - much simpler!
+	if err := audio.Process(audio.Buffer(audioOut), audio.Buffer(audioIn), gain); err != nil {
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Audio processing error: %v", err))
 		}
-		
-		// Apply gain to each sample
-		for i := uint32(0); i < framesCount; i++ {
-			outChannel[i] = inChannel[i] * float32(gain)
-		}
+		return api.ProcessError
 	}
 	
 	return api.ProcessContinue
@@ -710,36 +637,48 @@ func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
 		return
 	}
 	
-	// Use the zero-allocation ProcessTypedEvents method instead of ProcessAllEvents
+	// Use the zero-allocation ProcessTypedEvents method
 	events.ProcessTypedEvents(p)
 }
 
-// TypedEventHandler implementation for zero-allocation event processing
-
-// HandleParamValue handles parameter value changes
-func (p *GainPlugin) HandleParamValue(event *api.ParamValueEvent, time uint32) {
+// HandleParamValue handles parameter value changes (overrides NoOpHandler)
+func (p *GainPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint32) {
 	// Handle the parameter change based on its ID
-	switch event.ParamID {
-	case 0: // Gain parameter
+	switch paramEvent.ParamID {
+	case ParamGain:
 		// Clamp value to valid range
-		value := api.ClampValue(event.Value, 0.0, 2.0)
+		value := param.ClampValue(paramEvent.Value, 0.0, 2.0)
 		
-		// Update both atomic storage and parameter manager
-		api.UpdateParameterAtomic(&p.gain, value, p.paramManager, event.ParamID)
+		// Update atomic storage and parameter manager
+		p.gain.Store(value)
+		if err := p.ParamManager.SetValue(paramEvent.ParamID, value); err != nil {
+			if p.Logger != nil {
+				p.Logger.Warning(fmt.Sprintf("Failed to set parameter %d: %v", paramEvent.ParamID, err))
+			}
+		}
 		
 		// Log the parameter change
-		if p.logger != nil {
-			// Convert to dB for logging
-			db := 20.0 * math.Log10(value)
-			p.logger.Debug(fmt.Sprintf("Gain changed to %.2f dB", db))
+		if p.Logger != nil {
+			// Convert to dB for logging using audio package
+			db := audio.LinearToDb(value)
+			p.Logger.Debug(fmt.Sprintf("Gain changed to %.2f dB", db))
 		}
 	}
 }
 
-// The following event handlers are inherited from api.NoOpEventHandler:
-// HandleParamMod, HandleParamGestureBegin, HandleParamGestureEnd,
-// HandleNoteOn, HandleNoteOff, HandleNoteChoke, HandleNoteEnd,
-// HandleNoteExpression, HandleTransport, HandleMIDI, HandleMIDISysex, HandleMIDI2
+// No-op event handlers (gain plugin doesn't process these events)
+func (p *GainPlugin) HandleParamMod(e *api.ParamModEvent, time uint32) {}
+func (p *GainPlugin) HandleParamGestureBegin(e *api.ParamGestureEvent, time uint32) {}
+func (p *GainPlugin) HandleParamGestureEnd(e *api.ParamGestureEvent, time uint32) {}
+func (p *GainPlugin) HandleNoteOn(e *api.NoteEvent, time uint32) {}
+func (p *GainPlugin) HandleNoteOff(e *api.NoteEvent, time uint32) {}
+func (p *GainPlugin) HandleNoteChoke(e *api.NoteEvent, time uint32) {}
+func (p *GainPlugin) HandleNoteEnd(e *api.NoteEvent, time uint32) {}
+func (p *GainPlugin) HandleNoteExpression(e *api.NoteExpressionEvent, time uint32) {}
+func (p *GainPlugin) HandleTransport(e *api.TransportEvent, time uint32) {}
+func (p *GainPlugin) HandleMIDI(e *api.MIDIEvent, time uint32) {}
+func (p *GainPlugin) HandleMIDISysex(e *api.MIDISysexEvent, time uint32) {}
+func (p *GainPlugin) HandleMIDI2(e *api.MIDI2Event, time uint32) {}
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
@@ -806,41 +745,41 @@ func (p *GainPlugin) OnTimer(timerID uint64) {
 
 // OnTrackInfoChanged is called when the track information changes
 func (p *GainPlugin) OnTrackInfoChanged() {
-	if p.trackInfo == nil {
+	if p.TrackInfo == nil {
 		return
 	}
 	
 	// Get the new track information
-	info, ok := p.trackInfo.GetTrackInfo()
+	info, ok := p.TrackInfo.GetTrackInfo()
 	if !ok {
-		if p.logger != nil {
-			p.logger.Warning("Failed to get track info")
+		if p.Logger != nil {
+			p.Logger.Warning("Failed to get track info")
 		}
 		return
 	}
 	
 	// Log the track information
-	if p.logger != nil {
-		p.logger.Info(fmt.Sprintf("Track info changed:"))
+	if p.Logger != nil {
+		p.Logger.Info(fmt.Sprintf("Track info changed:"))
 		if info.Flags&api.TrackInfoHasTrackName != 0 {
-			p.logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
+			p.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
 		}
 		if info.Flags&api.TrackInfoHasTrackColor != 0 {
-			p.logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
+			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
 				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
 		}
 		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
-			p.logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
+			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
 				info.AudioChannelCount, info.AudioPortType))
 		}
 		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
-			p.logger.Info("  This is a return track")
+			p.Logger.Info("  This is a return track")
 		}
 		if info.Flags&api.TrackInfoIsForBus != 0 {
-			p.logger.Info("  This is a bus track")
+			p.Logger.Info("  This is a bus track")
 		}
 		if info.Flags&api.TrackInfoIsForMaster != 0 {
-			p.logger.Info("  This is the master track")
+			p.Logger.Info("  This is the master track")
 		}
 	}
 	
@@ -891,14 +830,14 @@ func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, act
 	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
 		// For gain parameter, also update atomic value
 		if paramID == 0 {
-			atomic.StoreInt64(&p.gain, int64(api.FloatToBits(1.0)))
+			p.gain.Store(1.0)
 		}
 		return p.contextMenuProvider.HandleResetParameter(paramID)
 	}
 	
 	if p.contextMenuProvider.IsAboutAction(actionID) {
-		if p.logger != nil {
-			p.logger.Info("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
+		if p.Logger != nil {
+			p.Logger.Info("Gain Plugin v1.0.0 - A simple gain adjustment plugin")
 		}
 		return true
 	}
@@ -919,8 +858,8 @@ func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, act
 	}
 	
 	// Apply preset value
-	p.paramManager.SetParameterValue(0, value)
-	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
+	p.ParamManager.SetValue(0, value)
+	p.gain.Store(value)
 	// TODO: Request parameter flush to notify host
 	return true
 }
@@ -958,14 +897,14 @@ func (p *GainPlugin) OnParamMappingSet(paramID uint32, hasMapping bool, color *a
 	api.DebugAssertMainThread("GainPlugin.OnParamMappingSet")
 	
 	// Log the mapping change
-	if p.logger != nil {
+	if p.Logger != nil {
 		if hasMapping {
-			p.logger.Info(fmt.Sprintf("Parameter %d mapped to %s: %s", paramID, label, description))
+			p.Logger.Info(fmt.Sprintf("Parameter %d mapped to %s: %s", paramID, label, description))
 			if color != nil {
-				p.logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
+				p.Logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
 			}
 		} else {
-			p.logger.Info(fmt.Sprintf("Parameter %d mapping cleared", paramID))
+			p.Logger.Info(fmt.Sprintf("Parameter %d mapping cleared", paramID))
 		}
 	}
 	
@@ -978,7 +917,7 @@ func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32
 	api.DebugAssertMainThread("GainPlugin.OnParamAutomationSet")
 	
 	// Log the automation state change
-	if p.logger != nil {
+	if p.Logger != nil {
 		var stateStr string
 		switch automationState {
 		case api.ParamIndicationAutomationNone:
@@ -995,9 +934,9 @@ func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32
 			stateStr = "Unknown"
 		}
 		
-		p.logger.Info(fmt.Sprintf("Parameter %d automation state: %s", paramID, stateStr))
+		p.Logger.Info(fmt.Sprintf("Parameter %d automation state: %s", paramID, stateStr))
 		if color != nil {
-			p.logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
+			p.Logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
 		}
 	}
 	
@@ -1008,10 +947,25 @@ func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32
 func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
 	out := api.NewOutputStream(stream)
 	
-	// Use state manager to save parameters
-	if err := p.stateManager.SaveParametersToStream(out, p.paramManager); err != nil {
-		if p.logger != nil {
-			p.logger.Error(fmt.Sprintf("Failed to save state: %v", err))
+	// Create state with current parameter values
+	params := []state.Parameter{
+		{ID: ParamGain, Value: p.gain.Load(), Name: "gain"},
+	}
+	stateData := p.StateManager.CreateState(params, nil)
+	
+	// Convert to JSON and save
+	jsonData, err := p.StateManager.SaveToJSON(stateData)
+	if err != nil {
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Failed to serialize state: %v", err))
+		}
+		return false
+	}
+	
+	// Write JSON data as string to stream
+	if err := out.WriteString(string(jsonData)); err != nil {
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Failed to write state: %v", err))
 		}
 		return false
 	}
@@ -1023,17 +977,39 @@ func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
 func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 	in := api.NewInputStream(stream)
 	
-	// Use state manager to load parameters
-	if err := p.stateManager.LoadParametersFromStream(in, p.paramManager); err != nil {
-		if p.logger != nil {
-			p.logger.Error(fmt.Sprintf("Failed to load state: %v", err))
+	// Read JSON data as string from stream
+	jsonString, err := in.ReadString()
+	if err != nil {
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Failed to read state data: %v", err))
 		}
 		return false
 	}
 	
-	// Update internal state for the gain parameter
-	value := p.paramManager.GetParameterValue(0)
-	atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
+	// Load and validate state
+	stateData, err := p.StateManager.LoadFromJSON([]byte(jsonString))
+	if err != nil {
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Failed to deserialize state: %v", err))
+		}
+		return false
+	}
+	
+	// Apply loaded parameters
+	for _, param := range stateData.Parameters {
+		if param.ID == ParamGain {
+			p.gain.Store(param.Value)
+			if err := p.ParamManager.SetValue(param.ID, param.Value); err != nil {
+				if p.Logger != nil {
+					p.Logger.Warning(fmt.Sprintf("Failed to set parameter %d: %v", param.ID, err))
+				}
+			}
+		}
+	}
+	
+	// Get the loaded gain value
+	value := p.gain.Load()
+	p.gain.Store(value)
 	
 	return true
 }
@@ -1041,16 +1017,16 @@ func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 // SaveStateWithContext saves the plugin state to a stream with context
 func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
 	// Log the context type
-	if p.logger != nil {
+	if p.Logger != nil {
 		switch contextType {
 		case api.StateContextForPreset:
-			p.logger.Info("Saving state for preset")
+			p.Logger.Info("Saving state for preset")
 		case api.StateContextForDuplicate:
-			p.logger.Info("Saving state for duplicate")
+			p.Logger.Info("Saving state for duplicate")
 		case api.StateContextForProject:
-			p.logger.Info("Saving state for project")
+			p.Logger.Info("Saving state for project")
 		default:
-			p.logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
+			p.Logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
 		}
 	}
 	
@@ -1062,16 +1038,16 @@ func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uin
 // LoadStateWithContext loads the plugin state from a stream with context
 func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
 	// Log the context type
-	if p.logger != nil {
+	if p.Logger != nil {
 		switch contextType {
 		case api.StateContextForPreset:
-			p.logger.Info("Loading state for preset")
+			p.Logger.Info("Loading state for preset")
 		case api.StateContextForDuplicate:
-			p.logger.Info("Loading state for duplicate")
+			p.Logger.Info("Loading state for duplicate")
 		case api.StateContextForProject:
-			p.logger.Info("Loading state for project")
+			p.Logger.Info("Loading state for project")
 		default:
-			p.logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
+			p.Logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
 		}
 	}
 	
@@ -1080,89 +1056,11 @@ func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uin
 	return p.LoadState(stream)
 }
 
-// LoadPresetFromLocation loads a preset from the specified location
+// LoadPresetFromLocation - preset loading is handled externally via JSON files
 func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) bool {
-	// Log the preset load request
-	if p.logger != nil {
-		switch locationKind {
-		case api.PresetLocationFile:
-			p.logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", location, loadKey))
-		case api.PresetLocationPlugin:
-			p.logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKey))
-		default:
-			p.logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
-			return false
-		}
-	}
-	
-	// Handle different location kinds
-	switch locationKind {
-	case api.PresetLocationFile:
-		// Load preset from file
-		if location == "" {
-			return false
-		}
-		
-		// Use state manager to load preset
-		metadata, customData, err := p.stateManager.LoadPresetFromFile(location, p.paramManager)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to load preset file: %v", err))
-			}
-			return false
-		}
-		
-		// Update internal state for the gain parameter
-		value := p.paramManager.GetParameterValue(0)
-		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
-		
-		if p.logger != nil {
-			p.logger.Info(fmt.Sprintf("Preset '%s' loaded: gain = %.2f", metadata.Name, value))
-		}
-		
-		// Handle any custom data if needed
-		_ = customData
-		
-		return true
-		
-	case api.PresetLocationPlugin:
-		// Load bundled preset from embedded files
-		presetPath := filepath.Join("presets", "factory", loadKey+".json")
-		
-		// Read from embedded filesystem
-		presetData, err := factoryPresets.ReadFile(presetPath)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to load bundled preset '%s': %v", loadKey, err))
-			}
-			return false
-		}
-		
-		// Use state manager to load preset
-		metadata, customData, err := p.stateManager.LoadPreset(presetData, p.paramManager)
-		if err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
-			}
-			return false
-		}
-		
-		// Update internal state for the gain parameter
-		value := p.paramManager.GetParameterValue(0)
-		atomic.StoreInt64(&p.gain, int64(api.FloatToBits(value)))
-		
-		if p.logger != nil {
-			p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded: gain = %.2f", metadata.Name, value))
-		}
-		
-		// Handle any custom data if needed
-		_ = customData
-		
-		return true
-		
-	default:
-		return false
-	}
+	// Presets are handled externally by the host via JSON files
+	// The plugin doesn't need to implement preset loading
+	return false
 }
 
 // Helper functions for atomic float64 operations

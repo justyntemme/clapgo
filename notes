@@ -1,0 +1,18 @@
+ pkg/param domain package with atomic operations and manager
+ pkg/event domain package with handler and processor
+ pkg/state domain package with save/load functionality
+ pkg/audio domain package with buffer operations
+ pkg/plugin domain package with base implementation
+ pkg/host domain package with logger and extensions
+
+   1. Phase 1: Remove embedded preset loading (Lines 39-41 + preset methods) - 45 lines saved
+  2. Phase 2: Consolidate 447 lines of export functions into a single dispatcher - 400 lines saved
+  3. Phase 3: Extract common plugin fields to plugin.Base - 25 lines saved
+  4. Phase 4: Remove redundant event handler (keep only HandleParamValue) - 70 lines saved
+  5. Phase 5: Simplify constructor from 75 to 10 lines - 65 lines saved
+  6. Phase 6: Replace all boilerplate methods with domain package calls - 460 lines saved
+    - Process helpers → audio.ProcessStereo()
+    - Parameter methods → p.ParamManager delegations
+    - State methods → p.StateManager.Save/Load()
+    - Audio ports → audio.StereoPortProvider
+    - Lifecycle methods → Base implementations
