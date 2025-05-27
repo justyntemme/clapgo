@@ -34,30 +34,6 @@ func (d *EventPoolDiagnostics) LogPoolDiagnostics(processor *EventProcessor, int
 	}
 }
 
-// NoOpEventHandler provides default no-op implementations for all event handler methods
-// Embed this struct in your plugin to avoid implementing unused methods
-type NoOpEventHandler struct{}
-
-// Parameter events
-func (h *NoOpEventHandler) HandleParamValue(event *ParamValueEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleParamMod(event *ParamModEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleParamGestureBegin(event *ParamGestureEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleParamGestureEnd(event *ParamGestureEvent, time uint32) {}
-
-// Note events
-func (h *NoOpEventHandler) HandleNoteOn(event *NoteEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleNoteOff(event *NoteEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleNoteChoke(event *NoteEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleNoteEnd(event *NoteEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleNoteExpression(event *NoteExpressionEvent, time uint32) {}
-
-// Transport events
-func (h *NoOpEventHandler) HandleTransport(event *TransportEvent, time uint32) {}
-
-// MIDI events
-func (h *NoOpEventHandler) HandleMIDI(event *MIDIEvent, time uint32) {}
-func (h *NoOpEventHandler) HandleMIDI2(event *MIDI2Event, time uint32) {}
-func (h *NoOpEventHandler) HandleMIDISysex(event *MIDISysexEvent, time uint32) {}
 
 // UpdateParameterAtomic updates both atomic storage and parameter manager
 // This ensures thread-safe parameter updates visible to both audio thread and host
@@ -115,18 +91,18 @@ func ProcessStandardMIDI(event *MIDIEvent, handler TypedEventHandler, time uint3
 	switch status {
 	case 0x90: // Note On
 		if event.Data[2] > 0 {
-			if noteOn := MIDIToNoteOn(event.Data, event.Port, channel); noteOn != nil {
+			if noteOn := MIDIToNoteOn(event.Data, int16(event.Port), channel); noteOn != nil {
 				handler.HandleNoteOn(noteOn, time)
 			}
 		} else {
 			// Velocity 0 means note off
-			if noteOff := MIDIToNoteOff(event.Data, event.Port, channel); noteOff != nil {
+			if noteOff := MIDIToNoteOff(event.Data, int16(event.Port), channel); noteOff != nil {
 				handler.HandleNoteOff(noteOff, time)
 			}
 		}
 		
 	case 0x80: // Note Off
-		if noteOff := MIDIToNoteOff(event.Data, event.Port, channel); noteOff != nil {
+		if noteOff := MIDIToNoteOff(event.Data, int16(event.Port), channel); noteOff != nil {
 			handler.HandleNoteOff(noteOff, time)
 		}
 		

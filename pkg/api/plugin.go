@@ -122,66 +122,49 @@ type EventHandler interface {
 	ProcessTypedEvents(handler TypedEventHandler)
 }
 
-// TypedEventHandler provides callbacks for each event type.
-// Plugins can implement this interface to handle specific event types.
+// TypedEventHandler processes events with type-specific methods
 type TypedEventHandler interface {
-	// HandleParamValue handles parameter value changes.
+	// Parameter events
 	HandleParamValue(event *ParamValueEvent, time uint32)
-
-	// HandleParamMod handles parameter modulation events.
 	HandleParamMod(event *ParamModEvent, time uint32)
-
-	// HandleParamGestureBegin handles parameter gesture begin events.
 	HandleParamGestureBegin(event *ParamGestureEvent, time uint32)
-
-	// HandleParamGestureEnd handles parameter gesture end events.
 	HandleParamGestureEnd(event *ParamGestureEvent, time uint32)
-
-	// HandleNoteOn handles note on events.
+	
+	// Note events
 	HandleNoteOn(event *NoteEvent, time uint32)
-
-	// HandleNoteOff handles note off events.
 	HandleNoteOff(event *NoteEvent, time uint32)
-
-	// HandleNoteChoke handles note choke events.
 	HandleNoteChoke(event *NoteEvent, time uint32)
-
-	// HandleNoteEnd handles note end events.
 	HandleNoteEnd(event *NoteEvent, time uint32)
-
-	// HandleNoteExpression handles note expression events.
 	HandleNoteExpression(event *NoteExpressionEvent, time uint32)
-
-	// HandleTransport handles transport events.
+	
+	// Transport events
 	HandleTransport(event *TransportEvent, time uint32)
-
-	// HandleMIDI handles MIDI 1.0 events.
+	
+	// MIDI events
 	HandleMIDI(event *MIDIEvent, time uint32)
-
-	// HandleMIDISysex handles MIDI system exclusive events.
-	HandleMIDISysex(event *MIDISysexEvent, time uint32)
-
-	// HandleMIDI2 handles MIDI 2.0 events.
 	HandleMIDI2(event *MIDI2Event, time uint32)
+	HandleMIDISysex(event *MIDISysexEvent, time uint32)
 }
 
-// BaseTypedEventHandler provides default no-op implementations for all event handlers.
-// Plugins can embed this struct and override only the methods they need.
-type BaseTypedEventHandler struct{}
+// NoOpEventHandler provides default no-op implementations for all event handler methods
+type NoOpEventHandler struct{}
 
-func (b *BaseTypedEventHandler) HandleParamValue(event *ParamValueEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleParamMod(event *ParamModEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleParamGestureBegin(event *ParamGestureEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleParamGestureEnd(event *ParamGestureEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleNoteOn(event *NoteEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleNoteOff(event *NoteEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleNoteChoke(event *NoteEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleNoteEnd(event *NoteEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleNoteExpression(event *NoteExpressionEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleTransport(event *TransportEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleMIDI(event *MIDIEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleMIDISysex(event *MIDISysexEvent, time uint32) {}
-func (b *BaseTypedEventHandler) HandleMIDI2(event *MIDI2Event, time uint32) {}
+func (h *NoOpEventHandler) HandleParamValue(event *ParamValueEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleParamMod(event *ParamModEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleParamGestureBegin(event *ParamGestureEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleParamGestureEnd(event *ParamGestureEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleNoteOn(event *NoteEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleNoteOff(event *NoteEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleNoteChoke(event *NoteEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleNoteEnd(event *NoteEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleNoteExpression(event *NoteExpressionEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleTransport(event *TransportEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleMIDI(event *MIDIEvent, time uint32) {}
+func (h *NoOpEventHandler) HandleMIDI2(event *MIDI2Event, time uint32) {}
+func (h *NoOpEventHandler) HandleMIDISysex(event *MIDISysexEvent, time uint32) {}
+
+// BaseTypedEventHandler is deprecated - use NoOpEventHandler
+type BaseTypedEventHandler = NoOpEventHandler
 
 // Event represents an event in the CLAP processing context.
 type Event struct {
@@ -198,91 +181,85 @@ type Event struct {
 	Data interface{}
 }
 
-// ParamValueEvent represents a parameter value change event.
+// ParamValueEvent represents a parameter value change event
 type ParamValueEvent struct {
-	// ParamID is the ID of the parameter being changed
 	ParamID uint32
-
-	// Cookie is an opaque pointer to plugin-specific data
-	Cookie unsafe.Pointer
-
-	// NoteID is the note ID if the parameter is associated with a note (-1 for wildcard)
-	NoteID int32
-
-	// Port is the port index if the parameter is associated with a port (-1 for wildcard)
-	Port int16
-
-	// Channel is the channel index if the parameter is associated with a channel (-1 for wildcard)
+	Cookie  unsafe.Pointer
+	NoteID  int32
+	Port    int16
 	Channel int16
-
-	// Key is the key number if the parameter is associated with a key (-1 for wildcard)
-	Key int16
-
-	// Value is the new parameter value
-	Value float64
+	Key     int16
+	Value   float64
 }
 
-// ParamModEvent represents a parameter modulation event.
+// ParamModEvent represents a parameter modulation event
 type ParamModEvent struct {
-	// ParamID is the ID of the parameter being modulated
 	ParamID uint32
-
-	// Cookie is an opaque pointer to plugin-specific data
-	Cookie unsafe.Pointer
-
-	// NoteID is the note ID if the parameter is associated with a note (-1 for wildcard)
-	NoteID int32
-
-	// Port is the port index if the parameter is associated with a port (-1 for wildcard)
-	Port int16
-
-	// Channel is the channel index if the parameter is associated with a channel (-1 for wildcard)
+	Cookie  unsafe.Pointer
+	NoteID  int32
+	Port    int16
 	Channel int16
-
-	// Key is the key number if the parameter is associated with a key (-1 for wildcard)
-	Key int16
-
-	// Amount is the modulation amount
-	Amount float64
+	Key     int16
+	Amount  float64
 }
 
-// NoteEvent represents a note event (note on, note off, choke, end).
+// NoteEvent represents a note event (note on, note off, choke, end)
 type NoteEvent struct {
-	// NoteID is a unique identifier for the note instance (-1 for unspecified/wildcard)
-	NoteID int32
-
-	// Port is the port index (-1 for wildcard)
-	Port int16
-
-	// Channel is the channel index (0-15, -1 for wildcard)
-	Channel int16
-
-	// Key is the note key (0-127, -1 for wildcard)
-	Key int16
-
-	// Velocity is the note velocity (0.0 to 1.0)
+	NoteID   int32
+	Port     int16
+	Channel  int16
+	Key      int16
 	Velocity float64
 }
 
-// NoteExpressionEvent represents a note expression event.
+// NoteExpressionEvent represents a note expression event
 type NoteExpressionEvent struct {
-	// ExpressionID is the type of expression (see NoteExpression* constants)
 	ExpressionID int32
+	NoteID       int32
+	Port         int16
+	Channel      int16
+	Key          int16
+	Value        float64
+}
 
-	// NoteID is the note ID to target (-1 for wildcard)
-	NoteID int32
+// ParamGestureEvent represents parameter gesture begin/end events
+type ParamGestureEvent struct {
+	ParamID uint32
+}
 
-	// Port is the port index to target (-1 for wildcard)
+// TransportEvent represents transport state changes
+type TransportEvent struct {
+	Flags                uint32
+	SongPosBeats         uint64
+	SongPosSeconds       uint64
+	Tempo                float64
+	TempoInc             float64
+	LoopStartBeats       uint64
+	LoopEndBeats         uint64
+	LoopStartSeconds     uint64
+	LoopEndSeconds       uint64
+	BarStart             uint64
+	BarNumber            int32
+	TimeSignatureNum     uint16
+	TimeSignatureDen     uint16
+}
+
+// MIDIEvent represents MIDI 1.0 events
+type MIDIEvent struct {
 	Port int16
+	Data [3]byte
+}
 
-	// Channel is the channel to target (-1 for wildcard)
-	Channel int16
+// MIDISysexEvent represents MIDI system exclusive events
+type MIDISysexEvent struct {
+	Port int16
+	Data []byte
+}
 
-	// Key is the key to target (-1 for wildcard)
-	Key int16
-
-	// Value is the expression value (range depends on expression type)
-	Value float64
+// MIDI2Event represents MIDI 2.0 events
+type MIDI2Event struct {
+	Port int16
+	Data [4]uint32
 }
 
 // Process status codes and event types are defined in constants.go

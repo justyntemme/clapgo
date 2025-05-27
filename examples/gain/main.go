@@ -129,6 +129,7 @@ func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
 	events.ProcessTypedEvents(p)
 }
 
+// HandleParamValue handles parameter value changes (implements api.TypedEventHandler)
 func (p *GainPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint32) {
 	switch paramEvent.ParamID {
 	case ParamGain:
