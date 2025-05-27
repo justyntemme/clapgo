@@ -30,7 +30,6 @@ import (
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
-	"github.com/justyntemme/clapgo/pkg/state"
 )
 
 
@@ -195,8 +194,6 @@ type GainPlugin struct {
 	
 	// Legacy fields (to be removed in future phases)
 	contextMenuProvider *api.DefaultContextMenuProvider
-	poolDiagnostics     api.EventPoolDiagnostics
-	latency             uint32
 }
 
 
@@ -225,6 +222,14 @@ func NewGainPlugin() *GainPlugin {
 	// Register gain parameter
 	p.ParamManager.Register(param.Volume(ParamGain, "Gain"))
 	p.ParamManager.SetValue(ParamGain, 1.0)
+	
+	// Initialize context menu provider for common menu functionality
+	p.contextMenuProvider = api.NewDefaultContextMenuProvider(
+		nil, // We'll handle param manager ourselves
+		PluginName,
+		PluginVersion,
+		nil, // Host will be set later
+	)
 	
 	return p
 }
@@ -523,7 +528,7 @@ func (p *GainPlugin) ProcessWithHandle(process unsafe.Pointer) int {
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
 	
 	// Log event pool diagnostics periodically (every 1000 calls)
-	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
+	p.PoolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
 	
 	return result
 }
@@ -697,84 +702,18 @@ func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
 	}
 }
 
-// OnMainThread is called on the main thread
-func (p *GainPlugin) OnMainThread() {
-	// Nothing to do
-}
+// OnMainThread is provided by PluginBase
 
-// GetPluginID returns the plugin ID
-func (p *GainPlugin) GetPluginID() string {
-	return PluginID
-}
+// GetPluginID is provided by PluginBase
 
-// GetLatency returns the plugin's latency in samples
-func (p *GainPlugin) GetLatency() uint32 {
-	// Check main thread (latency is queried on main thread)
-	api.DebugAssertMainThread("GainPlugin.GetLatency")
-	
-	// For this simple gain plugin, we have no latency
-	// In a real plugin with lookahead or FFT processing, this would return
-	// the actual latency in samples
-	return p.latency
-}
+// GetLatency is provided by PluginBase (returns 0)
 
-// GetTail returns the plugin's tail length in samples
-func (p *GainPlugin) GetTail() uint32 {
-	// Gain plugin has no tail (no reverb/delay)
-	return 0
-}
+// GetTail is provided by PluginBase (returns 0)
 
-// OnTimer handles timer callbacks
-func (p *GainPlugin) OnTimer(timerID uint64) {
-	// Gain plugin doesn't use timers
-	// This is here as an example implementation
-}
+// OnTimer is provided by PluginBase
 
-// OnTrackInfoChanged is called when the track information changes
-func (p *GainPlugin) OnTrackInfoChanged() {
-	if p.TrackInfo == nil {
-		return
-	}
-	
-	// Get the new track information
-	info, ok := p.TrackInfo.GetTrackInfo()
-	if !ok {
-		if p.Logger != nil {
-			p.Logger.Warning("Failed to get track info")
-		}
-		return
-	}
-	
-	// Log the track information
-	if p.Logger != nil {
-		p.Logger.Info(fmt.Sprintf("Track info changed:"))
-		if info.Flags&api.TrackInfoHasTrackName != 0 {
-			p.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
-		}
-		if info.Flags&api.TrackInfoHasTrackColor != 0 {
-			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
-				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
-		}
-		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
-			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
-				info.AudioChannelCount, info.AudioPortType))
-		}
-		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
-			p.Logger.Info("  This is a return track")
-		}
-		if info.Flags&api.TrackInfoIsForBus != 0 {
-			p.Logger.Info("  This is a bus track")
-		}
-		if info.Flags&api.TrackInfoIsForMaster != 0 {
-			p.Logger.Info("  This is the master track")
-		}
-	}
-	
-	// For a more sophisticated plugin, you might:
-	// - Adjust default parameter values based on track type
-	// - Configure audio processing differently for bus/master tracks
-	// - Update GUI to show track information
-}
+// OnTrackInfoChanged is provided by PluginBase with default logging
+// Override this method if you need custom track info handling
 
 // Context Menu Extension Methods
 
@@ -847,7 +786,6 @@ func (p *GainPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, act
 	// Apply preset value
 	p.ParamManager.SetValue(0, value)
 	p.gain.Store(value)
-	// TODO: Request parameter flush to notify host
 	return true
 }
 
@@ -876,179 +814,43 @@ func (p *GainPlugin) GetRemoteControlsPage(pageIndex uint32) (*api.RemoteControl
 	return page, true
 }
 
-// Param Indication Extension Methods
-
-// OnParamMappingSet is called when the host sets or clears a mapping indication
-func (p *GainPlugin) OnParamMappingSet(paramID uint32, hasMapping bool, color *api.Color, label string, description string) {
-	// Check main thread (param indication is always on main thread)
-	api.DebugAssertMainThread("GainPlugin.OnParamMappingSet")
-	
-	// Log the mapping change
-	if p.Logger != nil {
-		if hasMapping {
-			p.Logger.Info(fmt.Sprintf("Parameter %d mapped to %s: %s", paramID, label, description))
-			if color != nil {
-				p.Logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
-			}
-		} else {
-			p.Logger.Info(fmt.Sprintf("Parameter %d mapping cleared", paramID))
-		}
-	}
-	
-	// In a real plugin with GUI, you would update the visual indication here
-}
-
-// OnParamAutomationSet is called when the host sets or clears an automation indication
-func (p *GainPlugin) OnParamAutomationSet(paramID uint32, automationState uint32, color *api.Color) {
-	// Check main thread (param indication is always on main thread)
-	api.DebugAssertMainThread("GainPlugin.OnParamAutomationSet")
-	
-	// Log the automation state change
-	if p.Logger != nil {
-		var stateStr string
-		switch automationState {
-		case api.ParamIndicationAutomationNone:
-			stateStr = "None"
-		case api.ParamIndicationAutomationPresent:
-			stateStr = "Present"
-		case api.ParamIndicationAutomationPlaying:
-			stateStr = "Playing"
-		case api.ParamIndicationAutomationRecording:
-			stateStr = "Recording"
-		case api.ParamIndicationAutomationOverriding:
-			stateStr = "Overriding"
-		default:
-			stateStr = "Unknown"
-		}
-		
-		p.Logger.Info(fmt.Sprintf("Parameter %d automation state: %s", paramID, stateStr))
-		if color != nil {
-			p.Logger.Info(fmt.Sprintf("  Color: R=%d G=%d B=%d A=%d", color.Red, color.Green, color.Blue, color.Alpha))
-		}
-	}
-	
-	// In a real plugin with GUI, you would update the visual indication here
-}
+// Param Indication Extension Methods are provided by PluginBase
+// Override OnParamMappingSet and OnParamAutomationSet if you need custom handling
 
 // SaveState saves the plugin state to a stream
 func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
-	out := api.NewOutputStream(stream)
-	
-	// Create state with current parameter values
-	params := []state.Parameter{
-		{ID: ParamGain, Value: p.gain.Load(), Name: "gain"},
-	}
-	stateData := p.StateManager.CreateState(params, nil)
-	
-	// Convert to JSON and save
-	jsonData, err := p.StateManager.SaveToJSON(stateData)
-	if err != nil {
-		if p.Logger != nil {
-			p.Logger.Error(fmt.Sprintf("Failed to serialize state: %v", err))
-		}
-		return false
-	}
-	
-	// Write JSON data as string to stream
-	if err := out.WriteString(string(jsonData)); err != nil {
-		if p.Logger != nil {
-			p.Logger.Error(fmt.Sprintf("Failed to write state: %v", err))
-		}
-		return false
-	}
-	
-	return true
+	return p.SaveStateWithParams(stream, map[uint32]float64{
+		ParamGain: p.gain.Load(),
+	})
 }
 
 // LoadState loads the plugin state from a stream
 func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
-	in := api.NewInputStream(stream)
-	
-	// Read JSON data as string from stream
-	jsonString, err := in.ReadString()
-	if err != nil {
-		if p.Logger != nil {
-			p.Logger.Error(fmt.Sprintf("Failed to read state data: %v", err))
+	return p.LoadStateWithCallback(stream, func(id uint32, value float64) {
+		if id == ParamGain {
+			p.gain.Store(value)
+			p.ParamManager.SetValue(id, value)
 		}
-		return false
-	}
-	
-	// Load and validate state
-	stateData, err := p.StateManager.LoadFromJSON([]byte(jsonString))
-	if err != nil {
-		if p.Logger != nil {
-			p.Logger.Error(fmt.Sprintf("Failed to deserialize state: %v", err))
-		}
-		return false
-	}
-	
-	// Apply loaded parameters
-	for _, param := range stateData.Parameters {
-		if param.ID == ParamGain {
-			p.gain.Store(param.Value)
-			if err := p.ParamManager.SetValue(param.ID, param.Value); err != nil {
-				if p.Logger != nil {
-					p.Logger.Warning(fmt.Sprintf("Failed to set parameter %d: %v", param.ID, err))
-				}
-			}
-		}
-	}
-	
-	// Get the loaded gain value
-	value := p.gain.Load()
-	p.gain.Store(value)
-	
-	return true
+	})
 }
 
-// SaveStateWithContext saves the plugin state to a stream with context
+// SaveStateWithContext saves state with context logging
 func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
-	// Log the context type
-	if p.Logger != nil {
-		switch contextType {
-		case api.StateContextForPreset:
-			p.Logger.Info("Saving state for preset")
-		case api.StateContextForDuplicate:
-			p.Logger.Info("Saving state for duplicate")
-		case api.StateContextForProject:
-			p.Logger.Info("Saving state for project")
-		default:
-			p.Logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
-		}
-	}
-	
-	// For this simple gain plugin, we save the same data regardless of context
-	// More complex plugins might save different data based on context
+	// Use base implementation for logging
+	p.PluginBase.SaveStateWithContext(stream, contextType)
+	// Then do actual save
 	return p.SaveState(stream)
 }
 
-// LoadStateWithContext loads the plugin state from a stream with context
+// LoadStateWithContext loads state with context logging
 func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
-	// Log the context type
-	if p.Logger != nil {
-		switch contextType {
-		case api.StateContextForPreset:
-			p.Logger.Info("Loading state for preset")
-		case api.StateContextForDuplicate:
-			p.Logger.Info("Loading state for duplicate")
-		case api.StateContextForProject:
-			p.Logger.Info("Loading state for project")
-		default:
-			p.Logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
-		}
-	}
-	
-	// For this simple gain plugin, we load the same data regardless of context
-	// More complex plugins might handle loading differently based on context
+	// Use base implementation for logging
+	p.PluginBase.LoadStateWithContext(stream, contextType)
+	// Then do actual load
 	return p.LoadState(stream)
 }
 
-// LoadPresetFromLocation - preset loading is handled externally via JSON files
-func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) bool {
-	// Presets are handled externally by the host via JSON files
-	// The plugin doesn't need to implement preset loading
-	return false
-}
+// LoadPresetFromLocation is provided by PluginBase (returns false)
 
 // Helper functions for atomic float64 operations
 
