@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"unsafe"
+	
+	"github.com/justyntemme/clapgo/pkg/host"
 )
 
 // DefaultContextMenuProvider provides common context menu functionality
@@ -85,7 +87,11 @@ func (d *DefaultContextMenuProvider) HandleResetParameter(paramID uint32) bool {
 	// Reset to default value
 	d.paramManager.SetParameterValue(paramID, info.DefaultValue)
 	
-	// TODO: Request parameter flush to notify host of change
+	// Request parameter flush to notify host of change
+	if d.host != nil {
+		paramsHost := host.NewParamsHost(d.host)
+		paramsHost.RequestFlush()
+	}
 	
 	return true
 }

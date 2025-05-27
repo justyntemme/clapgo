@@ -60,7 +60,10 @@ func NewGainPlugin() *GainPlugin {
 	
 	p.gain.Store(1.0)
 	
-	p.ParamManager.Register(param.Volume(ParamGain, "Gain"))
+	if err := p.ParamManager.Register(param.Volume(ParamGain, "Gain")); err != nil {
+		// In a real plugin, we might want to handle this error differently
+		panic("Failed to register gain parameter: " + err.Error())
+	}
 	p.ParamManager.SetValue(ParamGain, 1.0)
 	
 	return p
