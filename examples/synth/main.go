@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/audio"
 	"math"
 	"os"
 	"path/filepath"
@@ -772,7 +773,6 @@ type Voice struct {
 	Velocity     float64
 	Phase        float64
 	IsActive     bool
-	ReleasePhase float64
 	
 	// Tuning support
 	TuningID     uint64  // ID of tuning to use (0 for equal temperament)
@@ -784,10 +784,8 @@ type Voice struct {
 	Brightness        float64  // Filter/brightness modulation (0.0-1.0)
 	Pressure          float64  // Aftertouch/pressure value (0.0-1.0)
 	
-	// ADSR envelope state
-	EnvelopePhase     int      // 0=attack, 1=decay, 2=sustain, 3=release
-	EnvelopeValue     float64  // Current envelope value
-	EnvelopeTime      float64  // Time in current phase
+	// ADSR envelope
+	Envelope    *audio.ADSREnvelope
 }
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
@@ -1053,7 +1051,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			hasActiveVoices = true
 			
 			// Calculate frequency for this note with pitch bend
-			baseFreq := noteToFrequency(int(voice.Key))
+			baseFreq := audio.NoteToFrequency(int(voice.Key))
 			
 			// Apply tuning if available
 			if p.tuning != nil && voice.TuningID != 0 {
@@ -1230,6 +1228,15 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
 	voiceIndex := p.findFreeVoice()
 	
 	// Create a new voice with validated data
+	envelope := audio.NewADSREnvelope(p.sampleRate)
+	// Set envelope parameters from current plugin state
+	attack := api.LoadParameterAtomic(&p.attack)
+	decay := api.LoadParameterAtomic(&p.decay)
+	sustain := api.LoadParameterAtomic(&p.sustain)
+	release := api.LoadParameterAtomic(&p.release)
+	envelope.SetADSR(attack, decay, sustain, release)
+	envelope.Trigger()
+	
 	p.voices[voiceIndex] = &Voice{
 		NoteID:      noteEvent.NoteID,
 		Channel:     noteEvent.Channel,
@@ -1237,7 +1244,7 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
 		Velocity:    velocity,
 		Phase:       0.0,
 		IsActive:    true,
-		ReleasePhase: -1.0, // Not in release phase
+		Envelope:    envelope,
 	}
 	
 	if p.logger != nil {
@@ -1258,8 +1265,8 @@ func (p *SynthPlugin) HandleNoteOff(noteEvent *api.NoteEvent, time uint32) {
 		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
 		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
 		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
-			// Start the release phase (0.0 = start of release)
-			voice.ReleasePhase = 0.0
+			// Start the release phase
+			voice.Envelope.Release()
 		}
 	}
 }
@@ -1470,10 +1477,6 @@ func generateSample(phase, freq float64, waveform int) float64 {
 	}
 }
 
-// noteToFrequency converts a MIDI note number to a frequency
-func noteToFrequency(note int) float64 {
-	return 440.0 * math.Pow(2.0, (float64(note)-69.0)/12.0)
-}
 
 // GetNotePortManager returns the plugin's note port manager
 func (p *SynthPlugin) GetNotePortManager() *api.NotePortManager {

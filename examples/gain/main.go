@@ -104,20 +104,16 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	
 	gain := float32(p.gain.Load())
 	
-	// Apply gain to each channel
-	for ch := 0; ch < len(audioOut) && ch < len(audioIn); ch++ {
-		if len(audioOut[ch]) != len(audioIn[ch]) {
-			if p.Logger != nil {
-				p.Logger.Error("Frame count mismatch between input and output")
-			}
-			return api.ProcessError
+	// Validate buffers
+	if !audio.ValidateBuffers(audioOut, audioIn) {
+		if p.Logger != nil {
+			p.Logger.Error("Invalid audio buffers")
 		}
-		
-		// Process each sample
-		for i := 0; i < len(audioOut[ch]); i++ {
-			audioOut[ch][i] = audioIn[ch][i] * gain
-		}
+		return api.ProcessError
 	}
+	
+	// Apply gain using the helper function
+	audio.ProcessWithGain(audioOut, audioIn, gain)
 	
 	return api.ProcessContinue
 }

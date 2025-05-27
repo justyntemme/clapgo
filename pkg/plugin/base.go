@@ -504,3 +504,13 @@ func (b *PluginBase) Deactivate() {
 func (b *PluginBase) StopProcessing() {
 	b.CommonStopProcessing()
 }
+
+// StartProcessing delegates to CommonStartProcessing
+func (b *PluginBase) StartProcessing() bool {
+	return b.CommonStartProcessing()
+}
+
+// Reset delegates to CommonReset
+func (b *PluginBase) Reset() {
+	b.CommonReset()
+}
