@@ -205,6 +205,24 @@ func (b *PluginBase) LoadPresetFromLocation(locationKind uint32, location string
 	return false
 }
 
+// GetParamInfo gets parameter info by index - can be used directly by plugins
+func (b *PluginBase) GetParamInfo(index uint32, info unsafe.Pointer) bool {
+	if info == nil {
+		return false
+	}
+	
+	paramInfo, err := b.ParamManager.GetInfoByIndex(index)
+	if err != nil {
+		return false
+	}
+	
+	param.InfoToC(paramInfo, info)
+	
+	return true
+}
+
+
+
 
 // OnTrackInfoChanged provides default track info change handling with logging
 func (b *PluginBase) OnTrackInfoChanged() {
