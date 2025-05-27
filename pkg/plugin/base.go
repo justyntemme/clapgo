@@ -11,6 +11,8 @@ import (
 
 // PluginBase provides comprehensive base functionality for all plugins
 type PluginBase struct {
+	api.NoOpEventHandler // Embed no-op event handlers from api package
+	
 	// Core plugin state
 	Host         unsafe.Pointer
 	SampleRate   float64

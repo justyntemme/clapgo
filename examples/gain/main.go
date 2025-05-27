@@ -46,7 +46,9 @@ func init() {
 // Helper function to extract plugin from CGO handle
 func getPlugin(plugin unsafe.Pointer) *GainPlugin {
 	if plugin == nil {
-		return nil
+		// Return a dummy plugin to avoid nil pointer dereference
+		// The methods should handle nil gracefully
+		return &GainPlugin{}
 	}
 	return cgo.Handle(plugin).Value().(*GainPlugin)
 }
@@ -371,19 +373,7 @@ func (p *GainPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint
 	}
 }
 
-// No-op event handlers (gain plugin doesn't process these events)
-func (p *GainPlugin) HandleParamMod(e *api.ParamModEvent, time uint32) {}
-func (p *GainPlugin) HandleParamGestureBegin(e *api.ParamGestureEvent, time uint32) {}
-func (p *GainPlugin) HandleParamGestureEnd(e *api.ParamGestureEvent, time uint32) {}
-func (p *GainPlugin) HandleNoteOn(e *api.NoteEvent, time uint32) {}
-func (p *GainPlugin) HandleNoteOff(e *api.NoteEvent, time uint32) {}
-func (p *GainPlugin) HandleNoteChoke(e *api.NoteEvent, time uint32) {}
-func (p *GainPlugin) HandleNoteEnd(e *api.NoteEvent, time uint32) {}
-func (p *GainPlugin) HandleNoteExpression(e *api.NoteExpressionEvent, time uint32) {}
-func (p *GainPlugin) HandleTransport(e *api.TransportEvent, time uint32) {}
-func (p *GainPlugin) HandleMIDI(e *api.MIDIEvent, time uint32) {}
-func (p *GainPlugin) HandleMIDISysex(e *api.MIDISysexEvent, time uint32) {}
-func (p *GainPlugin) HandleMIDI2(e *api.MIDI2Event, time uint32) {}
+// No-op event handlers are now provided by PluginBase which embeds event.NoOpHandler
 
 // Helper methods for minimal export functions
 
@@ -624,6 +614,57 @@ func (p *GainPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
 		eventHandler := api.NewEventProcessor(inEvents, outEvents)
 		p.processEvents(eventHandler, 0)
 	}
+}
+
+// PopulateContextMenuWithTarget wraps PopulateContextMenu with target creation
+func (p *GainPlugin) PopulateContextMenuWithTarget(targetKind uint32, targetID uint64, builder unsafe.Pointer) bool {
+	if builder == nil {
+		return false
+	}
+	
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: targetKind,
+			ID:   targetID,
+		}
+	}
+	
+	// Create builder wrapper
+	menuBuilder := api.NewContextMenuBuilder(builder)
+	
+	return p.PopulateContextMenu(target, menuBuilder)
+}
+
+// PerformContextMenuActionWithTarget wraps PerformContextMenuAction with target creation
+func (p *GainPlugin) PerformContextMenuActionWithTarget(targetKind uint32, targetID uint64, actionID uint64) bool {
+	// Create target
+	var target *api.ContextMenuTarget
+	if targetKind != api.ContextMenuTargetKindGlobal {
+		target = &api.ContextMenuTarget{
+			Kind: targetKind,
+			ID:   targetID,
+		}
+	}
+	
+	return p.PerformContextMenuAction(target, actionID)
+}
+
+// GetRemoteControlsPageToC gets remote controls page and converts to C
+func (p *GainPlugin) GetRemoteControlsPageToC(pageIndex uint32, cPage unsafe.Pointer) bool {
+	if cPage == nil {
+		return false
+	}
+	
+	page, ok := p.GetRemoteControlsPage(pageIndex)
+	if !ok {
+		return false
+	}
+	
+	// Convert Go page to C structure
+	api.RemoteControlsPageToC(page, cPage)
+	return true
 }
 
 // GetExtension gets a plugin extension
@@ -1015,202 +1056,91 @@ func (p *GainPlugin) LoadPresetFromLocation(locationKind uint32, location string
 
 //export ClapGo_PluginStateSave
 func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.SaveState(stream))
+	return C.bool(getPlugin(plugin).SaveState(stream))
 }
 
 //export ClapGo_PluginStateLoad
 func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.LoadState(stream))
+	return C.bool(getPlugin(plugin).LoadState(stream))
 }
 
 // State Context Extension Exports
 
 //export ClapGo_PluginStateSaveWithContext
 func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.SaveStateWithContext(stream, uint32(contextType)))
+	return C.bool(getPlugin(plugin).SaveStateWithContext(stream, uint32(contextType)))
 }
 
 //export ClapGo_PluginStateLoadWithContext
 func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.bool(p.LoadStateWithContext(stream, uint32(contextType)))
+	return C.bool(getPlugin(plugin).LoadStateWithContext(stream, uint32(contextType)))
 }
 
 // Preset Load Extension Exports
 
 //export ClapGo_PluginPresetLoadFromLocation
 func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Convert C strings to Go strings
-	var locationStr, loadKeyStr string
-	if location != nil {
-		locationStr = C.GoString(location)
-	}
-	if loadKey != nil {
-		loadKeyStr = C.GoString(loadKey)
-	}
-	
-	return C.bool(p.LoadPresetFromLocation(uint32(locationKind), locationStr, loadKeyStr))
+	return C.bool(getPlugin(plugin).LoadPresetFromLocation(uint32(locationKind), C.GoString(location), C.GoString(loadKey)))
 }
 
 // Phase 3 Extension Exports
 
 //export ClapGo_PluginLatencyGet
 func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) uint32 {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return p.GetLatency()
+	return getPlugin(plugin).GetLatency()
 }
 
 //export ClapGo_PluginTailGet
 func ClapGo_PluginTailGet(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.uint32_t(p.GetTail())
+	return C.uint32_t(getPlugin(plugin).GetTail())
 }
 
 //export ClapGo_PluginOnTimer
 func ClapGo_PluginOnTimer(plugin unsafe.Pointer, timerID C.uint64_t) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	p.OnTimer(uint64(timerID))
+	getPlugin(plugin).OnTimer(uint64(timerID))
 }
 
 // Phase 7 Extension Exports
 
 //export ClapGo_PluginTrackInfoChanged
 func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	p.OnTrackInfoChanged()
+	getPlugin(plugin).OnTrackInfoChanged()
 }
 
 // Context Menu Extension Exports
 
 //export ClapGo_PluginContextMenuPopulate
 func ClapGo_PluginContextMenuPopulate(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, builder unsafe.Pointer) C.bool {
-	if plugin == nil || builder == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: uint32(targetKind),
-			ID:   uint64(targetID),
-		}
-	}
-	
-	// Create builder wrapper
-	menuBuilder := api.NewContextMenuBuilder(builder)
-	
-	return C.bool(p.PopulateContextMenu(target, menuBuilder))
+	return C.bool(getPlugin(plugin).PopulateContextMenuWithTarget(uint32(targetKind), uint64(targetID), builder))
 }
 
 //export ClapGo_PluginContextMenuPerform
 func ClapGo_PluginContextMenuPerform(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, actionID C.uint64_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: uint32(targetKind),
-			ID:   uint64(targetID),
-		}
-	}
-	
-	return C.bool(p.PerformContextMenuAction(target, uint64(actionID)))
+	return C.bool(getPlugin(plugin).PerformContextMenuActionWithTarget(uint32(targetKind), uint64(targetID), uint64(actionID)))
 }
 
 // Remote Controls Extension Exports
 
 //export ClapGo_PluginRemoteControlsCount
 func ClapGo_PluginRemoteControlsCount(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.uint32_t(p.GetRemoteControlsPageCount())
+	return C.uint32_t(getPlugin(plugin).GetRemoteControlsPageCount())
 }
 
 //export ClapGo_PluginRemoteControlsGet
 func ClapGo_PluginRemoteControlsGet(plugin unsafe.Pointer, pageIndex C.uint32_t, cPage unsafe.Pointer) C.bool {
-	if plugin == nil || cPage == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	page, ok := p.GetRemoteControlsPage(uint32(pageIndex))
-	if !ok {
-		return C.bool(false)
-	}
-	
-	// Convert Go page to C structure
-	api.RemoteControlsPageToC(page, cPage)
-	return C.bool(true)
+	return C.bool(getPlugin(plugin).GetRemoteControlsPageToC(uint32(pageIndex), cPage))
 }
 
 // Param Indication Extension Exports
 
 //export ClapGo_PluginParamIndicationSetMapping
 func ClapGo_PluginParamIndicationSetMapping(plugin unsafe.Pointer, paramID C.uint64_t, hasMapping C.bool, color unsafe.Pointer, label *C.char, description *C.char) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	var labelStr, descStr string
-	if label != nil {
-		labelStr = C.GoString(label)
-	}
-	if description != nil {
-		descStr = C.GoString(description)
-	}
-	
-	p.OnParamMappingSet(uint32(paramID), bool(hasMapping), api.ColorFromC(color), labelStr, descStr)
+	getPlugin(plugin).OnParamMappingSet(uint32(paramID), bool(hasMapping), api.ColorFromC(color), C.GoString(label), C.GoString(description))
 }
 
 //export ClapGo_PluginParamIndicationSetAutomation
 func ClapGo_PluginParamIndicationSetAutomation(plugin unsafe.Pointer, paramID C.uint64_t, automationState C.uint32_t, color unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	p.OnParamAutomationSet(uint32(paramID), uint32(automationState), api.ColorFromC(color))
+	getPlugin(plugin).OnParamAutomationSet(uint32(paramID), uint32(automationState), api.ColorFromC(color))
 }
 
 func main() {
