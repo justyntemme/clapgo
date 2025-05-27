@@ -49,6 +49,13 @@ This means our refactoring strategy must preserve the ability for plugins to exp
 2. Plugin main.go contains minimal CGO exports that delegate to domain packages
 3. Consider code generation for repetitive C export boilerplate
 
+#### Identify and Move Plugin-Specific Logic
+**Task**: Audit pkg/ directory for any plugin-specific logic that should be moved back to example plugins
+- Review all pkg/ subdirectories for code that is specific to gain/synth examples
+- Ensure pkg/ contains only reusable, generic CLAP functionality
+- Move any plugin-specific DSP algorithms, parameter definitions, or business logic to respective example directories
+- Maintain clear separation: pkg/ for framework/bridge code, examples/ for plugin-specific implementations
+
 #### `pkg/param/` - Parameter Domain
 ```go
 // Types move from api.ParamInfo → param.Info

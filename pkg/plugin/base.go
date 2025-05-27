@@ -71,7 +71,8 @@ func (b *PluginBase) CommonInit() bool {
 	api.DebugSetMainThread()
 	
 	if b.Logger != nil {
-		b.Logger.Debug("Plugin initialized")
+		b.Logger.Info(fmt.Sprintf("[%s] Plugin initialized", b.Info.Name))
+		b.Logger.Debug(fmt.Sprintf("[%s] Plugin ID: %s, Version: %s", b.Info.Name, b.Info.ID, b.Info.Version))
 	}
 	
 	return true
@@ -83,6 +84,10 @@ func (b *PluginBase) CommonDestroy() {
 	api.DebugAssertMainThread("Plugin.Destroy")
 	if b.ThreadCheck != nil {
 		b.ThreadCheck.AssertMainThread("Plugin.Destroy")
+	}
+	
+	if b.Logger != nil {
+		b.Logger.Info(fmt.Sprintf("[%s] Plugin destroyed", b.Info.Name))
 	}
 }
 
@@ -98,7 +103,8 @@ func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uin
 	b.IsActivated = true
 	
 	if b.Logger != nil {
-		b.Logger.Info("Plugin activated")
+		b.Logger.Info(fmt.Sprintf("[%s] Plugin activated - Sample rate: %.0f Hz, Frame range: %d-%d", 
+			b.Info.Name, sampleRate, minFrames, maxFrames))
 	}
 	
 	return true
@@ -115,20 +121,23 @@ func (b *PluginBase) CommonDeactivate() {
 	b.IsActivated = false
 	
 	if b.Logger != nil {
-		b.Logger.Info("Plugin deactivated")
+		b.Logger.Info(fmt.Sprintf("[%s] Plugin deactivated", b.Info.Name))
 	}
 }
 
 // CommonStartProcessing prepares for audio processing
 func (b *PluginBase) CommonStartProcessing() bool {
 	if !b.IsActivated {
+		if b.Logger != nil {
+			b.Logger.Warning(fmt.Sprintf("[%s] Cannot start processing - plugin not activated", b.Info.Name))
+		}
 		return false
 	}
 	
 	b.IsProcessing = true
 	
 	if b.Logger != nil {
-		b.Logger.Debug("Started processing")
+		b.Logger.Info(fmt.Sprintf("[%s] Started audio processing", b.Info.Name))
 	}
 	
 	return true
@@ -139,7 +148,7 @@ func (b *PluginBase) CommonStopProcessing() {
 	b.IsProcessing = false
 	
 	if b.Logger != nil {
-		b.Logger.Debug("Stopped processing")
+		b.Logger.Info(fmt.Sprintf("[%s] Stopped audio processing", b.Info.Name))
 	}
 }
 
@@ -195,6 +204,7 @@ func (b *PluginBase) OnMainThread() {
 func (b *PluginBase) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) bool {
 	return false
 }
+
 
 // OnTrackInfoChanged provides default track info change handling with logging
 func (b *PluginBase) OnTrackInfoChanged() {
@@ -450,4 +460,29 @@ func (b *PluginBase) LoadStateWithContext(stream unsafe.Pointer, contextType uin
 	// Override this method if you need context-specific loading
 	// This is a fallback - plugins should implement LoadState
 	return false
+}
+
+// Init delegates to CommonInit
+func (b *PluginBase) Init() bool {
+	return b.CommonInit()
+}
+
+// Destroy delegates to CommonDestroy
+func (b *PluginBase) Destroy() {
+	b.CommonDestroy()
+}
+
+// Activate delegates to CommonActivate
+func (b *PluginBase) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+	return b.CommonActivate(sampleRate, minFrames, maxFrames)
+}
+
+// Deactivate delegates to CommonDeactivate
+func (b *PluginBase) Deactivate() {
+	b.CommonDeactivate()
+}
+
+// StopProcessing delegates to CommonStopProcessing
+func (b *PluginBase) StopProcessing() {
+	b.CommonStopProcessing()
 }

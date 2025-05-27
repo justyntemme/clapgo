@@ -136,44 +136,6 @@ func Mix(dst, src Buffer, gain float32) error {
 	return nil
 }
 
-// Process applies gain from input to output buffers
-func Process(out, in Buffer, gain float32) error {
-	if out.Channels() != in.Channels() {
-		return ErrChannelMismatch
-	}
-	
-	if out.Frames() != in.Frames() {
-		return ErrFrameCountMismatch
-	}
-	
-	for ch := range out {
-		for i := range out[ch] {
-			out[ch][i] = in[ch][i] * gain
-		}
-	}
-	
-	return nil
-}
-
-// ProcessRange processes a range of samples
-func ProcessRange(out, in Buffer, gain float32, start, end int) error {
-	if out.Channels() != in.Channels() {
-		return ErrChannelMismatch
-	}
-	
-	frames := out.Frames()
-	if start < 0 || end > frames || start >= end {
-		return ErrInvalidBuffer
-	}
-	
-	for ch := range out {
-		for i := start; i < end; i++ {
-			out[ch][i] = in[ch][i] * gain
-		}
-	}
-	
-	return nil
-}
 
 // GetPeak returns the peak (maximum absolute) value in the buffer
 func GetPeak(buf Buffer) float32 {
