@@ -43,466 +43,143 @@ func init() {
 	fmt.Printf("Gain plugin initialized: %s (%s)\n", gainPlugin.GetPluginInfo().Name, gainPlugin.GetPluginInfo().ID)
 }
 
+// Helper function to extract plugin from CGO handle
+func getPlugin(plugin unsafe.Pointer) *GainPlugin {
+	if plugin == nil {
+		return nil
+	}
+	return cgo.Handle(plugin).Value().(*GainPlugin)
+}
+
 // Standardized export functions for manifest system
 
 //export ClapGo_CreatePlugin
 func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
-	id := C.GoString(pluginID)
-	fmt.Printf("Gain plugin - ClapGo_CreatePlugin with ID: %s\n", id)
-	
-	if id == PluginID {
-		// Initialize host-dependent features
-		gainPlugin.PluginBase.InitWithHost(host)
-		
-		// Log plugin creation
-		if gainPlugin.Logger != nil {
-			gainPlugin.Logger.Info("Creating gain plugin instance")
-		}
-		
-		// Create a CGO handle to safely pass the Go object to C
-		handle := cgo.NewHandle(gainPlugin)
-		fmt.Printf("Created plugin instance: %s, handle: %v\n", id, handle)
-		
-		// Log handle creation
-		if gainPlugin.Logger != nil {
-			gainPlugin.Logger.Debug(fmt.Sprintf("[ClapGo_CreatePlugin] Created handle: %v", handle))
-		}
-		
-		// Register as audio ports provider
-		api.RegisterAudioPortsProvider(unsafe.Pointer(handle), gainPlugin)
-		
-		return unsafe.Pointer(handle)
+	if C.GoString(pluginID) == PluginID {
+		return unsafe.Pointer(gainPlugin.CreateWithHost(host))
 	}
-	
-	fmt.Printf("Error: Unknown plugin ID: %s\n", id)
 	return nil
 }
 
 //export ClapGo_GetVersion
 func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
-	if major != nil {
-		*major = C.uint32_t(1)
-	}
-	if minor != nil {
-		*minor = C.uint32_t(0)
-	}
-	if patch != nil {
-		*patch = C.uint32_t(0)
-	}
+	if major != nil { *major = C.uint32_t(1) }
+	if minor != nil { *minor = C.uint32_t(0) }
+	if patch != nil { *patch = C.uint32_t(0) }
 	return C.bool(true)
 }
 
 //export ClapGo_GetPluginID
 func ClapGo_GetPluginID(pluginID *C.char) *C.char {
-	return C.CString(gainPlugin.GetPluginID())
+	return C.CString(PluginID)
 }
 
 //export ClapGo_GetPluginName
 func ClapGo_GetPluginName(pluginID *C.char) *C.char {
-	return C.CString(gainPlugin.GetPluginInfo().Name)
+	return C.CString(PluginName)
 }
 
 //export ClapGo_GetPluginVendor
 func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
-	return C.CString(gainPlugin.GetPluginInfo().Vendor)
+	return C.CString(PluginVendor)
 }
 
 //export ClapGo_GetPluginVersion
 func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
-	return C.CString(gainPlugin.GetPluginInfo().Version)
+	return C.CString(PluginVersion)
 }
 
 //export ClapGo_GetPluginDescription
 func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
-	return C.CString(gainPlugin.GetPluginInfo().Description)
+	return C.CString(PluginDescription)
 }
 
 //export ClapGo_PluginInit
 func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginInit: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return C.bool(false)
-	}
-	
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the init call
-	if p.Logger != nil {
-		p.Logger.Debug("[ClapGo_PluginInit] Starting plugin initialization")
-	}
-	
-	result := p.Init()
-	
-	// Log the result
-	if p.Logger != nil {
-		if result {
-			p.Logger.Info("[ClapGo_PluginInit] Plugin initialization successful")
-		} else {
-			p.Logger.Error("[ClapGo_PluginInit] Plugin initialization failed")
-		}
-	}
-	
-	return C.bool(result)
+	return C.bool(getPlugin(plugin).InitWithLogging())
 }
 
 //export ClapGo_PluginDestroy
 func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginDestroy: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return
+	if p := getPlugin(plugin); p != nil {
+		p.DestroyWithHandle(plugin)
 	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	
-	// Log the destroy call
-	if p.Logger != nil {
-		p.Logger.Debug(fmt.Sprintf("[ClapGo_PluginDestroy] Destroying plugin instance, handle: %v", handle))
-	}
-	
-	p.Destroy()
-	
-	// Unregister from audio ports provider
-	api.UnregisterAudioPortsProvider(plugin)
-	
-	// Log completion
-	if p.Logger != nil {
-		p.Logger.Info("[ClapGo_PluginDestroy] Plugin instance destroyed successfully")
-	}
-	
-	handle.Delete()
 }
 
 //export ClapGo_PluginActivate
 func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the activate call
-	if p.Logger != nil {
-		p.Logger.Debug(fmt.Sprintf("[ClapGo_PluginActivate] Activating plugin - SR: %.0f, frames: %d-%d", 
-			float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
-	}
-	
-	result := p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
-	
-	// Log result
-	if p.Logger != nil {
-		if result {
-			p.Logger.Info("[ClapGo_PluginActivate] Plugin activation successful")
-		} else {
-			p.Logger.Error("[ClapGo_PluginActivate] Plugin activation failed")
-		}
-	}
-	
-	return C.bool(result)
+	return C.bool(getPlugin(plugin).ActivateWithLogging(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
 }
 
 //export ClapGo_PluginDeactivate
 func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginDeactivate: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return
-	}
-	
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the deactivate call
-	if p.Logger != nil {
-		p.Logger.Debug("[ClapGo_PluginDeactivate] Deactivating plugin")
-	}
-	
-	p.Deactivate()
-	
-	// Log completion
-	if p.Logger != nil {
-		p.Logger.Info("[ClapGo_PluginDeactivate] Plugin deactivation successful")
-	}
+	getPlugin(plugin).DeactivateWithLogging()
 }
 
 //export ClapGo_PluginStartProcessing
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	// Mark this thread as audio thread for debug builds
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
-	
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginStartProcessing: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return C.bool(false)
-	}
-	
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the start processing call
-	if p.Logger != nil {
-		p.Logger.Debug("[ClapGo_PluginStartProcessing] Starting audio processing")
-	}
-	
-	result := p.StartProcessing()
-	
-	// Log result
-	if p.Logger != nil {
-		if result {
-			p.Logger.Info("[ClapGo_PluginStartProcessing] Audio processing started successfully")
-		} else {
-			p.Logger.Error("[ClapGo_PluginStartProcessing] Failed to start audio processing")
-		}
-	}
-	
-	return C.bool(result)
+	return C.bool(getPlugin(plugin).StartProcessingWithLogging())
 }
 
 //export ClapGo_PluginStopProcessing
 func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
-	// Mark this thread as audio thread for debug builds
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
-	
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginStopProcessing: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return
-	}
-	
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the stop processing call
-	if p.Logger != nil {
-		p.Logger.Debug("[ClapGo_PluginStopProcessing] Stopping audio processing")
-	}
-	
-	p.StopProcessing()
-	
-	// Log completion
-	if p.Logger != nil {
-		p.Logger.Info("[ClapGo_PluginStopProcessing] Audio processing stopped successfully")
-	}
+	getPlugin(plugin).StopProcessingWithLogging()
 }
 
 //export ClapGo_PluginReset
 func ClapGo_PluginReset(plugin unsafe.Pointer) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginReset: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil {
-		return
-	}
-	
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Log the reset call
-	if p.Logger != nil {
-		p.Logger.Debug("[ClapGo_PluginReset] Resetting plugin state")
-	}
-	
-	p.Reset()
-	
-	// Log completion
-	if p.Logger != nil {
-		p.Logger.Info("[ClapGo_PluginReset] Plugin reset successful")
-	}
+	getPlugin(plugin).ResetWithLogging()
 }
 
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
-	// Mark this thread as audio thread for debug builds
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
-	
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("PANIC in ClapGo_PluginProcess: %v\n", r)
-		}
-	}()
-	
-	if plugin == nil || process == nil {
-		return C.int32_t(api.ProcessError)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*GainPlugin)
-	
-	// Convert the C clap_process_t to Go parameters
-	cProcess := (*C.clap_process_t)(process)
-	
-	// Extract steady time and frame count
-	steadyTime := int64(cProcess.steady_time)
-	framesCount := uint32(cProcess.frames_count)
-	
-	// Convert audio buffers using our abstraction - NO MORE MANUAL CONVERSION!
-	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
-	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
-	
-	// Create event handler using the new abstraction - NO MORE MANUAL EVENT HANDLING!
-	eventHandler := api.NewEventProcessor(
-		unsafe.Pointer(cProcess.in_events),
-		unsafe.Pointer(cProcess.out_events),
-	)
-	
-	// Setup event pool logging
-	api.SetupPoolLogging(eventHandler, p.Logger)
-	
-	// Call the actual Go process method
-	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
-	
-	// Log event pool diagnostics periodically (every 1000 calls)
-	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
-	
-	return C.int32_t(result)
+	return C.int32_t(getPlugin(plugin).ProcessWithHandle(process))
 }
 
 //export ClapGo_PluginGetExtension
 func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
-	if plugin == nil {
-		return nil
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	extID := C.GoString(id)
-	return p.GetExtension(extID)
+	return getPlugin(plugin).GetExtension(C.GoString(id))
 }
 
 //export ClapGo_PluginOnMainThread
 func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	p.OnMainThread()
+	getPlugin(plugin).OnMainThread()
 }
 
 //export ClapGo_PluginParamsCount
 func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	return C.uint32_t(p.ParamManager.Count())
+	return C.uint32_t(getPlugin(plugin).ParamManager.Count())
 }
 
 //export ClapGo_PluginParamsGetInfo
 func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info unsafe.Pointer) C.bool {
-	if plugin == nil || info == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Get parameter info from manager
-	paramInfo, err := p.ParamManager.GetInfoByIndex(uint32(index))
-	if err != nil {
-		return C.bool(false)
-	}
-	
-	// Convert to C struct using helper
-	param.InfoToC(paramInfo, info)
-	
-	return C.bool(true)
+	return C.bool(getPlugin(plugin).GetParamInfo(uint32(index), info))
 }
 
 //export ClapGo_PluginParamsGetValue
 func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, value *C.double) C.bool {
-	if plugin == nil || value == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Get current value - read atomically from our gain storage
-	if uint32(paramID) == 0 {
-		*value = C.double(p.gain.Load())
-		return C.bool(true)
-	}
-	
-	return C.bool(false)
+	return C.bool(getPlugin(plugin).GetParamValue(uint32(paramID), value))
 }
 
 //export ClapGo_PluginParamsValueToText
 func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
-	if plugin == nil || buffer == nil || size == 0 {
-		return C.bool(false)
-	}
-	// For gain parameter, format as dB
-	if uint32(paramID) == 0 {
-		text := param.FormatValue(float64(value), param.FormatDecibel)
-		
-		// Copy to C buffer manually
-		bytes := []byte(text)
-		if len(bytes) >= int(size) {
-			bytes = bytes[:size-1]
-		}
-		for i, b := range bytes {
-			*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
-		}
-		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
-		
-		return C.bool(true)
-	}
-	
-	return C.bool(false)
+	return C.bool(getPlugin(plugin).ParamValueToText(uint32(paramID), float64(value), buffer, uint32(size)))
 }
 
 //export ClapGo_PluginParamsTextToValue
 func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, text *C.char, value *C.double) C.bool {
-	if plugin == nil || text == nil || value == nil {
-		return C.bool(false)
-	}
-	
-	// Convert text to Go string
-	goText := C.GoString(text)
-	
-	// For gain parameter, use the ParameterValueParser
-	if uint32(paramID) == 0 {
-		parser := param.NewParser(param.FormatDecibel)
-		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			// Clamp to valid range for gain parameter
-			clamped := param.ClampValue(parsedValue, 0.0, 2.0)
-			*value = C.double(clamped)
-			return C.bool(true)
-		}
-	}
-	
-	return C.bool(false)
+	return C.bool(getPlugin(plugin).ParamTextToValue(uint32(paramID), C.GoString(text), value))
 }
 
 //export ClapGo_PluginParamsFlush
 func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, outEvents unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*GainPlugin)
-	
-	// Process events using our abstraction
-	if inEvents != nil {
-		eventHandler := api.NewEventProcessor(inEvents, outEvents)
-		p.processEvents(eventHandler, 0)
-	}
+	getPlugin(plugin).ParamsFlush(inEvents, outEvents)
 }
 
 // GainPlugin represents the gain plugin
@@ -548,6 +225,30 @@ func NewGainPlugin() *GainPlugin {
 	p.ParamManager.SetValue(ParamGain, 1.0)
 	
 	return p
+}
+
+// CreateWithHost creates plugin handle after initializing with host
+func (p *GainPlugin) CreateWithHost(host unsafe.Pointer) cgo.Handle {
+	// Initialize host-dependent features
+	p.PluginBase.InitWithHost(host)
+	
+	// Log plugin creation
+	if p.Logger != nil {
+		p.Logger.Info("Creating gain plugin instance")
+	}
+	
+	// Create a CGO handle to safely pass the Go object to C
+	handle := cgo.NewHandle(p)
+	
+	// Log handle creation
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("[CreateWithHost] Created handle: %v", handle))
+	}
+	
+	// Register as audio ports provider
+	api.RegisterAudioPortsProvider(unsafe.Pointer(handle), p)
+	
+	return handle
 }
 
 // Init initializes the plugin
@@ -683,6 +384,247 @@ func (p *GainPlugin) HandleTransport(e *api.TransportEvent, time uint32) {}
 func (p *GainPlugin) HandleMIDI(e *api.MIDIEvent, time uint32) {}
 func (p *GainPlugin) HandleMIDISysex(e *api.MIDISysexEvent, time uint32) {}
 func (p *GainPlugin) HandleMIDI2(e *api.MIDI2Event, time uint32) {}
+
+// Helper methods for minimal export functions
+
+// InitWithLogging wraps Init with logging
+func (p *GainPlugin) InitWithLogging() bool {
+	if p.Logger != nil {
+		p.Logger.Debug("[InitWithLogging] Starting plugin initialization")
+	}
+	
+	result := p.Init()
+	
+	if p.Logger != nil {
+		if result {
+			p.Logger.Info("[InitWithLogging] Plugin initialization successful")
+		} else {
+			p.Logger.Error("[InitWithLogging] Plugin initialization failed")
+		}
+	}
+	
+	return result
+}
+
+// DestroyWithHandle wraps Destroy with handle cleanup
+func (p *GainPlugin) DestroyWithHandle(plugin unsafe.Pointer) {
+	if p.Logger != nil {
+		p.Logger.Debug("[DestroyWithHandle] Destroying plugin instance")
+	}
+	
+	p.Destroy()
+	
+	// Unregister from audio ports provider
+	api.UnregisterAudioPortsProvider(plugin)
+	
+	if p.Logger != nil {
+		p.Logger.Info("[DestroyWithHandle] Plugin instance destroyed successfully")
+	}
+	
+	// Delete the handle to free the Go object
+	cgo.Handle(plugin).Delete()
+}
+
+// ActivateWithLogging wraps Activate with logging
+func (p *GainPlugin) ActivateWithLogging(sampleRate float64, minFrames, maxFrames uint32) bool {
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("[ActivateWithLogging] Activating plugin - SR: %.0f, frames: %d-%d", 
+			sampleRate, minFrames, maxFrames))
+	}
+	
+	result := p.Activate(sampleRate, minFrames, maxFrames)
+	
+	if p.Logger != nil {
+		if result {
+			p.Logger.Info("[ActivateWithLogging] Plugin activation successful")
+		} else {
+			p.Logger.Error("[ActivateWithLogging] Plugin activation failed")
+		}
+	}
+	
+	return result
+}
+
+// DeactivateWithLogging wraps Deactivate with logging
+func (p *GainPlugin) DeactivateWithLogging() {
+	if p.Logger != nil {
+		p.Logger.Debug("[DeactivateWithLogging] Deactivating plugin")
+	}
+	
+	p.Deactivate()
+	
+	if p.Logger != nil {
+		p.Logger.Info("[DeactivateWithLogging] Plugin deactivation successful")
+	}
+}
+
+// StartProcessingWithLogging wraps StartProcessing with logging
+func (p *GainPlugin) StartProcessingWithLogging() bool {
+	if p.Logger != nil {
+		p.Logger.Debug("[StartProcessingWithLogging] Starting audio processing")
+	}
+	
+	result := p.StartProcessing()
+	
+	if p.Logger != nil {
+		if result {
+			p.Logger.Info("[StartProcessingWithLogging] Audio processing started successfully")
+		} else {
+			p.Logger.Error("[StartProcessingWithLogging] Failed to start audio processing")
+		}
+	}
+	
+	return result
+}
+
+// StopProcessingWithLogging wraps StopProcessing with logging
+func (p *GainPlugin) StopProcessingWithLogging() {
+	if p.Logger != nil {
+		p.Logger.Debug("[StopProcessingWithLogging] Stopping audio processing")
+	}
+	
+	p.StopProcessing()
+	
+	if p.Logger != nil {
+		p.Logger.Info("[StopProcessingWithLogging] Audio processing stopped successfully")
+	}
+}
+
+// ResetWithLogging wraps Reset with logging
+func (p *GainPlugin) ResetWithLogging() {
+	if p.Logger != nil {
+		p.Logger.Debug("[ResetWithLogging] Resetting plugin state")
+	}
+	
+	p.Reset()
+	
+	if p.Logger != nil {
+		p.Logger.Info("[ResetWithLogging] Plugin reset successful")
+	}
+}
+
+// ProcessWithHandle wraps Process with C handle conversion
+func (p *GainPlugin) ProcessWithHandle(process unsafe.Pointer) int {
+	if process == nil {
+		return api.ProcessError
+	}
+	
+	// Convert the C clap_process_t to Go parameters
+	cProcess := (*C.clap_process_t)(process)
+	
+	// Extract steady time and frame count
+	steadyTime := int64(cProcess.steady_time)
+	framesCount := uint32(cProcess.frames_count)
+	
+	// Convert audio buffers using our abstraction
+	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
+	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
+	
+	// Create event handler using the new abstraction
+	eventHandler := api.NewEventProcessor(
+		unsafe.Pointer(cProcess.in_events),
+		unsafe.Pointer(cProcess.out_events),
+	)
+	
+	// Setup event pool logging
+	api.SetupPoolLogging(eventHandler, p.Logger)
+	
+	// Call the actual Go process method
+	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
+	
+	// Log event pool diagnostics periodically (every 1000 calls)
+	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
+	
+	return result
+}
+
+// GetParamInfo gets parameter info by index
+func (p *GainPlugin) GetParamInfo(index uint32, info unsafe.Pointer) bool {
+	if info == nil {
+		return false
+	}
+	
+	// Get parameter info from manager
+	paramInfo, err := p.ParamManager.GetInfoByIndex(index)
+	if err != nil {
+		return false
+	}
+	
+	// Convert to C struct using helper
+	param.InfoToC(paramInfo, info)
+	
+	return true
+}
+
+// GetParamValue gets parameter value by ID
+func (p *GainPlugin) GetParamValue(paramID uint32, value *C.double) bool {
+	if value == nil {
+		return false
+	}
+	
+	// Get current value - read atomically from our gain storage
+	if paramID == ParamGain {
+		*value = C.double(p.gain.Load())
+		return true
+	}
+	
+	return false
+}
+
+// ParamValueToText converts parameter value to text
+func (p *GainPlugin) ParamValueToText(paramID uint32, value float64, buffer *C.char, size uint32) bool {
+	if buffer == nil || size == 0 {
+		return false
+	}
+	
+	// For gain parameter, format as dB
+	if paramID == ParamGain {
+		text := param.FormatValue(value, param.FormatDecibel)
+		
+		// Copy to C buffer manually
+		bytes := []byte(text)
+		if len(bytes) >= int(size) {
+			bytes = bytes[:size-1]
+		}
+		for i, b := range bytes {
+			*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
+		}
+		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
+		
+		return true
+	}
+	
+	return false
+}
+
+// ParamTextToValue converts parameter text to value
+func (p *GainPlugin) ParamTextToValue(paramID uint32, text string, value *C.double) bool {
+	if value == nil {
+		return false
+	}
+	
+	// For gain parameter, use the ParameterValueParser
+	if paramID == ParamGain {
+		parser := param.NewParser(param.FormatDecibel)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			// Clamp to valid range for gain parameter
+			clamped := param.ClampValue(parsedValue, 0.0, 2.0)
+			*value = C.double(clamped)
+			return true
+		}
+	}
+	
+	return false
+}
+
+// ParamsFlush flushes parameter events
+func (p *GainPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
+	// Process events using our abstraction
+	if inEvents != nil {
+		eventHandler := api.NewEventProcessor(inEvents, outEvents)
+		p.processEvents(eventHandler, 0)
+	}
+}
 
 // GetExtension gets a plugin extension
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
