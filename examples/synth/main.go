@@ -69,11 +69,8 @@ type Voice struct {
 	Brightness       float64 // Filter/brightness modulation (0.0-1.0)
 	Pressure         float64 // Aftertouch/pressure value (0.0-1.0)
 
-	// Simple envelope state (for compatibility with existing code)
-	EnvelopeValue float64 // Current envelope value (0.0-1.0)
-	ReleasePhase  float64 // Release phase progress (0.0-1.0, -1.0 if not releasing)
-	EnvelopeTime  float64 // Time in current envelope stage
-	EnvelopePhase int     // ADSR phase: 0=attack, 1=decay, 2=sustain
+	// ADSR envelope
+	Envelope *audio.ADSREnvelope
 }
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
@@ -389,7 +386,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			}
 
 			// Check if voice is still active
-			if voice.ReleasePhase >= 1.0 {
+			if !voice.Envelope.IsActive() {
 				// Send note end event to host if we have a valid note ID
 				if voice.NoteID >= 0 && events != nil {
 					endEvent := event.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
@@ -613,17 +610,17 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 	// (envelope parameters will be used directly in processing)
 
 	p.voices[voiceIndex] = &Voice{
-		NoteID:        noteEvent.NoteID,
-		Channel:       noteEvent.Channel,
-		Key:           noteEvent.Key,
-		Velocity:      velocity,
-		Phase:         0.0,
-		IsActive:      true,
-		EnvelopeValue: 0.0,
-		ReleasePhase:  -1.0,
-		EnvelopeTime:  0.0,
-		EnvelopePhase: 0,
+		NoteID:   noteEvent.NoteID,
+		Channel:  noteEvent.Channel,
+		Key:      noteEvent.Key,
+		Velocity: velocity,
+		Phase:    0.0,
+		IsActive: true,
+		Envelope: audio.NewADSREnvelope(p.SampleRate),
 	}
+	
+	// Trigger the envelope to start the attack phase
+	p.voices[voiceIndex].Envelope.Trigger()
 
 	if p.Logger != nil {
 		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
@@ -644,7 +641,7 @@ func (p *SynthPlugin) HandleNoteOff(noteEvent *event.NoteEvent, time uint32) {
 			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
 				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Start the release phase
-			voice.ReleasePhase = 0.0
+			voice.Envelope.Release()
 		}
 	}
 }
@@ -738,20 +735,11 @@ func (p *SynthPlugin) findFreeVoice() int {
 		}
 	}
 
-	// If no empty slots, find the voice in release phase with the most progress
-	bestIndex := 0
-	bestReleasePhase := -1.0
-
+	// If no empty slots, find the voice in release phase
 	for i, voice := range p.voices {
-		if voice != nil && voice.ReleasePhase >= 0.0 && voice.ReleasePhase > bestReleasePhase {
-			bestIndex = i
-			bestReleasePhase = voice.ReleasePhase
+		if voice != nil && voice.Envelope.Stage == audio.EnvelopeStageRelease {
+			return i
 		}
-	}
-
-	// If we found a voice in release phase, use that
-	if bestReleasePhase >= 0.0 {
-		return bestIndex
 	}
 
 	// No voices in release, steal the quietest voice
@@ -760,8 +748,8 @@ func (p *SynthPlugin) findFreeVoice() int {
 
 	for i, voice := range p.voices {
 		if voice != nil && voice.IsActive {
-			// Consider envelope value and velocity
-			level := voice.EnvelopeValue * voice.Velocity
+			// Consider current envelope value and velocity
+			level := voice.Envelope.CurrentValue * voice.Velocity
 			if level < quietestLevel {
 				quietestLevel = level
 				quietestIdx = i
@@ -772,67 +760,13 @@ func (p *SynthPlugin) findFreeVoice() int {
 	return quietestIdx
 }
 
-// getEnvelopeValue calculates the ADSR envelope value for a voice
+// getEnvelopeValue updates the envelope parameters and returns the current value
 func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
-	// Time increment per sample
-	timeInc := 1.0 / p.SampleRate
-
-	// If in release phase
-	if voice.ReleasePhase >= 0.0 {
-		// Update release phase
-		releaseSamples := release * p.SampleRate
-		if releaseSamples <= 0 {
-			releaseSamples = 1
-		}
-		voice.ReleasePhase += 1.0 / releaseSamples
-
-		// Calculate release envelope (exponential decay from last envelope value)
-		if voice.ReleasePhase >= 1.0 {
-			voice.EnvelopeValue = 0.0
-		} else {
-			voice.EnvelopeValue = voice.EnvelopeValue * math.Pow(0.99, 1.0/releaseSamples)
-		}
-		return voice.EnvelopeValue
-	}
-
-	// Update envelope time
-	voice.EnvelopeTime += timeInc
-
-	// Attack phase
-	if voice.EnvelopePhase == 0 {
-		if attack <= 0 {
-			voice.EnvelopeValue = 1.0
-			voice.EnvelopePhase = 1
-			voice.EnvelopeTime = 0
-		} else if voice.EnvelopeTime >= attack {
-			voice.EnvelopeValue = 1.0
-			voice.EnvelopePhase = 1
-			voice.EnvelopeTime = 0
-		} else {
-			voice.EnvelopeValue = voice.EnvelopeTime / attack
-		}
-	}
-
-	// Decay phase
-	if voice.EnvelopePhase == 1 {
-		if decay <= 0 {
-			voice.EnvelopeValue = sustain
-			voice.EnvelopePhase = 2
-		} else if voice.EnvelopeTime >= decay {
-			voice.EnvelopeValue = sustain
-			voice.EnvelopePhase = 2
-		} else {
-			decayProgress := voice.EnvelopeTime / decay
-			voice.EnvelopeValue = 1.0 - decayProgress*(1.0-sustain)
-		}
-	}
-
-	// Sustain phase
-	if voice.EnvelopePhase == 2 {
-		voice.EnvelopeValue = sustain
-	}
-
-	return voice.EnvelopeValue
+	// Update envelope parameters if they changed
+	voice.Envelope.SetADSR(attack, decay, sustain, release)
+	
+	// Process one sample and return the value
+	return voice.Envelope.Process()
 }
 
 // GetNotePortManager returns the plugin's note port manager
