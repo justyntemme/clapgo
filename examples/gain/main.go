@@ -75,7 +75,7 @@ func NewGainPlugin() *GainPlugin {
 func (p *GainPlugin) CreateWithHost(host unsafe.Pointer) cgo.Handle {
 	p.PluginBase.InitWithHost(host)
 	handle := cgo.NewHandle(p)
-	api.RegisterAudioPortsProvider(unsafe.Pointer(handle), p)
+	audio.RegisterPortsProvider(unsafe.Pointer(handle), p)
 	return handle
 }
 

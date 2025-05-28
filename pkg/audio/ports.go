@@ -1,13 +1,10 @@
 package audio
 
-import (
-	"github.com/justyntemme/clapgo/pkg/api"
-)
-
 // PortProvider is the interface for audio port configuration
+// Deprecated: Use PortsProvider instead
 type PortProvider interface {
 	GetAudioPortCount(isInput bool) uint32
-	GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo
+	GetAudioPortInfo(index uint32, isInput bool) PortInfo
 }
 
 // StereoPortProvider provides standard stereo input/output configuration
@@ -30,10 +27,10 @@ func (s *StereoPortProvider) GetAudioPortCount(isInput bool) uint32 {
 }
 
 // GetAudioPortInfo returns stereo port information
-func (s *StereoPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo {
+func (s *StereoPortProvider) GetAudioPortInfo(index uint32, isInput bool) PortInfo {
 	if index != 0 {
-		return api.AudioPortInfo{
-			ID: api.InvalidID,
+		return PortInfo{
+			ID: InvalidID,
 		}
 	}
 	
@@ -42,7 +39,7 @@ func (s *StereoPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.Au
 		name = s.InputName
 	}
 	
-	return api.CreateStereoPort(0, name, true)
+	return CreateStereoPort(0, name, true)
 }
 
 // MonoPortProvider provides standard mono input/output configuration
@@ -65,10 +62,10 @@ func (m *MonoPortProvider) GetAudioPortCount(isInput bool) uint32 {
 }
 
 // GetAudioPortInfo returns mono port information
-func (m *MonoPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo {
+func (m *MonoPortProvider) GetAudioPortInfo(index uint32, isInput bool) PortInfo {
 	if index != 0 {
-		return api.AudioPortInfo{
-			ID: api.InvalidID,
+		return PortInfo{
+			ID: InvalidID,
 		}
 	}
 	
@@ -77,13 +74,13 @@ func (m *MonoPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.Audi
 		name = m.InputName
 	}
 	
-	return api.CreateMonoPort(0, name, true)
+	return CreateMonoPort(0, name, true)
 }
 
 // MultiPortProvider allows custom port configurations
 type MultiPortProvider struct {
-	InputPorts  []api.AudioPortInfo
-	OutputPorts []api.AudioPortInfo
+	InputPorts  []PortInfo
+	OutputPorts []PortInfo
 }
 
 // GetAudioPortCount returns the number of ports
@@ -95,8 +92,8 @@ func (m *MultiPortProvider) GetAudioPortCount(isInput bool) uint32 {
 }
 
 // GetAudioPortInfo returns port information by index
-func (m *MultiPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.AudioPortInfo {
-	var ports []api.AudioPortInfo
+func (m *MultiPortProvider) GetAudioPortInfo(index uint32, isInput bool) PortInfo {
+	var ports []PortInfo
 	if isInput {
 		ports = m.InputPorts
 	} else {
@@ -104,8 +101,8 @@ func (m *MultiPortProvider) GetAudioPortInfo(index uint32, isInput bool) api.Aud
 	}
 	
 	if index >= uint32(len(ports)) {
-		return api.AudioPortInfo{
-			ID: api.InvalidID,
+		return PortInfo{
+			ID: InvalidID,
 		}
 	}
 	
@@ -120,7 +117,7 @@ type SurroundSupport struct {
 // NewStereoSurroundSupport creates surround support for stereo-only plugins
 func NewStereoSurroundSupport() *SurroundSupport {
 	return &SurroundSupport{
-		SupportedMasks: []uint64{api.ChannelMaskStereo},
+		SupportedMasks: []uint64{ChannelMaskStereo},
 	}
 }
 
@@ -136,8 +133,8 @@ func (s *SurroundSupport) IsChannelMaskSupported(channelMask uint64) bool {
 
 // GetChannelMap returns the channel map for stereo
 func (s *SurroundSupport) GetChannelMap(isInput bool, portIndex uint32) []uint8 {
-	if portIndex == 0 && len(s.SupportedMasks) > 0 && s.SupportedMasks[0] == api.ChannelMaskStereo {
-		return api.CreateStereoChannelMap()
+	if portIndex == 0 && len(s.SupportedMasks) > 0 && s.SupportedMasks[0] == ChannelMaskStereo {
+		return CreateStereoChannelMap()
 	}
 	return nil
 }

@@ -16,6 +16,15 @@ var (
 // Buffer represents multi-channel audio data
 type Buffer [][]float32
 
+// AudioBuffer represents an audio buffer with Go-native types
+// This abstracts away all the C interop complexity and provides rich functionality
+type AudioBuffer struct {
+	// channels contains the audio data as Go slices
+	channels [][]float32
+	// frameCount is the number of frames in each channel
+	frameCount uint32
+}
+
 // NewBuffer creates a new audio buffer with the given dimensions
 func NewBuffer(channels, frames int) Buffer {
 	buf := make(Buffer, channels)
@@ -182,4 +191,135 @@ func Normalize(buf Buffer, targetPeak float32) {
 	
 	gain := targetPeak / currentPeak
 	ApplyGain(buf, gain)
+}
+
+// AudioBuffer methods for enhanced buffer functionality
+
+// NewAudioBuffer creates a new AudioBuffer with the specified number of channels and frames
+func NewAudioBuffer(channelCount int, frameCount uint32) *AudioBuffer {
+	channels := make([][]float32, channelCount)
+	for i := range channels {
+		channels[i] = make([]float32, frameCount)
+	}
+	
+	return &AudioBuffer{
+		channels:   channels,
+		frameCount: frameCount,
+	}
+}
+
+// GetChannels returns the audio channels as Go slices
+func (ab *AudioBuffer) GetChannels() [][]float32 {
+	return ab.channels
+}
+
+// GetFrameCount returns the number of frames in the buffer
+func (ab *AudioBuffer) GetFrameCount() uint32 {
+	return ab.frameCount
+}
+
+// GetChannelCount returns the number of channels in the buffer
+func (ab *AudioBuffer) GetChannelCount() int {
+	return len(ab.channels)
+}
+
+// CopyFrom copies audio data from another AudioBuffer
+func (ab *AudioBuffer) CopyFrom(src *AudioBuffer) {
+	minChannels := len(ab.channels)
+	if len(src.channels) < minChannels {
+		minChannels = len(src.channels)
+	}
+	
+	minFrames := ab.frameCount
+	if src.frameCount < minFrames {
+		minFrames = src.frameCount
+	}
+	
+	for ch := 0; ch < minChannels; ch++ {
+		copy(ab.channels[ch][:minFrames], src.channels[ch][:minFrames])
+	}
+}
+
+// Clear zeros out all audio data in the buffer
+func (ab *AudioBuffer) Clear() {
+	for ch := range ab.channels {
+		for i := range ab.channels[ch] {
+			ab.channels[ch][i] = 0.0
+		}
+	}
+}
+
+// ApplyGain applies gain to all channels in the buffer
+func (ab *AudioBuffer) ApplyGain(gain float32) {
+	for ch := range ab.channels {
+		for i := range ab.channels[ch] {
+			ab.channels[ch][i] *= gain
+		}
+	}
+}
+
+// Mix mixes audio from another buffer into this buffer
+func (ab *AudioBuffer) Mix(src *AudioBuffer, gain float32) {
+	minChannels := len(ab.channels)
+	if len(src.channels) < minChannels {
+		minChannels = len(src.channels)
+	}
+	
+	minFrames := ab.frameCount
+	if src.frameCount < minFrames {
+		minFrames = src.frameCount
+	}
+	
+	for ch := 0; ch < minChannels; ch++ {
+		for i := uint32(0); i < minFrames; i++ {
+			ab.channels[ch][i] += src.channels[ch][i] * gain
+		}
+	}
+}
+
+// GetPeakLevel returns the peak level (absolute maximum) for a channel
+func (ab *AudioBuffer) GetPeakLevel(channel int) float32 {
+	if channel >= len(ab.channels) {
+		return 0.0
+	}
+	
+	var peak float32 = 0.0
+	for _, sample := range ab.channels[channel] {
+		if abs := float32(sample); abs > peak {
+			if sample < 0 {
+				abs = -sample
+			} else {
+				abs = sample
+			}
+			peak = abs
+		}
+	}
+	
+	return peak
+}
+
+// GetRMSLevel returns the RMS level for a channel
+func (ab *AudioBuffer) GetRMSLevel(channel int) float32 {
+	if channel >= len(ab.channels) {
+		return 0.0
+	}
+	
+	var sum float64 = 0.0
+	for _, sample := range ab.channels[channel] {
+		sum += float64(sample) * float64(sample)
+	}
+	
+	return float32(sum / float64(len(ab.channels[channel])))
+}
+
+// IsSilent returns true if the buffer contains only silence (or near-silence)
+func (ab *AudioBuffer) IsSilent(threshold float32) bool {
+	for ch := range ab.channels {
+		for _, sample := range ab.channels[ch] {
+			if sample > threshold || sample < -threshold {
+				return false
+			}
+		}
+	}
+	return true
 }

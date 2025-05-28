@@ -32,6 +32,7 @@ import "C"
 import (
     "sync"
     "unsafe"
+    "github.com/justyntemme/clapgo/pkg/audio"
 )
 
 // Additional audio port flags not in constants.go
@@ -49,6 +50,18 @@ var (
     audioPortsLock      sync.RWMutex
 )
 
+// convertAudioPortInfo converts audio.PortInfo to api.AudioPortInfo
+func convertAudioPortInfo(audioPort audio.PortInfo) AudioPortInfo {
+    return AudioPortInfo{
+        ID:           audioPort.ID,
+        Name:         audioPort.Name,
+        ChannelCount: audioPort.ChannelCount,
+        Flags:        audioPort.Flags,
+        PortType:     audioPort.PortType,
+        InPlacePair:  audioPort.InPlacePair,
+    }
+}
+
 // RegisterAudioPortsProvider registers a plugin as an audio ports provider
 func RegisterAudioPortsProvider(plugin unsafe.Pointer, provider AudioPortsProvider) {
     audioPortsLock.Lock()
@@ -65,6 +78,13 @@ func UnregisterAudioPortsProvider(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginAudioPortsCount
 func ClapGo_PluginAudioPortsCount(plugin unsafe.Pointer, isInput C.bool) C.uint32_t {
+    // First check audio package registry (preferred)
+    count := audio.GetPortsCount(plugin, bool(isInput))
+    if count > 0 {
+        return C.uint32_t(count)
+    }
+    
+    // Fallback to api package registry
     audioPortsLock.RLock()
     provider, exists := audioPortsProviders[plugin]
     audioPortsLock.RUnlock()
@@ -74,7 +94,7 @@ func ClapGo_PluginAudioPortsCount(plugin unsafe.Pointer, isInput C.bool) C.uint3
         return 1
     }
     
-    count := provider.GetAudioPortCount(bool(isInput))
+    count = provider.GetAudioPortCount(bool(isInput))
     return C.uint32_t(count)
 }
 
@@ -84,11 +104,34 @@ func ClapGo_PluginAudioPortsGet(plugin unsafe.Pointer, index C.uint32_t, isInput
         return false
     }
     
+    cInfo := (*C.clap_audio_port_info_t)(info)
+    
+    // First check audio package registry (preferred)
+    if audioPortInfo, found := audio.GetPortInfo(plugin, uint32(index), bool(isInput)); found {
+        // Convert name to C string
+        nameStr := C.CString(audioPortInfo.Name)
+        defer C.free(unsafe.Pointer(nameStr))
+        
+        // Convert port type to C string
+        portType := C.CString(audioPortInfo.PortType)
+        defer C.free(unsafe.Pointer(portType))
+        
+        C.populate_audio_port_info(
+            cInfo,
+            C.uint32_t(audioPortInfo.ID),
+            nameStr,
+            C.uint32_t(audioPortInfo.ChannelCount),
+            C.uint32_t(audioPortInfo.Flags),
+            portType,
+            C.uint32_t(audioPortInfo.InPlacePair),
+        )
+        return true
+    }
+    
+    // Fallback to api package registry
     audioPortsLock.RLock()
     provider, exists := audioPortsProviders[plugin]
     audioPortsLock.RUnlock()
-    
-    cInfo := (*C.clap_audio_port_info_t)(info)
     
     if !exists || provider == nil {
         // Default implementation: single stereo port
