@@ -52,7 +52,8 @@ type Interface interface {
 type ProcessResult int
 
 const (
-	ProcessContinue       ProcessResult = 0
+	ProcessResultError   ProcessResult = -1
+	ProcessContinue      ProcessResult = 0
 	ProcessContinueIfNotQuiet ProcessResult = 1
 	ProcessTail          ProcessResult = 2
 	ProcessSleep         ProcessResult = 3

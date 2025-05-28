@@ -5,6 +5,7 @@ import (
 	"unsafe"
 	
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/event"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/state"
@@ -27,14 +28,14 @@ type PluginBase struct {
 	Logger       *hostpkg.Logger
 	
 	// Extensions
-	ThreadCheck  *api.ThreadChecker
+	ThreadCheck  *thread.Checker
 	TrackInfo    *api.HostTrackInfo
 	
 	// Plugin info
 	Info Info
 	
 	// Diagnostics
-	PoolDiagnostics api.EventPoolDiagnostics
+	PoolDiagnostics event.Diagnostics
 }
 
 // NewPluginBase creates a new plugin base with common initialization
@@ -56,7 +57,7 @@ func (b *PluginBase) InitWithHost(host unsafe.Pointer) {
 	
 	if host != nil {
 		// Initialize thread checker
-		b.ThreadCheck = api.NewThreadChecker(host)
+		b.ThreadCheck = thread.NewChecker(host)
 		if b.ThreadCheck.IsAvailable() && b.Logger != nil {
 			b.Logger.Info("Thread Check extension available - thread safety validation enabled")
 		}

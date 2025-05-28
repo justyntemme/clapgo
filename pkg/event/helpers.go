@@ -2,6 +2,7 @@ package event
 
 import (
 	"unsafe"
+	"github.com/justyntemme/clapgo/pkg/host"
 )
 
 // Diagnostics tracks event processing statistics for periodic logging
@@ -11,14 +12,15 @@ type Diagnostics struct {
 }
 
 // SetupPoolLogging configures event pool logging for diagnostics
-func SetupPoolLogging(processor *Processor, logger Logger) {
+func SetupPoolLogging(processor *Processor, logger *host.Logger) {
 	if processor == nil || logger == nil {
 		return
 	}
 	
-	if pool := processor.GetPool(); pool != nil {
-		pool.SetLogger(logger)
-	}
+	// TODO: Implement pool logging when Pool has SetLogger method
+	// if pool := processor.GetPool(); pool != nil {
+	// 	pool.SetLogger(logger)
+	// }
 }
 
 // LogPoolDiagnostics logs pool diagnostics every N process calls
@@ -26,9 +28,10 @@ func (d *Diagnostics) LogPoolDiagnostics(processor *Processor, interval uint64) 
 	d.processCallCount++
 	if d.processCallCount%interval == 0 && d.processCallCount != d.lastEventPoolDump {
 		d.lastEventPoolDump = d.processCallCount
-		if pool := processor.GetPool(); pool != nil {
-			pool.LogDiagnostics()
-		}
+		// TODO: Implement pool diagnostics when Pool has LogDiagnostics method
+		// if pool := processor.GetPool(); pool != nil {
+		// 	pool.LogDiagnostics()
+		// }
 	}
 }
 
@@ -53,18 +56,18 @@ func (s *ProcessingStats) Reset() {
 }
 
 // Log outputs current statistics
-func (s *ProcessingStats) Log(logger Logger) {
+func (s *ProcessingStats) Log(logger *host.Logger) {
 	if logger == nil {
 		return
 	}
 	
-	logger.Log(LogSeverityInfo, "Event Processing Statistics:")
-	logger.Log(LogSeverityInfo, "  Total Events: %d", s.EventsProcessed)
-	logger.Log(LogSeverityInfo, "  Param Events: %d", s.ParamEvents)
-	logger.Log(LogSeverityInfo, "  Note Events: %d", s.NoteEvents)
-	logger.Log(LogSeverityInfo, "  MIDI Events: %d", s.MIDIEvents)
-	logger.Log(LogSeverityInfo, "  Transport Events: %d", s.TransportEvents)
-	logger.Log(LogSeverityInfo, "  Process Calls: %d", s.ProcessCalls)
+	logger.Log(host.SeverityInfo, "Event Processing Statistics:")
+	logger.Log(host.SeverityInfo, "  Total Events: %d", s.EventsProcessed)
+	logger.Log(host.SeverityInfo, "  Param Events: %d", s.ParamEvents)
+	logger.Log(host.SeverityInfo, "  Note Events: %d", s.NoteEvents)
+	logger.Log(host.SeverityInfo, "  MIDI Events: %d", s.MIDIEvents)
+	logger.Log(host.SeverityInfo, "  Transport Events: %d", s.TransportEvents)
+	logger.Log(host.SeverityInfo, "  Process Calls: %d", s.ProcessCalls)
 }
 
 // ProcessStandardMIDI handles common MIDI messages and converts to note events

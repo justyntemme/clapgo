@@ -9,6 +9,7 @@ import (
 	
 	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
 	"github.com/justyntemme/clapgo/pkg/thread"
@@ -47,6 +48,7 @@ type GainPlugin struct {
 	*plugin.PluginBase
 	*audio.StereoPortProvider
 	*audio.SurroundSupport
+	event.NoOpHandler
 	
 	gain param.AtomicFloat64
 }
@@ -92,7 +94,7 @@ func (p *GainPlugin) Reset() {
 	p.gain.Store(1.0)
 }
 
-func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *event.Processor) int {
 	thread.AssertAudioThread("GainPlugin.Process")
 	if p.ThreadCheck != nil {
 		p.ThreadCheck.AssertAudioThread("GainPlugin.Process")
@@ -122,15 +124,15 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	return api.ProcessContinue
 }
 
-func (p *GainPlugin) processEvents(events api.EventHandler, frameCount uint32) {
+func (p *GainPlugin) processEvents(events *event.Processor, frameCount uint32) {
 	if events == nil {
 		return
 	}
-	events.ProcessTypedEvents(p)
+	events.ProcessAll(p)
 }
 
-// HandleParamValue handles parameter value changes (implements api.TypedEventHandler)
-func (p *GainPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint32) {
+// HandleParamValue handles parameter value changes (implements event.Handler)
+func (p *GainPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
 	switch paramEvent.ParamID {
 	case ParamGain:
 		// Clamp value to valid range
@@ -161,15 +163,15 @@ func (p *GainPlugin) ProcessWithHandle(process unsafe.Pointer) int {
 	steadyTime := int64(cProcess.steady_time)
 	framesCount := uint32(cProcess.frames_count)
 	
-	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
-	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
+	audioIn := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
+	audioOut := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
 	
-	eventHandler := api.NewEventProcessor(
+	eventHandler := event.NewProcessor(
 		unsafe.Pointer(cProcess.in_events),
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
-	api.SetupPoolLogging(eventHandler, p.Logger)
+	event.SetupPoolLogging(eventHandler, p.Logger)
 	
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
 	
@@ -235,7 +237,7 @@ func (p *GainPlugin) ParamTextToValue(paramID uint32, text string, value *C.doub
 
 func (p *GainPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
 	if inEvents != nil {
-		eventHandler := api.NewEventProcessor(inEvents, outEvents)
+		eventHandler := event.NewProcessor(inEvents, outEvents)
 		p.processEvents(eventHandler, 0)
 	}
 }

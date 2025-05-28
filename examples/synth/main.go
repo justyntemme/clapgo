@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/param"
 	"math"
 	"os"
 	"path/filepath"
@@ -248,7 +249,7 @@ func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
 		return 0
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.uint32_t(p.paramManager.GetParameterCount())
+	return C.uint32_t(p.paramManager.Count())
 }
 
 //export ClapGo_PluginParamsGetInfo
@@ -259,13 +260,13 @@ func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info un
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
 	// Get parameter info from manager
-	paramInfo, err := p.paramManager.GetParameterInfoByIndex(uint32(index))
+	paramInfo, err := p.paramManager.GetInfoByIndex(uint32(index))
 	if err != nil {
 		return C.bool(false)
 	}
 	
 	// Convert to C struct using helper
-	api.ParamInfoToC(paramInfo, info)
+	param.InfoToC(paramInfo, info)
 	
 	return C.bool(true)
 }
@@ -278,7 +279,7 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
 	// Get current value from parameter manager
-	val := p.paramManager.GetParameterValue(uint32(paramID))
+	val := p.paramManager.Get(uint32(paramID))
 	*value = C.double(val)
 	
 	return C.bool(true)
@@ -395,14 +396,14 @@ func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	}
 	
 	// Write parameter count
-	paramCount := p.paramManager.GetParameterCount()
+	paramCount := p.paramManager.Count()
 	if err := out.WriteUint32(paramCount); err != nil {
 		return false
 	}
 	
 	// Write each parameter ID and value
 	for i := uint32(0); i < paramCount; i++ {
-		info, err := p.paramManager.GetParameterInfoByIndex(i)
+		info, err := p.paramManager.GetInfoByIndex(i)
 		if err != nil {
 			return false
 		}
@@ -413,7 +414,7 @@ func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		}
 		
 		// Write parameter value
-		value := p.paramManager.GetParameterValue(info.ID)
+		value := p.paramManager.Get(info.ID)
 		if err := out.WriteFloat64(value); err != nil {
 			return false
 		}
@@ -542,18 +543,23 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		// Update parameter using helper
 		switch paramID {
 		case 1: // Volume
-			api.UpdateParameterAtomic(&p.volume, value, p.paramManager, paramID)
+			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(value)))
+			p.paramManager.Set(paramID, value)
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
-			p.paramManager.SetParameterValue(paramID, value)
+			p.paramManager.Set(paramID, value)
 		case 3: // Attack
-			api.UpdateParameterAtomic(&p.attack, value, p.paramManager, paramID)
+			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(value)))
+			p.paramManager.Set(paramID, value)
 		case 4: // Decay
-			api.UpdateParameterAtomic(&p.decay, value, p.paramManager, paramID)
+			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(value)))
+			p.paramManager.Set(paramID, value)
 		case 5: // Sustain
-			api.UpdateParameterAtomic(&p.sustain, value, p.paramManager, paramID)
+			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(value)))
+			p.paramManager.Set(paramID, value)
 		case 6: // Release
-			api.UpdateParameterAtomic(&p.release, value, p.paramManager, paramID)
+			atomic.StoreInt64(&p.release, int64(api.FloatToBits(value)))
+			p.paramManager.Set(paramID, value)
 		}
 	}
 	
@@ -784,8 +790,11 @@ type Voice struct {
 	Brightness        float64  // Filter/brightness modulation (0.0-1.0)
 	Pressure          float64  // Aftertouch/pressure value (0.0-1.0)
 	
-	// ADSR envelope
-	Envelope    *audio.ADSREnvelope
+	// Simple envelope state (for compatibility with existing code)
+	EnvelopeValue  float64  // Current envelope value (0.0-1.0)
+	ReleasePhase   float64  // Release phase progress (0.0-1.0, -1.0 if not releasing)
+	EnvelopeTime   float64  // Time in current envelope stage
+	EnvelopePhase  int      // ADSR phase: 0=attack, 1=decay, 2=sustain
 }
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
@@ -811,7 +820,7 @@ type SynthPlugin struct {
 	transportInfo TransportInfo
 	
 	// Parameter management using our new abstraction
-	paramManager *api.ParameterManager
+	paramManager *param.Manager
 	
 	// Note port management
 	notePortManager *api.NotePortManager
@@ -851,7 +860,7 @@ func NewSynthPlugin() *SynthPlugin {
 		transportInfo: TransportInfo{
 			Tempo: 120.0,
 		},
-		paramManager: api.NewParameterManager(),
+		paramManager: param.NewManager(),
 		notePortManager: api.NewNotePortManager(),
 	}
 	
@@ -864,15 +873,14 @@ func NewSynthPlugin() *SynthPlugin {
 	atomic.StoreInt64(&plugin.release, int64(api.FloatToBits(0.3)))     // 300ms
 	
 	// Register parameters using our new abstraction
-	plugin.paramManager.RegisterParameter(api.CreatePercentParameter(1, "Volume", 70.0))
-	plugin.paramManager.RegisterParameter(api.CreateFloatParameter(2, "Waveform", 0.0, 2.0, 0.0))
+	plugin.paramManager.Register(param.Percentage(1, "Volume", 70.0))
+	plugin.paramManager.Register(param.Choice(2, "Waveform", 3, 0))
 	
-	// Register ADSR parameters using helper
-	adsr := api.CreateADSRParameters(3, "")
-	plugin.paramManager.RegisterParameter(adsr.Attack)
-	plugin.paramManager.RegisterParameter(adsr.Decay)
-	plugin.paramManager.RegisterParameter(adsr.Sustain)
-	plugin.paramManager.RegisterParameter(adsr.Release)
+	// Register ADSR parameters
+	plugin.paramManager.Register(param.ADSR(3, "Attack", 2.0))    // Max 2 seconds
+	plugin.paramManager.Register(param.ADSR(4, "Decay", 2.0))     // Max 2 seconds  
+	plugin.paramManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
+	plugin.paramManager.Register(param.ADSR(6, "Release", 5.0))   // Max 5 seconds
 	
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(api.CreateDefaultInstrumentPort())
@@ -932,16 +940,16 @@ func (p *SynthPlugin) Init() bool {
 		}
 	}
 	
-	// Initialize context menu provider
-	if p.host != nil {
-		p.contextMenuProvider = api.NewDefaultContextMenuProvider(
-			p.paramManager,
-			"Simple Synth",
-			"1.0.0",
-			p.host,
-		)
-		p.contextMenuProvider.SetAboutMessage("Simple Synth v1.0.0 - A basic subtractive synthesizer")
-	}
+	// TODO: Initialize context menu provider with param.Manager support
+	// if p.host != nil {
+	//	p.contextMenuProvider = api.NewDefaultContextMenuProvider(
+	//		p.paramManager,
+	//		"Simple Synth", 
+	//		"1.0.0",
+	//		p.host,
+	//	)
+	//	p.contextMenuProvider.SetAboutMessage("Simple Synth v1.0.0 - A basic subtractive synthesizer")
+	// }
 	
 	// Check initial track info
 	if p.trackInfo != nil {
@@ -1152,18 +1160,23 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uin
 	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
-		api.UpdateParameterAtomic(&p.volume, paramEvent.Value, p.paramManager, paramEvent.ParamID)
+		atomic.StoreInt64(&p.volume, int64(api.FloatToBits(paramEvent.Value)))
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 2: // Waveform
 		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
-		p.paramManager.SetParameterValue(paramEvent.ParamID, paramEvent.Value)
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
-		api.UpdateParameterAtomic(&p.attack, paramEvent.Value, p.paramManager, paramEvent.ParamID)
+		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(paramEvent.Value)))
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 4: // Decay
-		api.UpdateParameterAtomic(&p.decay, paramEvent.Value, p.paramManager, paramEvent.ParamID)
+		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(paramEvent.Value)))
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 5: // Sustain
-		api.UpdateParameterAtomic(&p.sustain, paramEvent.Value, p.paramManager, paramEvent.ParamID)
+		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(paramEvent.Value)))
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 6: // Release
-		api.UpdateParameterAtomic(&p.release, paramEvent.Value, p.paramManager, paramEvent.ParamID)
+		atomic.StoreInt64(&p.release, int64(api.FloatToBits(paramEvent.Value)))
+		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	}
 }
 
@@ -1228,23 +1241,19 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
 	voiceIndex := p.findFreeVoice()
 	
 	// Create a new voice with validated data
-	envelope := audio.NewADSREnvelope(p.sampleRate)
-	// Set envelope parameters from current plugin state
-	attack := api.LoadParameterAtomic(&p.attack)
-	decay := api.LoadParameterAtomic(&p.decay)
-	sustain := api.LoadParameterAtomic(&p.sustain)
-	release := api.LoadParameterAtomic(&p.release)
-	envelope.SetADSR(attack, decay, sustain, release)
-	envelope.Trigger()
+	// (envelope parameters will be used directly in processing)
 	
 	p.voices[voiceIndex] = &Voice{
-		NoteID:      noteEvent.NoteID,
-		Channel:     noteEvent.Channel,
-		Key:         noteEvent.Key,
-		Velocity:    velocity,
-		Phase:       0.0,
-		IsActive:    true,
-		Envelope:    envelope,
+		NoteID:        noteEvent.NoteID,
+		Channel:       noteEvent.Channel,
+		Key:           noteEvent.Key,
+		Velocity:      velocity,
+		Phase:         0.0,
+		IsActive:      true,
+		EnvelopeValue: 0.0,
+		ReleasePhase:  -1.0,
+		EnvelopeTime:  0.0,
+		EnvelopePhase: 0,
 	}
 	
 	if p.logger != nil {
@@ -1266,7 +1275,7 @@ func (p *SynthPlugin) HandleNoteOff(noteEvent *api.NoteEvent, time uint32) {
 		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
 		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Start the release phase
-			voice.Envelope.Release()
+			voice.ReleasePhase = 0.0
 		}
 	}
 }
@@ -1704,7 +1713,7 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 	// Check for common actions first
 	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
 		// For synth parameters, also update atomic values
-		info, _ := p.paramManager.GetParameterInfo(paramID)
+		info, _ := p.paramManager.GetInfo(paramID)
 		switch paramID {
 		case 1: // Volume
 			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(info.DefaultValue)))
@@ -1732,7 +1741,7 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 	// Handle synth-specific actions
 	switch actionID {
 	case 1101: // Sine wave preset
-		p.paramManager.SetParameterValue(2, 0.0)
+		p.paramManager.Set(2, 0.0)
 		atomic.StoreInt64(&p.waveform, 0)
 		if p.host != nil {
 			// TODO: Request parameter flush to notify host
@@ -1740,7 +1749,7 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 		return true
 		
 	case 1102: // Saw wave preset
-		p.paramManager.SetParameterValue(2, 1.0)
+		p.paramManager.Set(2, 1.0)
 		atomic.StoreInt64(&p.waveform, 1)
 		if p.host != nil {
 			// TODO: Request parameter flush to notify host
@@ -1748,7 +1757,7 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 		return true
 		
 	case 1103: // Square wave preset
-		p.paramManager.SetParameterValue(2, 2.0)
+		p.paramManager.Set(2, 2.0)
 		atomic.StoreInt64(&p.waveform, 2)
 		if p.host != nil {
 			// TODO: Request parameter flush to notify host
