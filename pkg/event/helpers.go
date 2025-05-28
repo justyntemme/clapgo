@@ -17,10 +17,9 @@ func SetupPoolLogging(processor *Processor, logger *host.Logger) {
 		return
 	}
 	
-	// TODO: Implement pool logging when Pool has SetLogger method
-	// if pool := processor.GetPool(); pool != nil {
-	// 	pool.SetLogger(logger)
-	// }
+	if pool := processor.GetPool(); pool != nil {
+		pool.SetLogger(logger)
+	}
 }
 
 // LogPoolDiagnostics logs pool diagnostics every N process calls
@@ -28,10 +27,9 @@ func (d *Diagnostics) LogPoolDiagnostics(processor *Processor, interval uint64) 
 	d.processCallCount++
 	if d.processCallCount%interval == 0 && d.processCallCount != d.lastEventPoolDump {
 		d.lastEventPoolDump = d.processCallCount
-		// TODO: Implement pool diagnostics when Pool has LogDiagnostics method
-		// if pool := processor.GetPool(); pool != nil {
-		// 	pool.LogDiagnostics()
-		// }
+		if pool := processor.GetPool(); pool != nil {
+			pool.LogDiagnostics()
+		}
 	}
 }
 

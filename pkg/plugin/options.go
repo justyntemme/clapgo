@@ -106,10 +106,12 @@ func WithHost(host unsafe.Pointer) Option {
 	}
 }
 
-// WithLogger sets a custom logger
+// WithLogger sets a custom logger (interface{} is kept for future extensibility)
 func WithLogger(logger interface{}) Option {
 	return func(p *PluginBase) error {
-		// TODO: implement custom logger support
+		// For now, we rely on the host logger which is set via InitWithHost
+		// This option is reserved for future custom logger implementations
+		// such as file loggers, network loggers, etc.
 		return nil
 	}
 }

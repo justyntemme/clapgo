@@ -1,8 +1,11 @@
 package event
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
+	
+	"github.com/justyntemme/clapgo/pkg/host"
 )
 
 // Pool manages pre-allocated events to avoid allocations during audio processing
@@ -24,6 +27,9 @@ type Pool struct {
 	poolMisses        uint64
 	highWaterMark     uint64
 	currentAllocated  uint64
+	
+	// Logger for diagnostics
+	logger *host.Logger
 }
 
 // NewPool creates a new event pool
@@ -241,4 +247,25 @@ func (p *Pool) GetDiagnostics() (totalAllocations, poolHits, poolMisses, highWat
 		atomic.LoadUint64(&p.poolMisses),
 		atomic.LoadUint64(&p.highWaterMark),
 		atomic.LoadUint64(&p.currentAllocated)
+}
+
+// SetLogger sets the logger for pool diagnostics
+func (p *Pool) SetLogger(logger *host.Logger) {
+	p.logger = logger
+}
+
+// LogDiagnostics logs current pool diagnostics
+func (p *Pool) LogDiagnostics() {
+	if p.logger == nil {
+		return
+	}
+	
+	totalAllocations, poolHits, poolMisses, highWaterMark, currentAllocated := p.GetDiagnostics()
+	hitRate := float64(0)
+	if totalAllocations > 0 {
+		hitRate = float64(poolHits) / float64(totalAllocations) * 100
+	}
+	
+	p.logger.Debug(fmt.Sprintf("Event Pool Diagnostics: Total=%d Hits=%d Misses=%d HitRate=%.1f%% HighWaterMark=%d Current=%d",
+		totalAllocations, poolHits, poolMisses, hitRate, highWaterMark, currentAllocated))
 }
