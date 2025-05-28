@@ -19,9 +19,13 @@ package main
 //     return NULL;
 // }
 import "C"
+
 import (
-	"encoding/json"
 	"fmt"
+	"math"
+	"sync/atomic"
+	"unsafe"
+
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/extension"
@@ -30,17 +34,11 @@ import (
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
 	"github.com/justyntemme/clapgo/pkg/process"
-	"github.com/justyntemme/clapgo/pkg/state"
 	"github.com/justyntemme/clapgo/pkg/thread"
 	"github.com/justyntemme/clapgo/pkg/util"
-	"math"
-	"runtime/cgo"
-	"sync/atomic"
-	"unsafe"
 )
 
 // This example demonstrates a simple synthesizer plugin using the new API abstractions.
-
 
 // Export Go plugin functionality
 var (
@@ -52,555 +50,58 @@ func init() {
 	synthPlugin = NewSynthPlugin()
 }
 
-// Standardized exports for manifest system
-
-//export ClapGo_CreatePlugin
-func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
-	id := C.GoString(pluginID)
-	if id == PluginID {
-		// Store the host pointer and create utilities
-		synthPlugin.Host = host
-		synthPlugin.Logger = hostpkg.NewLogger(host)
-		
-		// Log plugin creation
-		if synthPlugin.Logger != nil {
-			synthPlugin.Logger.Info("Creating synth plugin instance")
-		}
-		
-		handle := cgo.NewHandle(synthPlugin)
-		return unsafe.Pointer(handle)
-	}
-	return nil
-}
-
-//export ClapGo_GetVersion
-func ClapGo_GetVersion(major, minor, patch *C.uint32_t) C.bool {
-	if major != nil {
-		*major = C.uint32_t(1)
-	}
-	if minor != nil {
-		*minor = C.uint32_t(0)
-	}
-	if patch != nil {
-		*patch = C.uint32_t(0)
-	}
-	return C.bool(true)
-}
-
-//export ClapGo_GetPluginID
-func ClapGo_GetPluginID(pluginID *C.char) *C.char {
-	return C.CString(synthPlugin.GetPluginID())
-}
-
-//export ClapGo_GetPluginName
-func ClapGo_GetPluginName(pluginID *C.char) *C.char {
-	return C.CString(synthPlugin.GetPluginInfo().Name)
-}
-
-//export ClapGo_GetPluginVendor
-func ClapGo_GetPluginVendor(pluginID *C.char) *C.char {
-	return C.CString(synthPlugin.GetPluginInfo().Vendor)
-}
-
-//export ClapGo_GetPluginVersion
-func ClapGo_GetPluginVersion(pluginID *C.char) *C.char {
-	return C.CString(synthPlugin.GetPluginInfo().Version)
-}
-
-//export ClapGo_GetPluginDescription
-func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
-	return C.CString(synthPlugin.GetPluginInfo().Description)
-}
-
-//export ClapGo_PluginInit
-func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	if p.Init() {
-		// Register as voice info provider after successful init
-		// Voice info provider registration moved to extension system
-		return C.bool(true)
-	}
-	return C.bool(false)
-}
-
-//export ClapGo_PluginDestroy
-func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*SynthPlugin)
-	// Unregister voice info provider before destroying
-	// Voice info provider unregistration moved to extension system
-	p.Destroy()
-	handle.Delete()
-}
-
-//export ClapGo_PluginActivate
-func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames, maxFrames C.uint32_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
-}
-
-//export ClapGo_PluginDeactivate
-func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.Deactivate()
-}
-
-//export ClapGo_PluginStartProcessing
-func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.StartProcessing())
-}
-
-//export ClapGo_PluginStopProcessing
-func ClapGo_PluginStopProcessing(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.StopProcessing()
-}
-
-//export ClapGo_PluginReset
-func ClapGo_PluginReset(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.Reset()
-}
-
-//export ClapGo_PluginProcess
-func ClapGo_PluginProcess(plugin unsafe.Pointer, processPtr unsafe.Pointer) C.int32_t {
-	// Mark this thread as audio thread for debug builds
-	thread.DebugMarkAudioThread()
-	defer thread.DebugUnmarkAudioThread()
-	
-	if plugin == nil || processPtr == nil {
-		return C.int32_t(process.ProcessError)
-	}
-	
-	handle := cgo.Handle(plugin)
-	p := handle.Value().(*SynthPlugin)
-	
-	// Convert the C clap_process_t to Go parameters
-	cProcess := (*C.clap_process_t)(processPtr)
-	
-	// Extract steady time and frame count
-	steadyTime := int64(cProcess.steady_time)
-	framesCount := uint32(cProcess.frames_count)
-	
-	// Convert audio buffers using our abstraction - NO MORE MANUAL CONVERSION!
-	audioIn := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
-	audioOut := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
-	
-	// Create event handler using the new abstraction - NO MORE MANUAL EVENT HANDLING!
-	eventHandler := event.NewEventProcessor(
-		unsafe.Pointer(cProcess.in_events),
-		unsafe.Pointer(cProcess.out_events),
-	)
-	
-	// Setup event pool logging
-	// TODO: Update when logger types are unified
-	
-	// Call the actual Go process method
-	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
-	
-	// Log event pool diagnostics periodically (every 1000 calls)
-	if p.poolDiagnostics != nil {
-		p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
-	}
-	
-	return C.int32_t(result)
-}
-
-//export ClapGo_PluginGetExtension
-func ClapGo_PluginGetExtension(plugin unsafe.Pointer, id *C.char) unsafe.Pointer {
-	if plugin == nil {
-		return nil
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	extID := C.GoString(id)
-	return p.GetExtension(extID)
-}
-
-//export ClapGo_PluginOnMainThread
-func ClapGo_PluginOnMainThread(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.OnMainThread()
-}
-
-//export ClapGo_PluginParamsCount
-func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.uint32_t(p.ParamManager.Count())
-}
-
-//export ClapGo_PluginParamsGetInfo
-func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info unsafe.Pointer) C.bool {
-	if plugin == nil || info == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	err := p.GetParamInfo(uint32(index), info)
-	return C.bool(err == nil)
-}
-
-//export ClapGo_PluginParamsGetValue
-func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, value *C.double) C.bool {
-	if plugin == nil || value == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.GetParamValue(uint32(paramID), unsafe.Pointer(value)))
-}
-
-//export ClapGo_PluginParamsValueToText
-func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.ParamValueToText(uint32(paramID), float64(value), unsafe.Pointer(buffer), uint32(size)))
-}
-
-//export ClapGo_PluginParamsTextToValue
-func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, text *C.char, value *C.double) C.bool {
-	if plugin == nil || text == nil || value == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.bool(p.ParamTextToValue(uint32(paramID), C.GoString(text), unsafe.Pointer(value)))
-}
-
-//export ClapGo_PluginParamsFlush
-func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, outEvents unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.ParamsFlush(inEvents, outEvents)
-}
-
-//export ClapGo_PluginStateSave
-func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	out := state.NewClapOutputStream(stream)
-	
-	// Write state version
-	if err := out.WriteUint32(1); err != nil {
-		return false
-	}
-	
-	// Write parameter count
-	paramCount := p.ParamManager.Count()
-	if err := out.WriteUint32(paramCount); err != nil {
-		return false
-	}
-	
-	// Write each parameter ID and value
-	for i := uint32(0); i < paramCount; i++ {
-		info, err := p.ParamManager.GetInfoByIndex(i)
-		if err != nil {
-			return false
-		}
-		
-		// Write parameter ID
-		if err := out.WriteUint32(info.ID); err != nil {
-			return false
-		}
-		
-		// Write parameter value
-		value := p.ParamManager.Get(info.ID)
-		if err := out.WriteFloat64(value); err != nil {
-			return false
-		}
-	}
-	
-	// Save custom state data
-	stateData := p.SaveState()
-	jsonData, err := json.Marshal(stateData)
-	if err != nil {
-		return false
-	}
-	
-	// Write JSON length and data
-	if err := out.WriteUint32(uint32(len(jsonData))); err != nil {
-		return false
-	}
-	if _, err := out.Write(jsonData); err != nil {
-		return false
-	}
-	
-	return C.bool(true)
-}
-
-//export ClapGo_PluginNotePortsCount
-func ClapGo_PluginNotePortsCount(plugin unsafe.Pointer, isInput C.bool) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Plugin implements note ports extension directly
-	npm := p.GetNotePortManager()
-	if npm == nil {
-		return 0
-	}
-	
-	if isInput {
-		return C.uint32_t(npm.GetInputPortCount())
-	}
-	return C.uint32_t(npm.GetOutputPortCount())
-}
-
-//export ClapGo_PluginNotePortsGet
-func ClapGo_PluginNotePortsGet(plugin unsafe.Pointer, index C.uint32_t, isInput C.bool, info unsafe.Pointer) C.bool {
-	if plugin == nil || info == nil {
-		return false
-	}
-	
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Plugin implements note ports extension directly
-	npm := p.GetNotePortManager()
-	
-	if npm == nil {
-		return false
-	}
-	
-	var portInfo *audio.NotePortInfo
-	if isInput {
-		portInfo = npm.GetInputPort(uint32(index))
-	} else {
-		portInfo = npm.GetOutputPort(uint32(index))
-	}
-	
-	if portInfo == nil {
-		return false
-	}
-	
-	// Cast to C structure
-	cInfo := (*C.clap_note_port_info_t)(info)
-	
-	// Convert Go NotePortInfo to C structure
-	cInfo.id = C.uint32_t(portInfo.ID)
-	cInfo.supported_dialects = C.uint32_t(portInfo.SupportedDialects)
-	cInfo.preferred_dialect = C.uint32_t(portInfo.PreferredDialect)
-	
-	// Copy name with null termination
-	nameBytes := []byte(portInfo.Name)
-	if len(nameBytes) > 255 {
-		nameBytes = nameBytes[:255]
-	}
-	for i, b := range nameBytes {
-		cInfo.name[i] = C.char(b)
-	}
-	cInfo.name[len(nameBytes)] = 0
-	
-	return true
-}
-
-
-//export ClapGo_PluginStateLoad
-func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	in := state.NewClapInputStream(stream)
-	
-	// Read state version
-	version, err := in.ReadUint32()
-	if err != nil || version != 1 {
-		return false
-	}
-	
-	// Read parameter count
-	paramCount, err := in.ReadUint32()
-	if err != nil {
-		return false
-	}
-	
-	// Read each parameter ID and value
-	for i := uint32(0); i < paramCount; i++ {
-		// Read parameter ID
-		paramID, err := in.ReadUint32()
-		if err != nil {
-			return false
-		}
-		
-		// Read parameter value
-		value, err := in.ReadFloat64()
-		if err != nil {
-			return false
-		}
-		
-		// Update parameter using helper
-		switch paramID {
-		case 1: // Volume
-			param.UpdateParameterAtomic(&p.volume, value, p.ParamManager, paramID)
-		case 2: // Waveform
-			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
-			p.ParamManager.Set(paramID, value)
-		case 3: // Attack
-			param.UpdateParameterAtomic(&p.attack, value, p.ParamManager, paramID)
-		case 4: // Decay
-			param.UpdateParameterAtomic(&p.decay, value, p.ParamManager, paramID)
-		case 5: // Sustain
-			param.UpdateParameterAtomic(&p.sustain, value, p.ParamManager, paramID)
-		case 6: // Release
-			param.UpdateParameterAtomic(&p.release, value, p.ParamManager, paramID)
-		}
-	}
-	
-	// Read custom state data
-	jsonLength, err := in.ReadUint32()
-	if err != nil {
-		return false
-	}
-	
-	if jsonLength > 0 {
-		jsonData := make([]byte, jsonLength)
-		if _, err := in.Read(jsonData); err != nil {
-			return false
-		}
-		
-		var stateData map[string]interface{}
-		if err := json.Unmarshal(jsonData, &stateData); err == nil {
-			p.LoadState(stateData)
-		}
-	}
-	
-	return C.bool(true)
-}
-
-// State Context Extension Exports
-
-//export ClapGo_PluginStateSaveWithContext
-func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Log the context type
-	if p.Logger != nil {
-		switch contextType {
-		case C.uint32_t(state.ContextForDuplicate):
-			p.Logger.Info("Saving state for duplicate")
-		case C.uint32_t(state.ContextForProject):
-			p.Logger.Info("Saving state for project")
-		default:
-			p.Logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
-		}
-	}
-	
-	// For all contexts, save everything including voice state
-	return ClapGo_PluginStateSave(plugin, stream)
-}
-
-//export ClapGo_PluginStateLoadWithContext
-func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	if plugin == nil || stream == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Log the context type
-	if p.Logger != nil {
-		switch contextType {
-		case C.uint32_t(state.ContextForDuplicate):
-			p.Logger.Info("Loading state for duplicate")
-		case C.uint32_t(state.ContextForProject):
-			p.Logger.Info("Loading state for project")
-		default:
-			p.Logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
-		}
-	}
-	
-	// Load the state
-	return ClapGo_PluginStateLoad(plugin, stream)
-}
-
-
 // Voice represents a single active note
 type Voice struct {
-	NoteID       int32
-	Channel      int16
-	Key          int16
-	Velocity     float64
-	Phase        float64
-	IsActive     bool
-	
+	NoteID   int32
+	Channel  int16
+	Key      int16
+	Velocity float64
+	Phase    float64
+	IsActive bool
+
 	// Tuning support
-	TuningID     uint64  // ID of tuning to use (0 for equal temperament)
-	
+	TuningID uint64 // ID of tuning to use (0 for equal temperament)
+
 	// Per-voice parameter values (for polyphonic modulation)
 	// These override the global values when non-zero
-	VolumeModulation   float64  // Additional volume modulation (0.0 = no change)
-	PitchBend         float64  // Pitch bend in semitones
-	Brightness        float64  // Filter/brightness modulation (0.0-1.0)
-	Pressure          float64  // Aftertouch/pressure value (0.0-1.0)
-	
+	VolumeModulation float64 // Additional volume modulation (0.0 = no change)
+	PitchBend        float64 // Pitch bend in semitones
+	Brightness       float64 // Filter/brightness modulation (0.0-1.0)
+	Pressure         float64 // Aftertouch/pressure value (0.0-1.0)
+
 	// Simple envelope state (for compatibility with existing code)
-	EnvelopeValue  float64  // Current envelope value (0.0-1.0)
-	ReleasePhase   float64  // Release phase progress (0.0-1.0, -1.0 if not releasing)
-	EnvelopeTime   float64  // Time in current envelope stage
-	EnvelopePhase  int      // ADSR phase: 0=attack, 1=decay, 2=sustain
+	EnvelopeValue float64 // Current envelope value (0.0-1.0)
+	ReleasePhase  float64 // Release phase progress (0.0-1.0, -1.0 if not releasing)
+	EnvelopeTime  float64 // Time in current envelope stage
+	EnvelopePhase int     // ADSR phase: 0=attack, 1=decay, 2=sustain
 }
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
 	*plugin.PluginBase
 	event.NoOpHandler // Embed to get default no-op implementations
-	
+
 	// Plugin state
-	voices       [16]*Voice  // Maximum 16 voices
-	
+	voices [16]*Voice // Maximum 16 voices
+
 	// Parameters with atomic storage for thread safety
-	volume       int64  // atomic storage for volume (0.0-1.0)
-	waveform     int64  // atomic storage for waveform (0-2)
-	attack       int64  // atomic storage for attack time
-	decay        int64  // atomic storage for decay time  
-	sustain      int64  // atomic storage for sustain level
-	release      int64  // atomic storage for release time
-	
+	volume   int64 // atomic storage for volume (0.0-1.0)
+	waveform int64 // atomic storage for waveform (0-2)
+	attack   int64 // atomic storage for attack time
+	decay    int64 // atomic storage for decay time
+	sustain  int64 // atomic storage for sustain level
+	release  int64 // atomic storage for release time
+
 	// Transport state
 	transportInfo TransportInfo
-	
+
 	// Note port management
 	notePortManager *audio.NotePortManager
-	
+
 	// Host utilities (non-base specific)
 	transportControl *hostpkg.TransportControl
-	tuning       *extension.HostTuning
-	
+	tuning           *extension.HostTuning
+
 	// Event pool diagnostics
 	poolDiagnostics *event.Diagnostics
 }
@@ -613,10 +114,10 @@ type TransportInfo struct {
 		Numerator   int
 		Denominator int
 	}
-	BarNumber     int
-	BeatPosition  float64
+	BarNumber       int
+	BeatPosition    float64
 	SecondsPosition float64
-	IsLooping     bool
+	IsLooping       bool
 }
 
 // NewSynthPlugin creates a new synth plugin
@@ -632,7 +133,7 @@ func NewSynthPlugin() *SynthPlugin {
 		Support:     "https://github.com/justyntemme/clapgo/issues",
 		Features:    []string{plugin.FeatureInstrument, plugin.FeatureStereo},
 	}
-	
+
 	plugin := &SynthPlugin{
 		PluginBase: plugin.NewPluginBase(pluginInfo),
 		transportInfo: TransportInfo{
@@ -641,28 +142,28 @@ func NewSynthPlugin() *SynthPlugin {
 		notePortManager: audio.NewNotePortManager(),
 		poolDiagnostics: &event.Diagnostics{},
 	}
-	
+
 	// Set default values atomically
-	atomic.StoreInt64(&plugin.volume, int64(util.AtomicFloat64ToBits(0.7)))      // -3dB
-	atomic.StoreInt64(&plugin.waveform, 0)                          // sine
-	atomic.StoreInt64(&plugin.attack, int64(util.AtomicFloat64ToBits(0.01)))     // 10ms
-	atomic.StoreInt64(&plugin.decay, int64(util.AtomicFloat64ToBits(0.1)))       // 100ms
-	atomic.StoreInt64(&plugin.sustain, int64(util.AtomicFloat64ToBits(0.7)))     // 70%
-	atomic.StoreInt64(&plugin.release, int64(util.AtomicFloat64ToBits(0.3)))     // 300ms
-	
+	atomic.StoreInt64(&plugin.volume, int64(util.AtomicFloat64ToBits(0.7)))  // -3dB
+	atomic.StoreInt64(&plugin.waveform, 0)                                   // sine
+	atomic.StoreInt64(&plugin.attack, int64(util.AtomicFloat64ToBits(0.01))) // 10ms
+	atomic.StoreInt64(&plugin.decay, int64(util.AtomicFloat64ToBits(0.1)))   // 100ms
+	atomic.StoreInt64(&plugin.sustain, int64(util.AtomicFloat64ToBits(0.7))) // 70%
+	atomic.StoreInt64(&plugin.release, int64(util.AtomicFloat64ToBits(0.3))) // 300ms
+
 	// Register parameters using our new abstraction
 	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
 	plugin.ParamManager.Register(param.Choice(2, "Waveform", 3, 0))
-	
+
 	// Register ADSR parameters
-	plugin.ParamManager.Register(param.ADSR(3, "Attack", 2.0))    // Max 2 seconds
-	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))     // Max 2 seconds  
+	plugin.ParamManager.Register(param.ADSR(3, "Attack", 2.0))         // Max 2 seconds
+	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))          // Max 2 seconds
 	plugin.ParamManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
-	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))   // Max 5 seconds
-	
+	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))        // Max 5 seconds
+
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
-	
+
 	return plugin
 }
 
@@ -670,7 +171,7 @@ func NewSynthPlugin() *SynthPlugin {
 func (p *SynthPlugin) Init() bool {
 	// Mark this as main thread for debug builds
 	thread.DebugSetMainThread()
-	
+
 	// Initialize thread checker
 	if p.Host != nil {
 		p.ThreadCheck = thread.NewChecker(p.Host)
@@ -678,12 +179,12 @@ func (p *SynthPlugin) Init() bool {
 			p.Logger.Info("Thread Check extension available - thread safety validation enabled")
 		}
 	}
-	
+
 	// Initialize track info helper
 	if p.Host != nil {
 		p.TrackInfo = hostpkg.NewTrackInfoProvider(p.Host)
 	}
-	
+
 	// Initialize transport control
 	if p.Host != nil {
 		p.transportControl = hostpkg.NewTransportControl(p.Host)
@@ -691,7 +192,7 @@ func (p *SynthPlugin) Init() bool {
 			p.Logger.Info("Transport control extension initialized")
 		}
 	}
-	
+
 	// Initialize tuning support
 	if p.Host != nil {
 		p.tuning = extension.NewHostTuning(p.Host)
@@ -701,37 +202,37 @@ func (p *SynthPlugin) Init() bool {
 			tunings := p.tuning.GetAllTunings()
 			if len(tunings) > 0 {
 				for _, t := range tunings {
-					p.Logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)", 
+					p.Logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)",
 						t.Name, t.TuningID, t.IsDynamic))
 				}
 			}
 		}
 	}
-	
+
 	if p.Logger != nil {
 		p.Logger.Debug("Synth plugin initialized")
 	}
-	
+
 	// TODO: Initialize context menu provider with param.Manager support
 	// if p.Host != nil {
 	//	p.contextMenuProvider = api.NewDefaultContextMenuProvider(
 	//		p.ParamManager,
-	//		"Simple Synth", 
+	//		"Simple Synth",
 	//		"1.0.0",
 	//		p.Host,
 	//	)
 	//	p.contextMenuProvider.SetAboutMessage("Simple Synth v1.0.0 - A basic subtractive synthesizer")
 	// }
-	
+
 	// Check initial track info
 	if p.TrackInfo != nil {
 		p.OnTrackInfoChanged()
 	}
-	
+
 	// Register as voice info provider
 	// Note: The plugin pointer is the cgo.Handle value returned by CreatePlugin
 	// We can't access it here, so registration will happen externally
-	
+
 	return true
 }
 
@@ -744,16 +245,16 @@ func (p *SynthPlugin) Destroy() {
 func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
 	p.SampleRate = sampleRate
 	p.IsActivated = true
-	
+
 	// Clear all voices
 	for i := range p.voices {
 		p.voices[i] = nil
 	}
-	
+
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
 	}
-	
+
 	return true
 }
 
@@ -790,17 +291,17 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	if !p.IsActivated || !p.IsProcessing {
 		return process.ProcessError
 	}
-	
+
 	// Process events using our new abstraction - NO MORE MANUAL EVENT PARSING!
 	if events != nil {
 		p.processEventHandler(events, framesCount)
 	}
-	
+
 	// If no outputs, nothing to do
 	if len(audioOut) == 0 {
 		return process.ProcessContinue
 	}
-	
+
 	// Get current parameter values atomically
 	volume := param.LoadParameterAtomic(&p.volume)
 	waveform := int(atomic.LoadInt64(&p.waveform))
@@ -808,85 +309,85 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	decay := param.LoadParameterAtomic(&p.decay)
 	sustain := param.LoadParameterAtomic(&p.sustain)
 	release := param.LoadParameterAtomic(&p.release)
-	
+
 	// Get the number of output channels
 	numChannels := len(audioOut)
-	
+
 	// Clear the output buffer
 	for ch := 0; ch < numChannels; ch++ {
 		outChannel := audioOut[ch]
 		if len(outChannel) < int(framesCount) {
 			continue
 		}
-		
+
 		for i := uint32(0); i < framesCount; i++ {
 			outChannel[i] = 0.0
 		}
 	}
-	
+
 	// Process each voice
 	var hasActiveVoices bool
 	for i, voice := range p.voices {
 		if voice != nil && voice.IsActive {
 			hasActiveVoices = true
-			
+
 			// Calculate frequency for this note with pitch bend
 			baseFreq := audio.NoteToFrequency(int(voice.Key))
-			
+
 			// Apply tuning if available
 			if p.tuning != nil && voice.TuningID != 0 {
 				// Apply tuning at the start of the frame
-				baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID, 
+				baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID,
 					int32(voice.Channel), int32(voice.Key), 0)
 			}
-			
+
 			// Apply pitch bend (in semitones)
 			freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
-			
+
 			// Generate audio for this voice
 			for j := uint32(0); j < framesCount; j++ {
 				// Get envelope value
 				env := p.getEnvelopeValue(voice, j, framesCount, attack, decay, sustain, release)
-				
+
 				// Generate sample with optional brightness filtering
 				sample := audio.GenerateWaveformSample(voice.Phase, audio.WaveformType(waveform))
-				
+
 				// Apply brightness as a simple low-pass filter simulation
 				if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
 					// Simple brightness simulation (in real implementation, use proper filter)
-					sample *= (voice.Brightness * 0.7 + 0.3)
+					sample *= (voice.Brightness*0.7 + 0.3)
 				}
-				
+
 				// Apply envelope and velocity
 				sample *= env * voice.Velocity
-				
+
 				// Apply per-voice volume modulation
 				voiceVolume := 1.0 + voice.VolumeModulation
 				if voiceVolume < 0.0 {
 					voiceVolume = 0.0
 				}
 				sample *= voiceVolume
-				
+
 				// Apply pressure (aftertouch) as additional volume modulation
 				if voice.Pressure > 0.0 {
 					// Pressure affects volume (could also affect other parameters)
-					sample *= (1.0 + voice.Pressure * 0.3)
+					sample *= (1.0 + voice.Pressure*0.3)
 				}
-				
+
 				// Apply master volume
 				sample *= volume
-				
+
 				// Add to all output channels
 				for ch := 0; ch < numChannels; ch++ {
 					if len(audioOut[ch]) > int(j) {
 						audioOut[ch][j] += float32(sample)
 					}
 				}
-				
+
 				// Advance oscillator phase
 				voice.Phase = audio.AdvancePhase(voice.Phase, freq, p.SampleRate)
 			}
-			
+
 			// Check if voice is still active
 			if voice.ReleasePhase >= 1.0 {
 				// Send note end event to host if we have a valid note ID
@@ -898,12 +399,12 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			}
 		}
 	}
-	
+
 	// Check if we have any active voices
 	if !hasActiveVoices {
 		return process.ProcessSleep
 	}
-	
+
 	return process.ProcessContinue
 }
 
@@ -912,7 +413,7 @@ func (p *SynthPlugin) processEventHandler(events *event.EventProcessor, frameCou
 	if events == nil {
 		return
 	}
-	
+
 	// Process all events
 	events.ProcessAll(p)
 }
@@ -922,7 +423,7 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 	if buffer == nil || size == 0 {
 		return false
 	}
-	
+
 	// Format based on parameter type
 	var text string
 	switch paramID {
@@ -947,18 +448,18 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 		// Use base implementation for unknown parameters
 		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
 	}
-	
+
 	// Copy string to C buffer
 	bytes := []byte(text)
 	if len(bytes) >= int(size) {
 		bytes = bytes[:size-1]
 	}
-	
+
 	// Convert to C char buffer
 	charBuf := (*[1 << 30]byte)(buffer)
 	copy(charBuf[:size], bytes)
 	charBuf[len(bytes)] = 0
-	
+
 	return true
 }
 
@@ -967,7 +468,7 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 	if value == nil {
 		return false
 	}
-	
+
 	// Parse based on parameter type
 	switch paramID {
 	case 1: // Volume (percentage)
@@ -1002,7 +503,7 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 			return true
 		}
 	}
-	
+
 	// Use base implementation for unknown parameters
 	return p.PluginBase.ParamTextToValue(paramID, text, value)
 }
@@ -1024,7 +525,7 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 		p.handlePolyphonicParameter(*paramEvent)
 		return
 	}
-	
+
 	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
@@ -1055,12 +556,12 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent
 		if voice == nil || !voice.IsActive {
 			continue
 		}
-		
+
 		// Match by note ID if specified
 		if paramEvent.NoteID >= 0 && voice.NoteID != paramEvent.NoteID {
 			continue
 		}
-		
+
 		// Match by key/channel if specified
 		if paramEvent.Key >= 0 && voice.Key != paramEvent.Key {
 			continue
@@ -1068,13 +569,13 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent
 		if paramEvent.Channel >= 0 && voice.Channel != paramEvent.Channel {
 			continue
 		}
-		
+
 		// Apply parameter to this voice
 		switch paramEvent.ParamID {
 		case 1: // Volume modulation
 			voice.VolumeModulation = paramEvent.Value - 1.0 // Store as offset from 1.0
 		case 7: // Pitch bend (new parameter we'll add)
-			voice.PitchBend = paramEvent.Value * 2.0 - 1.0 // Convert 0-1 to -1 to +1 semitones
+			voice.PitchBend = paramEvent.Value*2.0 - 1.0 // Convert 0-1 to -1 to +1 semitones
 		case 8: // Brightness (new parameter)
 			voice.Brightness = paramEvent.Value
 		case 9: // Pressure (new parameter)
@@ -1089,7 +590,7 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
 	}
-	
+
 	// Special transport control: C0 (MIDI note 24) toggles play/pause
 	if noteEvent.Key == 24 && p.transportControl != nil {
 		p.transportControl.RequestTogglePlay()
@@ -1098,19 +599,19 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 		}
 		return // Don't play the note
 	}
-	
+
 	// Ensure velocity is positive
 	velocity := noteEvent.Velocity
 	if velocity <= 0 {
 		velocity = 0.01 // Very quiet but not silent
 	}
-	
+
 	// Find a free voice slot or steal an existing one
 	voiceIndex := p.findFreeVoice()
-	
+
 	// Create a new voice with validated data
 	// (envelope parameters will be used directly in processing)
-	
+
 	p.voices[voiceIndex] = &Voice{
 		NoteID:        noteEvent.NoteID,
 		Channel:       noteEvent.Channel,
@@ -1123,7 +624,7 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 		EnvelopeTime:  0.0,
 		EnvelopePhase: 0,
 	}
-	
+
 	if p.Logger != nil {
 		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
 	}
@@ -1137,11 +638,11 @@ func (p *SynthPlugin) HandleNoteOff(noteEvent *event.NoteEvent, time uint32) {
 		if voice == nil || !voice.IsActive {
 			continue
 		}
-		
+
 		// Match on note ID if provided (non-negative), otherwise match on key and channel
 		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
-		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
-		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
+			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
+				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Start the release phase
 			voice.ReleasePhase = 0.0
 		}
@@ -1156,11 +657,11 @@ func (p *SynthPlugin) HandleNoteChoke(noteEvent *event.NoteEvent, time uint32) {
 		if voice == nil || !voice.IsActive {
 			continue
 		}
-		
+
 		// Match on note ID if provided (non-negative), otherwise match on key and channel
 		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
-		   (noteEvent.NoteID < 0 && voice.Key == noteEvent.Key && 
-		    (noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
+			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
+				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Immediately deactivate the voice
 			p.voices[i] = nil
 		}
@@ -1174,12 +675,12 @@ func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEv
 		if voice == nil || !voice.IsActive {
 			continue
 		}
-		
+
 		// Match by note ID if specified
 		if noteExprEvent.NoteID >= 0 && voice.NoteID != noteExprEvent.NoteID {
 			continue
 		}
-		
+
 		// Match by key/channel if specified
 		if noteExprEvent.Key >= 0 && voice.Key != noteExprEvent.Key {
 			continue
@@ -1187,7 +688,7 @@ func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEv
 		if noteExprEvent.Channel >= 0 && voice.Channel != noteExprEvent.Channel {
 			continue
 		}
-		
+
 		// Apply expression to this voice
 		switch noteExprEvent.ExpressionID {
 		case event.NoteExpressionVolume:
@@ -1210,7 +711,7 @@ func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEv
 func (p *SynthPlugin) HandleMIDI(midiEvent *event.MIDIEvent, time uint32) {
 	// Use the helper to process standard MIDI messages
 	event.ProcessStandardMIDI(midiEvent, p, time)
-	
+
 	// Handle additional MIDI CC messages
 	if len(midiEvent.Data) >= 3 {
 		status := midiEvent.Data[0] & 0xF0
@@ -1236,27 +737,27 @@ func (p *SynthPlugin) findFreeVoice() int {
 			return i
 		}
 	}
-	
+
 	// If no empty slots, find the voice in release phase with the most progress
 	bestIndex := 0
 	bestReleasePhase := -1.0
-	
+
 	for i, voice := range p.voices {
 		if voice != nil && voice.ReleasePhase >= 0.0 && voice.ReleasePhase > bestReleasePhase {
 			bestIndex = i
 			bestReleasePhase = voice.ReleasePhase
 		}
 	}
-	
+
 	// If we found a voice in release phase, use that
 	if bestReleasePhase >= 0.0 {
 		return bestIndex
 	}
-	
+
 	// No voices in release, steal the quietest voice
 	quietestIdx := 0
 	quietestLevel := 1.0
-	
+
 	for i, voice := range p.voices {
 		if voice != nil && voice.IsActive {
 			// Consider envelope value and velocity
@@ -1267,7 +768,7 @@ func (p *SynthPlugin) findFreeVoice() int {
 			}
 		}
 	}
-	
+
 	return quietestIdx
 }
 
@@ -1275,7 +776,7 @@ func (p *SynthPlugin) findFreeVoice() int {
 func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
 	// Time increment per sample
 	timeInc := 1.0 / p.SampleRate
-	
+
 	// If in release phase
 	if voice.ReleasePhase >= 0.0 {
 		// Update release phase
@@ -1284,7 +785,7 @@ func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uin
 			releaseSamples = 1
 		}
 		voice.ReleasePhase += 1.0 / releaseSamples
-		
+
 		// Calculate release envelope (exponential decay from last envelope value)
 		if voice.ReleasePhase >= 1.0 {
 			voice.EnvelopeValue = 0.0
@@ -1293,10 +794,10 @@ func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uin
 		}
 		return voice.EnvelopeValue
 	}
-	
+
 	// Update envelope time
 	voice.EnvelopeTime += timeInc
-	
+
 	// Attack phase
 	if voice.EnvelopePhase == 0 {
 		if attack <= 0 {
@@ -1311,7 +812,7 @@ func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uin
 			voice.EnvelopeValue = voice.EnvelopeTime / attack
 		}
 	}
-	
+
 	// Decay phase
 	if voice.EnvelopePhase == 1 {
 		if decay <= 0 {
@@ -1325,16 +826,14 @@ func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uin
 			voice.EnvelopeValue = 1.0 - decayProgress*(1.0-sustain)
 		}
 	}
-	
+
 	// Sustain phase
 	if voice.EnvelopePhase == 2 {
 		voice.EnvelopeValue = sustain
 	}
-	
+
 	return voice.EnvelopeValue
 }
-
-
 
 // GetNotePortManager returns the plugin's note port manager
 func (p *SynthPlugin) GetNotePortManager() *audio.NotePortManager {
@@ -1346,7 +845,7 @@ func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 	// All extensions are handled by the C bridge based on exported functions
 	// The C bridge checks for the presence of required exports and provides
 	// the extension implementation if available
-	
+
 	// Delegate to base plugin for any unhandled extensions
 	return p.PluginBase.GetExtension(id)
 }
@@ -1356,7 +855,7 @@ func (p *SynthPlugin) GetPluginInfo() manifest.PluginInfo {
 	return manifest.PluginInfo{
 		ID:          PluginID,
 		Name:        PluginName,
-		Vendor:      PluginVendor, 
+		Vendor:      PluginVendor,
 		URL:         "https://github.com/justyntemme/clapgo",
 		ManualURL:   "https://github.com/justyntemme/clapgo",
 		SupportURL:  "https://github.com/justyntemme/clapgo/issues",
@@ -1381,11 +880,11 @@ func (p *SynthPlugin) SaveState() map[string]interface{} {
 	// Save any additional state beyond parameters
 	return map[string]interface{}{
 		"plugin_version": "1.0.0",
-		"waveform":      atomic.LoadInt64(&p.waveform),
-		"attack":        util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.attack))),
-		"decay":         util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.decay))),
-		"sustain":       util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.sustain))),
-		"release":       util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release))),
+		"waveform":       atomic.LoadInt64(&p.waveform),
+		"attack":         util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.attack))),
+		"decay":          util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.decay))),
+		"sustain":        util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.sustain))),
+		"release":        util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release))),
 	}
 }
 
@@ -1395,7 +894,7 @@ func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	if waveform, ok := data["waveform"].(float64); ok {
 		atomic.StoreInt64(&p.waveform, int64(waveform))
 	}
-	
+
 	// Load ADSR
 	if attack, ok := data["attack"].(float64); ok {
 		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(attack)))
@@ -1421,12 +920,12 @@ func (p *SynthPlugin) GetLatency() uint32 {
 func (p *SynthPlugin) GetTail() uint32 {
 	// Get release time
 	release := util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release)))
-	
+
 	// Convert to samples
 	tailSamples := uint32(release * p.SampleRate)
-	
+
 	// Add some extra samples for safety
-	return tailSamples + uint32(p.SampleRate * 0.1) // 100ms extra
+	return tailSamples + uint32(p.SampleRate*0.1) // 100ms extra
 }
 
 // OnTimer handles timer callbacks
@@ -1443,7 +942,7 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 	if p.TrackInfo == nil {
 		return
 	}
-	
+
 	// Get the new track information
 	info, ok := p.TrackInfo.Get()
 	if !ok {
@@ -1452,7 +951,7 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 		}
 		return
 	}
-	
+
 	// Log the track information
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Track info changed:"))
@@ -1460,14 +959,14 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 			p.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
 		}
 		if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
-			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
+			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d",
 				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
 		}
 		if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
-			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
+			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s",
 				info.AudioChannelCount, info.AudioPortType))
 		}
-		
+
 		// Adjust synth behavior based on track type
 		if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
 			p.Logger.Info("  This is a return track - adjusting for wet signal")
@@ -1489,21 +988,19 @@ func (p *SynthPlugin) OnTuningChanged() {
 	if p.tuning == nil {
 		return
 	}
-	
+
 	if p.Logger != nil {
 		p.Logger.Info("Tuning pool changed, refreshing available tunings")
-		
+
 		// Log all available tunings
 		tunings := p.tuning.GetAllTunings()
 		p.Logger.Info(fmt.Sprintf("Available tunings: %d", len(tunings)))
 		for _, t := range tunings {
-			p.Logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)", 
+			p.Logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)",
 				t.Name, t.TuningID, t.IsDynamic))
 		}
 	}
 }
-
-
 
 // GetVoiceInfo returns voice count and capacity information
 func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
@@ -1514,105 +1011,16 @@ func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
 			activeVoices++
 		}
 	}
-	
+
 	return extension.VoiceInfo{
-		VoiceCount:    uint32(len(p.voices)), // Maximum polyphony
-		VoiceCapacity: uint32(len(p.voices)), // Same as count in our implementation
+		VoiceCount:    uint32(len(p.voices)),                           // Maximum polyphony
+		VoiceCapacity: uint32(len(p.voices)),                           // Same as count in our implementation
 		Flags:         extension.VoiceInfoFlagSupportsOverlappingNotes, // We support note IDs
 	}
 }
-
-
-// Helper functions for atomic float64 operations
-
-// Phase 3 Extension Exports
-
-//export ClapGo_PluginLatencyGet
-func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.uint32_t(p.GetLatency())
-}
-
-//export ClapGo_PluginTailGet
-func ClapGo_PluginTailGet(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.uint32_t(p.GetTail())
-}
-
-//export ClapGo_PluginOnTimer
-func ClapGo_PluginOnTimer(plugin unsafe.Pointer, timerID C.uint64_t) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.OnTimer(uint64(timerID))
-}
-
-// Voice info implementation is now in pkg/api/voice_info.go
-// The synth plugin implements VoiceInfoProvider interface
-
-// Phase 7 Extension Exports
-
-//export ClapGo_PluginTrackInfoChanged
-func ClapGo_PluginTrackInfoChanged(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.OnTrackInfoChanged()
-}
-
-// Tuning Extension Export
-
-//export ClapGo_PluginTuningChanged
-func ClapGo_PluginTuningChanged(plugin unsafe.Pointer) {
-	if plugin == nil {
-		return
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	p.OnTuningChanged()
-}
-
-// Note Name Extension Exports
-
-//export ClapGo_PluginNoteNameCount
-func ClapGo_PluginNoteNameCount(plugin unsafe.Pointer) C.uint32_t {
-	if plugin == nil {
-		return 0
-	}
-	_ = cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Synth provides note names for all MIDI notes
-	return C.uint32_t(128) // All MIDI notes
-}
-
-//export ClapGo_PluginNoteNameGet
-func ClapGo_PluginNoteNameGet(plugin unsafe.Pointer, index C.uint32_t, noteName unsafe.Pointer) C.bool {
-	if plugin == nil || noteName == nil || index >= 128 {
-		return C.bool(false)
-	}
-	_ = cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Get standard note name for this index
-	noteNames := extension.StandardNoteNames()
-	if int(index) >= len(noteNames) {
-		return C.bool(false)
-	}
-	
-	// Convert to C structure
-	extension.NoteNameToC(&noteNames[index], noteName)
-	
-	return C.bool(true)
-}
-
 
 func main() {
 	// This is not called when used as a plugin,
 	// but can be useful for testing
 }
+
