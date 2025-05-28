@@ -10,11 +10,9 @@ import (
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
-	"github.com/justyntemme/clapgo/pkg/extension"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
 	"github.com/justyntemme/clapgo/pkg/process"
-	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
 
@@ -83,11 +81,6 @@ func (p *GainPlugin) CreateWithHost(host unsafe.Pointer) cgo.Handle {
 
 
 func (p *GainPlugin) StartProcessing() error {
-	thread.AssertAudioThread("GainPlugin.StartProcessing")
-	if p.ThreadCheck != nil {
-		p.ThreadCheck.AssertAudioThread("GainPlugin.StartProcessing")
-	}
-	
 	return p.PluginBase.CommonStartProcessing()
 }
 
@@ -97,17 +90,12 @@ func (p *GainPlugin) Reset() {
 }
 
 func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *event.Processor) int {
-	thread.AssertAudioThread("GainPlugin.Process")
-	if p.ThreadCheck != nil {
-		p.ThreadCheck.AssertAudioThread("GainPlugin.Process")
-	}
-	
 	if !p.IsActivated || !p.IsProcessing {
 		return process.ProcessError
 	}
 	
 	if events != nil {
-		p.processEvents(events, framesCount)
+		events.ProcessAll(p)
 	}
 	
 	gain := float32(p.gain.Load())
@@ -128,12 +116,6 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	return process.ProcessContinue
 }
 
-func (p *GainPlugin) processEvents(events *event.Processor, frameCount uint32) {
-	if events == nil {
-		return
-	}
-	events.ProcessAll(p)
-}
 
 // HandleParamValue handles parameter value changes (implements event.Handler)
 func (p *GainPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
@@ -200,50 +182,11 @@ func (p *GainPlugin) GetParamValue(paramID uint32, value *C.double) bool {
 	return p.PluginBase.GetParamValue(paramID, unsafe.Pointer(value))
 }
 
-func (p *GainPlugin) ParamValueToText(paramID uint32, value float64, buffer *C.char, size uint32) bool {
-	if buffer == nil || size == 0 {
-		return false
-	}
-	
-	if paramID == ParamGain {
-		text := param.FormatValue(value, param.FormatDecibel)
-		
-		bytes := []byte(text)
-		if len(bytes) >= int(size) {
-			bytes = bytes[:size-1]
-		}
-		for i, b := range bytes {
-			*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
-		}
-		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
-		
-		return true
-	}
-	
-	return false
-}
-
-func (p *GainPlugin) ParamTextToValue(paramID uint32, text string, value *C.double) bool {
-	if value == nil {
-		return false
-	}
-	
-	if paramID == ParamGain {
-		parser := param.NewParser(param.FormatDecibel)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			clamped := param.ClampValue(parsedValue, 0.0, 2.0)
-			*value = C.double(clamped)
-			return true
-		}
-	}
-	
-	return false
-}
 
 func (p *GainPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
 	if inEvents != nil {
 		eventHandler := event.NewProcessor(inEvents, outEvents)
-		p.processEvents(eventHandler, 0)
+		eventHandler.ProcessAll(p)
 	}
 }
 
@@ -263,14 +206,6 @@ func (p *GainPlugin) GetRemoteControlsPageToC(pageIndex uint32, cPage unsafe.Poi
 	return true
 }
 
-func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
-	switch id {
-	case extension.PresetLoad:
-		return unsafe.Pointer(&p)
-	default:
-		return p.PluginBase.GetExtension(id)
-	}
-}
 
 
 
@@ -310,19 +245,5 @@ func (p *GainPlugin) LoadState(stream unsafe.Pointer) error {
 	})
 }
 
-func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) error {
-	if err := p.PluginBase.SaveStateWithContext(stream, contextType); err != nil {
-		return err
-	}
-	return p.SaveState(stream)
-}
-
-  
-func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) error {
-	if err := p.PluginBase.LoadStateWithContext(stream, contextType); err != nil {
-		return err
-	}
-	return p.LoadState(stream)
-}
 
 func main() {}

@@ -136,12 +136,12 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 
 //export ClapGo_PluginParamsValueToText
 func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
-	return C.bool(getPlugin(plugin).ParamValueToText(uint32(paramID), float64(value), buffer, uint32(size)))
+	return C.bool(getPlugin(plugin).ParamValueToText(uint32(paramID), float64(value), unsafe.Pointer(buffer), uint32(size)))
 }
 
 //export ClapGo_PluginParamsTextToValue
 func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, text *C.char, value *C.double) C.bool {
-	return C.bool(getPlugin(plugin).ParamTextToValue(uint32(paramID), C.GoString(text), value))
+	return C.bool(getPlugin(plugin).ParamTextToValue(uint32(paramID), C.GoString(text), unsafe.Pointer(value)))
 }
 
 //export ClapGo_PluginParamsFlush
@@ -161,23 +161,7 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	return C.bool(err == nil)
 }
 
-//export ClapGo_PluginStateSaveWithContext
-func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	err := getPlugin(plugin).SaveStateWithContext(stream, uint32(contextType))
-	return C.bool(err == nil)
-}
 
-//export ClapGo_PluginStateLoadWithContext
-func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	err := getPlugin(plugin).LoadStateWithContext(stream, uint32(contextType))
-	return C.bool(err == nil)
-}
-
-//export ClapGo_PluginPresetLoadFromLocation
-func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
-	err := getPlugin(plugin).LoadPresetFromLocation(uint32(locationKind), C.GoString(location), C.GoString(loadKey))
-	return C.bool(err == nil)
-}
 
 //export ClapGo_PluginLatencyGet
 func ClapGo_PluginLatencyGet(plugin unsafe.Pointer) uint32 {
