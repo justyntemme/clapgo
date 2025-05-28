@@ -34,7 +34,6 @@ import (
 	"github.com/justyntemme/clapgo/pkg/thread"
 	"github.com/justyntemme/clapgo/pkg/util"
 	"math"
-	"os"
 	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
@@ -513,8 +512,6 @@ func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	// Log the context type
 	if p.Logger != nil {
 		switch contextType {
-		case C.uint32_t(state.ContextForPreset):
-			p.Logger.Info("Saving state for preset")
 		case C.uint32_t(state.ContextForDuplicate):
 			p.Logger.Info("Saving state for duplicate")
 		case C.uint32_t(state.ContextForProject):
@@ -524,14 +521,7 @@ func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 		}
 	}
 	
-	// For preset saves, we might want to clear voice state
-	// For duplicate/project saves, we keep everything
-	if contextType == C.uint32_t(state.ContextForPreset) {
-		// Save without active voice data for presets
-		return ClapGo_PluginStateSave(plugin, stream)
-	}
-	
-	// For other contexts, save everything including voice state
+	// For all contexts, save everything including voice state
 	return ClapGo_PluginStateSave(plugin, stream)
 }
 
@@ -545,8 +535,6 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	// Log the context type
 	if p.Logger != nil {
 		switch contextType {
-		case C.uint32_t(state.ContextForPreset):
-			p.Logger.Info("Loading state for preset")
 		case C.uint32_t(state.ContextForDuplicate):
 			p.Logger.Info("Loading state for duplicate")
 		case C.uint32_t(state.ContextForProject):
@@ -557,105 +545,9 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	}
 	
 	// Load the state
-	result := ClapGo_PluginStateLoad(plugin, stream)
-	
-	// For preset loads, we might want to reset voice allocation
-	if contextType == C.uint32_t(state.ContextForPreset) && result {
-		// Clear all active voices when loading a preset
-		// Note: This assumes preset loads happen on the main thread
-		// Additional synchronization may be needed for multi-threaded hosts
-		for i := range p.voices {
-			if p.voices[i] != nil {
-				p.voices[i].IsActive = false
-			}
-		}
-	}
-	
-	return result
+	return ClapGo_PluginStateLoad(plugin, stream)
 }
 
-// Preset Load Extension Exports
-
-//export ClapGo_PluginPresetLoadFromLocation
-func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Convert C strings to Go strings
-	var locationStr, loadKeyStr string
-	if location != nil {
-		locationStr = C.GoString(location)
-	}
-	if loadKey != nil {
-		loadKeyStr = C.GoString(loadKey)
-	}
-	
-	// Log the preset load request
-	if p.Logger != nil {
-		switch locationKind {
-		case C.uint32_t(state.PresetLocationFile):
-			p.Logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", locationStr, loadKeyStr))
-		case C.uint32_t(state.PresetLocationPlugin):
-			p.Logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKeyStr))
-		default:
-			p.Logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
-			return C.bool(false)
-		}
-	}
-	
-	// Handle different location kinds
-	switch locationKind {
-	case C.uint32_t(state.PresetLocationFile):
-		// Load preset from file
-		if locationStr == "" {
-			return C.bool(false)
-		}
-		
-		// Read the preset file
-		presetData, err := os.ReadFile(locationStr)
-		if err != nil {
-			if p.Logger != nil {
-				p.Logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
-			}
-			return C.bool(false)
-		}
-		
-		// Parse the preset data
-		var preset map[string]interface{}
-		if err := json.Unmarshal(presetData, &preset); err != nil {
-			if p.Logger != nil {
-				p.Logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
-			}
-			return C.bool(false)
-		}
-		
-		// Clear all active voices when loading a preset
-		for i := range p.voices {
-			if p.voices[i] != nil {
-				p.voices[i].IsActive = false
-			}
-		}
-		
-		// Load the preset state
-		p.LoadState(preset)
-		
-		if p.Logger != nil {
-			p.Logger.Info("Preset loaded successfully")
-		}
-		return C.bool(true)
-		
-	case C.uint32_t(state.PresetLocationPlugin):
-		// Bundled presets not supported in this example
-		if p.Logger != nil {
-			p.Logger.Warning("Bundled presets not implemented")
-		}
-		return C.bool(false)
-	default:
-		return C.bool(false)
-	}
-}
 
 // Voice represents a single active note
 type Voice struct {
@@ -818,12 +710,6 @@ func (p *SynthPlugin) Init() bool {
 	
 	if p.Logger != nil {
 		p.Logger.Debug("Synth plugin initialized")
-		
-		// Log available bundled presets
-		presets := p.GetAvailablePresets()
-		if len(presets) > 0 {
-			p.Logger.Info(fmt.Sprintf("Available bundled presets: %v", presets))
-		}
 	}
 	
 	// TODO: Initialize context menu provider with param.Manager support
@@ -1618,11 +1504,6 @@ func (p *SynthPlugin) OnTuningChanged() {
 }
 
 
-// GetAvailablePresets returns a list of available bundled preset names
-func (p *SynthPlugin) GetAvailablePresets() []string {
-	// Bundled presets not supported in this example
-	return []string{}
-}
 
 // GetVoiceInfo returns voice count and capacity information
 func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
@@ -1641,51 +1522,6 @@ func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
 	}
 }
 
-// LoadPreset loads a preset from a location
-func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) bool {
-	// Open the preset file
-	file, err := os.Open(loadKey)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	
-	// Parse the preset JSON
-	var preset struct {
-		// Basic preset metadata
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		
-		// Specific synth parameters
-		Waveform     int     `json:"waveform"`
-		Attack       float64 `json:"attack"`
-		Decay        float64 `json:"decay"`
-		Sustain      float64 `json:"sustain"`
-		Release      float64 `json:"release"`
-		
-		// Custom state data
-		StateData    map[string]interface{} `json:"state_data"`
-	}
-	
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&preset); err != nil {
-		return false
-	}
-	
-	// Update synth parameters
-	atomic.StoreInt64(&p.waveform, int64(preset.Waveform))
-	atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(preset.Attack)))
-	atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(preset.Decay)))
-	atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(preset.Sustain)))
-	atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(preset.Release)))
-	
-	// Load any additional state data
-	if preset.StateData != nil {
-		p.LoadState(preset.StateData)
-	}
-	
-	return true
-}
 
 // Helper functions for atomic float64 operations
 
