@@ -18,19 +18,7 @@ This document provides a comprehensive strategy to refactor the synth plugin fro
 
 ## Detailed Refactoring Strategy
 
-### Phase 1: Use Framework ADSR Envelope (Already Exists!)
-
-**Current**: Lines ~1389-1449 custom getEnvelopeValue implementation
-**Action**: Replace with existing `audio.ADSREnvelope` from framework
-
-```go
-// REMOVE custom envelope logic
-// USE: audio.NewADSREnvelope() and envelope.Process()
-```
-
-**Savings**: ~60 lines
-
-### Phase 2: Simplify Plugin Structure
+### Phase 1: Simplify Plugin Structure
 
 **Current Plugin Structure** (Lines ~686-720):
 ```go
@@ -62,7 +50,7 @@ type SynthPlugin struct {
 }
 ```
 
-### Phase 3: Simplify Process Method
+### Phase 2: Simplify Process Method
 
 **Current**: Lines ~901-1024 complex processing logic
 **Target**: Clean, readable process method
@@ -98,7 +86,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32,
 
 **Savings**: ~100 lines
 
-### Phase 4: Remove Redundant Methods
+### Phase 3: Remove Redundant Methods
 
 **Methods to Remove/Simplify**:
 - GetAvailablePresets (not used)
@@ -109,7 +97,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32,
 
 **Savings**: ~200 lines
 
-### Phase 5: Use Builder Pattern for Parameters
+### Phase 4: Use Builder Pattern for Parameters
 
 **Current**: Manual parameter registration
 **Target**: Use parameter builder from framework
@@ -145,10 +133,10 @@ func NewSynthPlugin() *SynthPlugin {
 
 ## Implementation Order
 
-1. **Phase 1**: Replace custom envelope with framework (~30 mins)
-2. **Phase 2-3**: Simplify plugin structure and process (~1 hour)
-3. **Phase 4**: Remove redundant code (~30 mins)
-4. **Phase 5**: Use parameter builders (~30 mins)
+1. **Phase 1**: Simplify plugin structure (~30 mins)
+2. **Phase 2**: Simplify process method (~30 mins)
+3. **Phase 3**: Remove redundant code (~30 mins)
+4. **Phase 4**: Use parameter builders (~30 mins)
 
 ## Expected Results
 
