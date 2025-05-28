@@ -53,8 +53,8 @@ func (env *ADSREnvelope) Trigger() {
 	env.CurrentValue = 0
 }
 
-// Release moves the envelope to the release stage
-func (env *ADSREnvelope) Release() {
+// TriggerRelease moves the envelope to the release stage
+func (env *ADSREnvelope) TriggerRelease() {
 	if env.Stage != EnvelopeStageIdle && env.Stage != EnvelopeStageRelease {
 		env.ReleaseLevel = env.CurrentValue
 		env.Stage = EnvelopeStageRelease

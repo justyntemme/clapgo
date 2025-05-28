@@ -1,4 +1,4 @@
-package api
+package extension
 
 // Render modes for plugin processing
 const (

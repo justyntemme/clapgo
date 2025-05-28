@@ -38,52 +38,6 @@ const (
 	ExtTuning              = "clap.tuning/2"
 )
 
-// Event types
-const (
-	EventTypeNoteOn           = 0
-	EventTypeNoteOff          = 1
-	EventTypeNoteChoke        = 2
-	EventTypeNoteEnd          = 3
-	EventTypeNoteExpression   = 4
-	EventTypeParamValue       = 5
-	EventTypeParamMod         = 6
-	EventTypeParamGestureBegin = 7
-	EventTypeParamGestureEnd  = 8
-	EventTypeTransport        = 9
-	EventTypeMIDI             = 10
-	EventTypeMIDISysex        = 11
-	EventTypeMIDI2            = 12
-)
-
-// Note expression types
-const (
-	NoteExpressionVolume      = 0
-	NoteExpressionPan         = 1
-	NoteExpressionTuning      = 2
-	NoteExpressionVibrato     = 3
-	NoteExpressionExpression  = 4
-	NoteExpressionBrightness  = 5
-	NoteExpressionPressure    = 6
-)
-
-// Event flags
-const (
-	EventIsLive      = 1 << 0  // Indicates a live user event (e.g., user turning a knob)
-	EventDontRecord  = 1 << 1  // Event should not be recorded (e.g., to avoid conflicts)
-)
-
-// Transport flags
-const (
-	TransportHasTempo            = 1 << 0
-	TransportHasBeatsTimeline    = 1 << 1
-	TransportHasSecondsTimeline  = 1 << 2
-	TransportHasTimeSignature    = 1 << 3
-	TransportIsPlaying           = 1 << 4
-	TransportIsRecording         = 1 << 5
-	TransportIsLoopActive        = 1 << 6
-	TransportIsWithinPreRoll     = 1 << 7
-)
-
 // Note dialects
 const (
 	NoteDialectCLAP  = 1 << 0
@@ -111,15 +65,6 @@ const (
 	PortStereo    = "stereo"
 	PortSurround  = "surround"
 	PortAmbisonic = "ambisonic"
-)
-
-// Process status codes
-const (
-	ProcessError           = 0
-	ProcessContinue        = 1
-	ProcessContinueIfNotQuiet = 2
-	ProcessTail            = 3
-	ProcessSleep           = 4
 )
 
 // Parameter flags

@@ -94,7 +94,7 @@ func (h *ExportHelpers) PluginProcess(plugin unsafe.Pointer, process unsafe.Poin
 	if p, ok := h.GetPlugin(plugin).(ProcessorWithHandle); ok {
 		return C.int32_t(p.ProcessWithHandle(process))
 	}
-	return C.int32_t(api.ProcessError)
+	return C.int32_t(0) // ProcessError
 }
 
 // PluginGetExtension implements ClapGo_PluginGetExtension

@@ -135,7 +135,7 @@ func ParseParameterValueNote(text string) (int, error) {
 	octavePart := text[len(text)-1:]
 	
 	// Handle sharp notation
-	if len(text) >= 3 && (text[1] == '#' || text[1] == '♯') {
+	if len(text) >= 3 && text[1] == '#' {
 		notePart = text[:2]
 		octavePart = text[2:]
 	}

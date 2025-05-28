@@ -229,3 +229,18 @@ func CreateMIDI2(time uint32, port uint16, data [4]uint32) *MIDI2Event {
 		Data: data,
 	}
 }
+
+// CreateNoteEndEvent creates a note end event
+func CreateNoteEndEvent(time uint32, noteID int32, port, channel, key int16) *NoteEvent {
+	return &NoteEvent{
+		Header: Header{
+			Time: time,
+			Type: uint16(TypeNoteEnd),
+		},
+		NoteID:   noteID,
+		Port:     port,
+		Channel:  channel,
+		Key:      key,
+		Velocity: 0, // Ignored for end
+	}
+}

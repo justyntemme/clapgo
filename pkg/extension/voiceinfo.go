@@ -1,4 +1,4 @@
-package api
+package extension
 
 /*
 #cgo CFLAGS: -I../../include/clap/include
@@ -25,6 +25,20 @@ const (
     // of the same key.
     VoiceInfoFlagSupportsOverlappingNotes = C.CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES
 )
+
+// VoiceInfo contains information about a plugin's voice capabilities
+type VoiceInfo struct {
+	VoiceCount    uint32 // Current number of active voices
+	VoiceCapacity uint32 // Maximum number of voices
+	Flags         uint64 // Voice capability flags
+}
+
+// VoiceInfoProvider is implemented by plugins that provide voice information
+type VoiceInfoProvider interface {
+	// GetVoiceInfo returns the current voice information
+	// [main-thread]
+	GetVoiceInfo() VoiceInfo
+}
 
 // Global registry of plugins that implement VoiceInfoProvider
 var (

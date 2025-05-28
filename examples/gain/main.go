@@ -7,11 +7,13 @@ import (
 	"runtime/cgo"
 	"unsafe"
 	
-	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
+	"github.com/justyntemme/clapgo/pkg/extension"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/plugin"
+	"github.com/justyntemme/clapgo/pkg/process"
 	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
@@ -101,7 +103,7 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 	}
 	
 	if !p.IsActivated || !p.IsProcessing {
-		return api.ProcessError
+		return process.ProcessError
 	}
 	
 	if events != nil {
@@ -115,13 +117,13 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 		if p.Logger != nil {
 			p.Logger.Error("Invalid audio buffers")
 		}
-		return api.ProcessError
+		return process.ProcessError
 	}
 	
 	// Apply gain using the helper function
 	audio.ProcessWithGain(audioOut, audioIn, gain)
 	
-	return api.ProcessContinue
+	return process.ProcessContinue
 }
 
 func (p *GainPlugin) processEvents(events *event.Processor, frameCount uint32) {
@@ -153,12 +155,12 @@ func (p *GainPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time ui
 }
 
 
-func (p *GainPlugin) ProcessWithHandle(process unsafe.Pointer) int {
-	if process == nil {
-		return api.ProcessError
+func (p *GainPlugin) ProcessWithHandle(processPtr unsafe.Pointer) int {
+	if processPtr == nil {
+		return process.ProcessError
 	}
 	
-	cProcess := (*C.clap_process_t)(process)
+	cProcess := (*C.clap_process_t)(processPtr)
 	
 	steadyTime := int64(cProcess.steady_time)
 	framesCount := uint32(cProcess.frames_count)
@@ -254,32 +256,19 @@ func (p *GainPlugin) GetRemoteControlsPageToC(pageIndex uint32, cPage unsafe.Poi
 	}
 	
 	// Convert Go page to C structure
-	api.RemoteControlsPageToC(page, cPage)
+	controls.RemoteControlsPageToC(page, cPage)
 	return true
 }
 
 func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
 	switch id {
-	case api.ExtPresetLoad:
+	case extension.PresetLoad:
 		return unsafe.Pointer(&p)
 	default:
 		return nil
 	}
 }
 
-func (p *GainPlugin) GetPluginInfo() api.PluginInfo {
-	return api.PluginInfo{
-		ID:          pluginInfo.ID,
-		Name:        pluginInfo.Name,
-		Vendor:      pluginInfo.Vendor,
-		URL:         pluginInfo.URL,
-		ManualURL:   pluginInfo.Manual,
-		SupportURL:  pluginInfo.Support,
-		Version:     pluginInfo.Version,
-		Description: pluginInfo.Description,
-		Features:    pluginInfo.Features,
-	}
-}
 
 
 
@@ -288,16 +277,16 @@ func (p *GainPlugin) GetRemoteControlsPageCount() uint32 {
 	return 1
 }
 
-func (p *GainPlugin) GetRemoteControlsPage(pageIndex uint32) (*api.RemoteControlsPage, bool) {
+func (p *GainPlugin) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteControlsPage, bool) {
 	if pageIndex != 0 {
 		return nil, false
 	}
 	
-	return &api.RemoteControlsPage{
+	return &controls.RemoteControlsPage{
 		SectionName: "Main",
 		PageID:      1,
 		PageName:    "Gain Control",
-		ParamIDs:    [api.RemoteControlsCount]uint32{ParamGain},
+		ParamIDs:    [controls.RemoteControlsCount]uint32{ParamGain},
 		IsForPreset: false,
 	}, true
 }

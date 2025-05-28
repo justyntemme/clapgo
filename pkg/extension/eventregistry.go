@@ -1,4 +1,4 @@
-package api
+package extension
 
 /*
 #include "../../include/clap/include/clap/ext/event-registry.h"

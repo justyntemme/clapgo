@@ -25,7 +25,10 @@ import (
 	"fmt"
 	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/param"
+	"github.com/justyntemme/clapgo/pkg/process"
+	"github.com/justyntemme/clapgo/pkg/util"
 	"math"
 	"os"
 	"path/filepath"
@@ -183,20 +186,20 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 }
 
 //export ClapGo_PluginProcess
-func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32_t {
+func ClapGo_PluginProcess(plugin unsafe.Pointer, processPtr unsafe.Pointer) C.int32_t {
 	// Mark this thread as audio thread for debug builds
 	api.DebugMarkAudioThread()
 	defer api.DebugUnmarkAudioThread()
 	
-	if plugin == nil || process == nil {
-		return C.int32_t(api.ProcessError)
+	if plugin == nil || processPtr == nil {
+		return C.int32_t(process.ProcessError)
 	}
 	
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*SynthPlugin)
 	
 	// Convert the C clap_process_t to Go parameters
-	cProcess := (*C.clap_process_t)(process)
+	cProcess := (*C.clap_process_t)(processPtr)
 	
 	// Extract steady time and frame count
 	steadyTime := int64(cProcess.steady_time)
@@ -207,19 +210,21 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, process unsafe.Pointer) C.int32
 	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
 	
 	// Create event handler using the new abstraction - NO MORE MANUAL EVENT HANDLING!
-	eventHandler := api.NewEventProcessor(
+	eventHandler := event.NewEventProcessor(
 		unsafe.Pointer(cProcess.in_events),
 		unsafe.Pointer(cProcess.out_events),
 	)
 	
 	// Setup event pool logging
-	api.SetupPoolLogging(eventHandler, p.logger)
+	// TODO: Update when logger types are unified
 	
 	// Call the actual Go process method
 	result := p.Process(steadyTime, framesCount, audioIn, audioOut, eventHandler)
 	
 	// Log event pool diagnostics periodically (every 1000 calls)
-	p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
+	if p.poolDiagnostics != nil {
+		p.poolDiagnostics.LogPoolDiagnostics(eventHandler, 1000)
+	}
 	
 	return C.int32_t(result)
 }
@@ -294,7 +299,7 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 	var text string
 	switch uint32(paramID) {
 	case 1: // Volume
-		text = api.FormatParameterValue(float64(value), api.FormatPercentage)
+		text = param.FormatValue(float64(value), param.FormatPercentage)
 	case 2: // Waveform
 		switch int(math.Round(float64(value))) {
 		case 0:
@@ -307,15 +312,22 @@ func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, v
 			text = "Unknown"
 		}
 	case 3, 4, 6: // Attack, Decay, Release
-		text = api.FormatParameterValue(float64(value), api.FormatMilliseconds)
+		text = param.FormatValue(float64(value), param.FormatMilliseconds)
 	case 5: // Sustain
-		text = api.FormatParameterValue(float64(value), api.FormatPercentage)
+		text = param.FormatValue(float64(value), param.FormatPercentage)
 	default:
-		text = api.FormatParameterValue(float64(value), api.FormatDefault)
+		text = param.FormatValue(float64(value), param.FormatDefault)
 	}
 	
-	// Copy to C buffer using helper
-	api.CopyStringToCBuffer(text, unsafe.Pointer(buffer), int(size))
+	// Copy string to C buffer
+	bytes := []byte(text)
+	if len(bytes) >= int(size) {
+		bytes = bytes[:size-1]
+	}
+	for i, b := range bytes {
+		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
+	}
+	*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
 	
 	return C.bool(true)
 }
@@ -332,9 +344,9 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	// Parse based on parameter type
 	switch uint32(paramID) {
 	case 1: // Volume (percentage)
-		parser := api.NewParameterValueParser(api.FormatPercentage)
+		parser := param.NewParser(param.FormatPercentage)
 		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(api.ClampValue(parsedValue, 0.0, 1.0))
+			*value = C.double(param.ClampValue(parsedValue, 0.0, 1.0))
 			return C.bool(true)
 		}
 	case 2: // Waveform
@@ -351,15 +363,15 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 			return C.bool(true)
 		}
 	case 3, 4, 6: // Attack, Decay, Release (milliseconds)
-		parser := api.NewParameterValueParser(api.FormatMilliseconds)
+		parser := param.NewParser(param.FormatMilliseconds)
 		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(api.ClampValue(parsedValue, 0.001, 5.0))
+			*value = C.double(param.ClampValue(parsedValue, 0.001, 5.0))
 			return C.bool(true)
 		}
 	case 5: // Sustain (percentage)
-		parser := api.NewParameterValueParser(api.FormatPercentage)
+		parser := param.NewParser(param.FormatPercentage)
 		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(api.ClampValue(parsedValue, 0.0, 1.0))
+			*value = C.double(param.ClampValue(parsedValue, 0.0, 1.0))
 			return C.bool(true)
 		}
 	}
@@ -376,7 +388,7 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 	
 	// Process events using our abstraction
 	if inEvents != nil {
-		eventHandler := api.NewEventProcessor(inEvents, outEvents)
+		eventHandler := event.NewEventProcessor(inEvents, outEvents)
 		p.processEventHandler(eventHandler, 0)
 	}
 }
@@ -543,23 +555,18 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		// Update parameter using helper
 		switch paramID {
 		case 1: // Volume
-			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(value)))
-			p.paramManager.Set(paramID, value)
+			param.UpdateParameterAtomic(&p.volume, value, p.paramManager, paramID)
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
 			p.paramManager.Set(paramID, value)
 		case 3: // Attack
-			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(value)))
-			p.paramManager.Set(paramID, value)
+			param.UpdateParameterAtomic(&p.attack, value, p.paramManager, paramID)
 		case 4: // Decay
-			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(value)))
-			p.paramManager.Set(paramID, value)
+			param.UpdateParameterAtomic(&p.decay, value, p.paramManager, paramID)
 		case 5: // Sustain
-			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(value)))
-			p.paramManager.Set(paramID, value)
+			param.UpdateParameterAtomic(&p.sustain, value, p.paramManager, paramID)
 		case 6: // Release
-			atomic.StoreInt64(&p.release, int64(api.FloatToBits(value)))
-			p.paramManager.Set(paramID, value)
+			param.UpdateParameterAtomic(&p.release, value, p.paramManager, paramID)
 		}
 	}
 	
@@ -799,7 +806,7 @@ type Voice struct {
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
-	api.NoOpEventHandler // Embed to get default no-op implementations
+	event.NoOpHandler // Embed to get default no-op implementations
 	
 	// Plugin state
 	voices       [16]*Voice  // Maximum 16 voices
@@ -831,10 +838,10 @@ type SynthPlugin struct {
 	threadCheck  *api.ThreadChecker
 	transportControl *api.HostTransportControl
 	tuning       *api.HostTuning
-	contextMenuProvider *api.DefaultContextMenuProvider
+	// contextMenuProvider - removed as it's migrated to extension package
 	
 	// Event pool diagnostics
-	poolDiagnostics api.EventPoolDiagnostics
+	poolDiagnostics *event.Diagnostics
 }
 
 // TransportInfo holds host transport information
@@ -862,15 +869,16 @@ func NewSynthPlugin() *SynthPlugin {
 		},
 		paramManager: param.NewManager(),
 		notePortManager: api.NewNotePortManager(),
+		poolDiagnostics: &event.Diagnostics{},
 	}
 	
 	// Set default values atomically
-	atomic.StoreInt64(&plugin.volume, int64(api.FloatToBits(0.7)))      // -3dB
+	atomic.StoreInt64(&plugin.volume, int64(util.AtomicFloat64ToBits(0.7)))      // -3dB
 	atomic.StoreInt64(&plugin.waveform, 0)                          // sine
-	atomic.StoreInt64(&plugin.attack, int64(api.FloatToBits(0.01)))     // 10ms
-	atomic.StoreInt64(&plugin.decay, int64(api.FloatToBits(0.1)))       // 100ms
-	atomic.StoreInt64(&plugin.sustain, int64(api.FloatToBits(0.7)))     // 70%
-	atomic.StoreInt64(&plugin.release, int64(api.FloatToBits(0.3)))     // 300ms
+	atomic.StoreInt64(&plugin.attack, int64(util.AtomicFloat64ToBits(0.01)))     // 10ms
+	atomic.StoreInt64(&plugin.decay, int64(util.AtomicFloat64ToBits(0.1)))       // 100ms
+	atomic.StoreInt64(&plugin.sustain, int64(util.AtomicFloat64ToBits(0.7)))     // 70%
+	atomic.StoreInt64(&plugin.release, int64(util.AtomicFloat64ToBits(0.3)))     // 300ms
 	
 	// Register parameters using our new abstraction
 	plugin.paramManager.Register(param.Percentage(1, "Volume", 70.0))
@@ -1013,10 +1021,10 @@ func (p *SynthPlugin) Reset() {
 }
 
 // Process processes audio data using the new abstractions
-func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *event.EventProcessor) int {
 	// Check if we're in a valid state for processing
 	if !p.isActivated || !p.isProcessing {
-		return api.ProcessError
+		return process.ProcessError
 	}
 	
 	// Process events using our new abstraction - NO MORE MANUAL EVENT PARSING!
@@ -1026,16 +1034,16 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	
 	// If no outputs, nothing to do
 	if len(audioOut) == 0 {
-		return api.ProcessContinue
+		return process.ProcessContinue
 	}
 	
 	// Get current parameter values atomically
-	volume := api.LoadParameterAtomic(&p.volume)
+	volume := param.LoadParameterAtomic(&p.volume)
 	waveform := int(atomic.LoadInt64(&p.waveform))
-	attack := api.LoadParameterAtomic(&p.attack)
-	decay := api.LoadParameterAtomic(&p.decay)
-	sustain := api.LoadParameterAtomic(&p.sustain)
-	release := api.LoadParameterAtomic(&p.release)
+	attack := param.LoadParameterAtomic(&p.attack)
+	decay := param.LoadParameterAtomic(&p.decay)
+	sustain := param.LoadParameterAtomic(&p.sustain)
+	release := param.LoadParameterAtomic(&p.release)
 	
 	// Get the number of output channels
 	numChannels := len(audioOut)
@@ -1122,7 +1130,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			if voice.ReleasePhase >= 1.0 {
 				// Send note end event to host if we have a valid note ID
 				if voice.NoteID >= 0 && events != nil {
-					endEvent := api.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
+					endEvent := event.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
 					events.PushOutputEvent(endEvent)
 				}
 				p.voices[i] = nil
@@ -1132,24 +1140,24 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	
 	// Check if we have any active voices
 	if !hasActiveVoices {
-		return api.ProcessSleep
+		return process.ProcessSleep
 	}
 	
-	return api.ProcessContinue
+	return process.ProcessContinue
 }
 
 // processEventHandler handles all incoming events using our new EventHandler abstraction
-func (p *SynthPlugin) processEventHandler(events api.EventHandler, frameCount uint32) {
+func (p *SynthPlugin) processEventHandler(events *event.EventProcessor, frameCount uint32) {
 	if events == nil {
 		return
 	}
 	
-	// Use the zero-allocation ProcessTypedEvents method instead of ProcessAllEvents
-	events.ProcessTypedEvents(p)
+	// Process all events
+	events.ProcessAll(p)
 }
 
 // HandleParamValue handles parameter value changes
-func (p *SynthPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uint32) {
+func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
 	// Check if this is a polyphonic parameter event (targets specific note)
 	if paramEvent.NoteID >= 0 || paramEvent.Key >= 0 {
 		// This is a polyphonic parameter change - apply to specific voice(s)
@@ -1160,28 +1168,28 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *api.ParamValueEvent, time uin
 	// Handle global parameter changes
 	switch paramEvent.ParamID {
 	case 1: // Volume
-		atomic.StoreInt64(&p.volume, int64(api.FloatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.volume, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 2: // Waveform
 		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
-		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 4: // Decay
-		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 5: // Sustain
-		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 6: // Release
-		atomic.StoreInt64(&p.release, int64(api.FloatToBits(paramEvent.Value)))
+		atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
 		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
 	}
 }
 
 // handlePolyphonicParameter processes polyphonic parameter changes
-func (p *SynthPlugin) handlePolyphonicParameter(paramEvent api.ParamValueEvent) {
+func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent) {
 	// Find matching voices
 	for _, voice := range p.voices {
 		if voice == nil || !voice.IsActive {
@@ -1216,7 +1224,7 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent api.ParamValueEvent) 
 }
 
 // HandleNoteOn handles note on events
-func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
+func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 	// Validate note event fields (CLAP spec says key must be 0-127)
 	if noteEvent.Key < 0 || noteEvent.Key > 127 {
 		return
@@ -1262,7 +1270,7 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *api.NoteEvent, time uint32) {
 }
 
 // HandleNoteOff handles note off events
-func (p *SynthPlugin) HandleNoteOff(noteEvent *api.NoteEvent, time uint32) {
+func (p *SynthPlugin) HandleNoteOff(noteEvent *event.NoteEvent, time uint32) {
 	// Find the voice with this note ID or key/channel combination
 	for _, voice := range p.voices {
 		// Safety check
@@ -1281,7 +1289,7 @@ func (p *SynthPlugin) HandleNoteOff(noteEvent *api.NoteEvent, time uint32) {
 }
 
 // HandleNoteChoke handles note choke events (immediate stop)
-func (p *SynthPlugin) HandleNoteChoke(noteEvent *api.NoteEvent, time uint32) {
+func (p *SynthPlugin) HandleNoteChoke(noteEvent *event.NoteEvent, time uint32) {
 	// Find the voice with this note ID or key/channel combination
 	for i, voice := range p.voices {
 		// Safety check
@@ -1300,7 +1308,7 @@ func (p *SynthPlugin) HandleNoteChoke(noteEvent *api.NoteEvent, time uint32) {
 }
 
 // HandleNoteExpression handles note expression events (MPE)
-func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *api.NoteExpressionEvent, time uint32) {
+func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEvent, time uint32) {
 	// Find matching voices
 	for _, voice := range p.voices {
 		if voice == nil || !voice.IsActive {
@@ -1322,26 +1330,26 @@ func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *api.NoteExpressionEven
 		
 		// Apply expression to this voice
 		switch noteExprEvent.ExpressionID {
-		case api.NoteExpressionVolume:
+		case event.NoteExpressionVolume:
 			voice.VolumeModulation = noteExprEvent.Value - 1.0 // Store as offset
-		case api.NoteExpressionPan:
+		case event.NoteExpressionPan:
 			// Could implement stereo panning here
-		case api.NoteExpressionTuning:
+		case event.NoteExpressionTuning:
 			voice.PitchBend = noteExprEvent.Value // In semitones
-		case api.NoteExpressionVibrato:
+		case event.NoteExpressionVibrato:
 			// Could implement vibrato depth here
-		case api.NoteExpressionBrightness:
+		case event.NoteExpressionBrightness:
 			voice.Brightness = noteExprEvent.Value
-		case api.NoteExpressionPressure:
+		case event.NoteExpressionPressure:
 			voice.Pressure = noteExprEvent.Value
 		}
 	}
 }
 
 // HandleMIDI handles MIDI 1.0 events
-func (p *SynthPlugin) HandleMIDI(midiEvent *api.MIDIEvent, time uint32) {
+func (p *SynthPlugin) HandleMIDI(midiEvent *event.MIDIEvent, time uint32) {
 	// Use the helper to process standard MIDI messages
-	api.ProcessStandardMIDI(midiEvent, p, time)
+	event.ProcessStandardMIDI(midiEvent, p, time)
 	
 	// Handle additional MIDI CC messages
 	if len(midiEvent.Data) >= 3 {
@@ -1350,7 +1358,7 @@ func (p *SynthPlugin) HandleMIDI(midiEvent *api.MIDIEvent, time uint32) {
 			switch midiEvent.Data[1] {
 			case 7: // Volume
 				value := float64(midiEvent.Data[2]) / 127.0
-				paramEvent := api.ParamValueEvent{
+				paramEvent := event.ParamValueEvent{
 					ParamID: 1, // Volume parameter
 					Value:   value,
 				}
@@ -1531,10 +1539,10 @@ func (p *SynthPlugin) SaveState() map[string]interface{} {
 	return map[string]interface{}{
 		"plugin_version": "1.0.0",
 		"waveform":      atomic.LoadInt64(&p.waveform),
-		"attack":        api.FloatFromBits(uint64(atomic.LoadInt64(&p.attack))),
-		"decay":         api.FloatFromBits(uint64(atomic.LoadInt64(&p.decay))),
-		"sustain":       api.FloatFromBits(uint64(atomic.LoadInt64(&p.sustain))),
-		"release":       api.FloatFromBits(uint64(atomic.LoadInt64(&p.release))),
+		"attack":        util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.attack))),
+		"decay":         util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.decay))),
+		"sustain":       util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.sustain))),
+		"release":       util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release))),
 	}
 }
 
@@ -1547,16 +1555,16 @@ func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	
 	// Load ADSR
 	if attack, ok := data["attack"].(float64); ok {
-		atomic.StoreInt64(&p.attack, int64(api.FloatToBits(attack)))
+		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(attack)))
 	}
 	if decay, ok := data["decay"].(float64); ok {
-		atomic.StoreInt64(&p.decay, int64(api.FloatToBits(decay)))
+		atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(decay)))
 	}
 	if sustain, ok := data["sustain"].(float64); ok {
-		atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(sustain)))
+		atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(sustain)))
 	}
 	if release, ok := data["release"].(float64); ok {
-		atomic.StoreInt64(&p.release, int64(api.FloatToBits(release)))
+		atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(release)))
 	}
 }
 
@@ -1569,7 +1577,7 @@ func (p *SynthPlugin) GetLatency() uint32 {
 // GetTail returns the plugin's tail length in samples
 func (p *SynthPlugin) GetTail() uint32 {
 	// Get release time
-	release := api.FloatFromBits(uint64(atomic.LoadInt64(&p.release)))
+	release := util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release)))
 	
 	// Convert to samples
 	tailSamples := uint32(release * p.sampleRate)
@@ -1660,14 +1668,14 @@ func (p *SynthPlugin) PopulateContextMenu(target *api.ContextMenuTarget, builder
 	api.DebugAssertMainThread("SynthPlugin.PopulateContextMenu")
 	
 	if target != nil && target.Kind == api.ContextMenuTargetKindParam {
-		// Use helper for common parameter menu items
-		p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
+		// TODO: Use helper for common parameter menu items
+		// p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
 		
 		// Add parameter-specific items
 		// No parameter-specific items for this synth currently
 	} else {
-		// Use helper for common global menu items
-		p.contextMenuProvider.PopulateGlobalMenu(builder)
+		// TODO: Use helper for common global menu items
+		// p.contextMenuProvider.PopulateGlobalMenu(builder)
 		
 		// Add synth-specific items
 		builder.AddItem(&api.ContextMenuSeparator{})
@@ -1710,28 +1718,28 @@ func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, ac
 	// Check main thread (context menu is always on main thread)
 	api.DebugAssertMainThread("SynthPlugin.PerformContextMenuAction")
 	
-	// Check for common actions first
-	if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
-		// For synth parameters, also update atomic values
-		info, _ := p.paramManager.GetInfo(paramID)
-		switch paramID {
-		case 1: // Volume
-			atomic.StoreInt64(&p.volume, int64(api.FloatToBits(info.DefaultValue)))
-		case 2: // Waveform
-			atomic.StoreInt64(&p.waveform, int64(info.DefaultValue))
-		case 3: // Attack
-			atomic.StoreInt64(&p.attack, int64(api.FloatToBits(info.DefaultValue)))
-		case 4: // Decay
-			atomic.StoreInt64(&p.decay, int64(api.FloatToBits(info.DefaultValue)))
-		case 5: // Sustain
-			atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(info.DefaultValue)))
-		case 6: // Release
-			atomic.StoreInt64(&p.release, int64(api.FloatToBits(info.DefaultValue)))
-		}
-		return p.contextMenuProvider.HandleResetParameter(paramID)
-	}
+	// TODO: Check for common actions first
+	// if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
+	// 	// For synth parameters, also update atomic values
+	// 	info, _ := p.paramManager.GetInfo(paramID)
+	// 	switch paramID {
+	// 	case 1: // Volume
+	// 		atomic.StoreInt64(&p.volume, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
+	// 	case 2: // Waveform
+	// 		atomic.StoreInt64(&p.waveform, int64(info.DefaultValue))
+	// 	case 3: // Attack
+	// 		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
+	// 	case 4: // Decay
+	// 		atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
+	// 	case 5: // Sustain
+	// 		atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
+	// 	case 6: // Release
+	// 		atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
+	// 	}
+	// 	return p.contextMenuProvider.HandleResetParameter(paramID)
+	// }
 	
-	if p.contextMenuProvider.IsAboutAction(actionID) {
+	if false { // p.contextMenuProvider.IsAboutAction(actionID) {
 		if p.logger != nil {
 			p.logger.Info("Simple Synth v1.0.0 - A basic subtractive synthesizer")
 		}
@@ -1856,10 +1864,10 @@ func (p *SynthPlugin) LoadPreset(locationKind uint32, location, loadKey string) 
 	
 	// Update synth parameters
 	atomic.StoreInt64(&p.waveform, int64(preset.Waveform))
-	atomic.StoreInt64(&p.attack, int64(api.FloatToBits(preset.Attack)))
-	atomic.StoreInt64(&p.decay, int64(api.FloatToBits(preset.Decay)))
-	atomic.StoreInt64(&p.sustain, int64(api.FloatToBits(preset.Sustain)))
-	atomic.StoreInt64(&p.release, int64(api.FloatToBits(preset.Release)))
+	atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(preset.Attack)))
+	atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(preset.Decay)))
+	atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(preset.Sustain)))
+	atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(preset.Release)))
 	
 	// Load any additional state data
 	if preset.StateData != nil {

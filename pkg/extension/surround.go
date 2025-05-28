@@ -1,4 +1,4 @@
-package api
+package extension
 
 /*
 #cgo CFLAGS: -I../../include/clap/include
@@ -38,7 +38,15 @@ const (
     SurroundChannelTBR = C.CLAP_SURROUND_TBR // Top Back Right
 )
 
-// Port type for surround is already defined in constants.go as PortSurround = "surround"
+// SurroundProvider is implemented by plugins that support surround audio configurations
+type SurroundProvider interface {
+	// IsChannelMaskSupported returns true if the given channel mask is supported
+	IsChannelMaskSupported(channelMask uint64) bool
+	
+	// GetChannelMap returns the channel map for a given port
+	// Returns the channel identifiers in order, or nil if not supported
+	GetChannelMap(isInput bool, portIndex uint32) []uint8
+}
 
 // Global registry of plugins that implement SurroundProvider
 var (

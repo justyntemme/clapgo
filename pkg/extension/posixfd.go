@@ -1,4 +1,4 @@
-package api
+package extension
 
 /*
 #include <stdlib.h>
