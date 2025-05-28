@@ -44,12 +44,96 @@ type PluginV2 interface {
 type ProcessorV2 interface {
 	// Process audio with context for cancellation
 	Process(ctx context.Context, in, out [][]float32, steadyTime int64) error
+	
+	// ProcessBatch processes multiple frames with context support
+	ProcessBatch(ctx context.Context, frames []ProcessFrame) error
 }
+
+// ProcessFrame represents a single frame of audio processing
+type ProcessFrame struct {
+	Input      [][]float32
+	Output     [][]float32
+	SteadyTime int64
+	Events     []Event
+}
+
+// Event represents an audio event (MIDI, parameter change, etc.)
+type Event struct {
+	Type      EventType
+	Time      uint32
+	Data      interface{}
+}
+
+// EventType identifies the type of event
+type EventType int
+
+const (
+	EventTypeNote EventType = iota
+	EventTypeParameter
+	EventTypeMIDI
+	EventTypeTransport
+)
 
 // StatefulV2 handles state persistence with io interfaces
 type StatefulV2 interface {
 	SaveState(ctx context.Context, writer StateWriter) error
 	LoadState(ctx context.Context, reader StateReader) error
+	
+	// SaveStateWithProgress saves state with progress reporting
+	SaveStateWithProgress(ctx context.Context, writer StateWriter, progress chan<- ProgressUpdate) error
+	
+	// LoadStateWithProgress loads state with progress reporting
+	LoadStateWithProgress(ctx context.Context, reader StateReader, progress chan<- ProgressUpdate) error
+}
+
+// ProgressUpdate represents progress information for long operations
+type ProgressUpdate struct {
+	Completed int64   // Bytes or items completed
+	Total     int64   // Total bytes or items
+	Message   string  // Human-readable progress message
+	Percent   float64 // Completion percentage (0.0 to 1.0)
+}
+
+// PresetLoaderV2 handles preset loading with context support
+type PresetLoaderV2 interface {
+	// LoadPreset loads a preset with context for cancellation
+	LoadPreset(ctx context.Context, location string) error
+	
+	// LoadPresetWithProgress loads preset with progress reporting
+	LoadPresetWithProgress(ctx context.Context, location string, progress chan<- ProgressUpdate) error
+	
+	// ValidatePreset validates a preset file without loading it
+	ValidatePreset(ctx context.Context, location string) error
+}
+
+// ParameterV2 provides context-aware parameter operations
+type ParameterV2 interface {
+	// GetParameter gets a parameter value with context
+	GetParameter(ctx context.Context, id uint32) (float64, error)
+	
+	// SetParameter sets a parameter value with context
+	SetParameter(ctx context.Context, id uint32, value float64) error
+	
+	// GetParameterText gets parameter display text with context
+	GetParameterText(ctx context.Context, id uint32, value float64) (string, error)
+	
+	// BeginParameterChanges starts a batch of parameter changes
+	BeginParameterChanges(ctx context.Context) (ParameterTransaction, error)
+}
+
+// ParameterTransaction allows batch parameter changes with rollback
+type ParameterTransaction interface {
+	// SetParameter sets a parameter in the transaction
+	SetParameter(id uint32, value float64) error
+	
+	// Commit applies all parameter changes
+	Commit() error
+	
+	// Rollback cancels all parameter changes
+	Rollback() error
+	
+	// Context returns the transaction context
+	Context() context.Context
 }
 
 // StateWriter abstracts state writing
@@ -60,12 +144,30 @@ type StateWriter interface {
 	WriteBytes(b []byte) error
 }
 
+// StateWriterV2 extends StateWriter with context support
+type StateWriterV2 interface {
+	StateWriter
+	WriteUint32WithContext(ctx context.Context, v uint32) error
+	WriteFloat64WithContext(ctx context.Context, v float64) error
+	WriteStringWithContext(ctx context.Context, s string) error
+	WriteBytesWithContext(ctx context.Context, b []byte) error
+}
+
 // StateReader abstracts state reading
 type StateReader interface {
 	ReadUint32() (uint32, error)
 	ReadFloat64() (float64, error)
 	ReadString() (string, error)
 	ReadBytes(n int) ([]byte, error)
+}
+
+// StateReaderV2 extends StateReader with context support
+type StateReaderV2 interface {
+	StateReader
+	ReadUint32WithContext(ctx context.Context) (uint32, error)
+	ReadFloat64WithContext(ctx context.Context) (float64, error)
+	ReadStringWithContext(ctx context.Context) (string, error)
+	ReadBytesWithContext(ctx context.Context, n int) ([]byte, error)
 }
 
 // ParameterError provides detailed parameter operation errors

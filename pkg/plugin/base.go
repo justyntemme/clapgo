@@ -514,3 +514,210 @@ func (b *PluginBase) StartProcessing() error {
 func (b *PluginBase) Reset() {
 	b.CommonReset()
 }
+
+// Context-aware methods for PluginV2 interface
+
+// InitWithContext performs initialization with context support
+func (b *PluginBase) InitWithContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.CommonInit()
+	}
+}
+
+// ActivateWithContext performs activation with context support
+func (b *PluginBase) ActivateWithContext(ctx context.Context, sampleRate float64, minFrames, maxFrames uint32) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.CommonActivate(sampleRate, minFrames, maxFrames)
+	}
+}
+
+// StartProcessingWithContext prepares for audio processing with context support
+func (b *PluginBase) StartProcessingWithContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return b.CommonStartProcessing()
+	}
+}
+
+// ProcessWithContext handles a single audio frame with context
+func (b *PluginBase) ProcessWithContext(ctx context.Context, in, out [][]float32, steadyTime int64) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Default implementation does nothing - plugins should override
+		return ErrNotImplemented
+	}
+}
+
+// ProcessBatch processes multiple frames with context support
+func (b *PluginBase) ProcessBatch(ctx context.Context, frames []ProcessFrame) error {
+	for i, frame := range frames {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if err := b.ProcessWithContext(ctx, frame.Input, frame.Output, frame.SteadyTime); err != nil {
+				return &ProcessError{Frame: uint32(i), Err: err}
+			}
+			
+			// Report progress if channel is available
+			if progress, ok := GetProgress(ctx); ok {
+				update := ProgressUpdate{
+					Completed: int64(i + 1),
+					Total:     int64(len(frames)),
+					Percent:   float64(i+1) / float64(len(frames)),
+					Message:   fmt.Sprintf("Processing frame %d/%d", i+1, len(frames)),
+				}
+				select {
+				case progress <- update:
+				default:
+					// Don't block if channel is full
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// SaveStateWithContextV2 saves state with context and progress support
+func (b *PluginBase) SaveStateWithContextV2(ctx context.Context, writer StateWriterV2) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Get parameter count for progress reporting
+		paramCount := b.ParamManager.Count()
+		
+		// Write parameter count
+		if err := writer.WriteUint32WithContext(ctx, paramCount); err != nil {
+			return fmt.Errorf("failed to write parameter count: %w", err)
+		}
+		
+		// Write each parameter
+		for i := uint32(0); i < paramCount; i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				paramInfo, err := b.ParamManager.GetInfoByIndex(i)
+				if err != nil {
+					return fmt.Errorf("failed to get parameter %d: %w", i, err)
+				}
+				
+				value, err := b.ParamManager.GetValue(paramInfo.ID)
+				if err != nil {
+					return fmt.Errorf("failed to get parameter value %d: %w", paramInfo.ID, err)
+				}
+				
+				// Write parameter ID and value
+				if err := writer.WriteUint32WithContext(ctx, paramInfo.ID); err != nil {
+					return fmt.Errorf("failed to write parameter ID %d: %w", paramInfo.ID, err)
+				}
+				
+				if err := writer.WriteFloat64WithContext(ctx, value); err != nil {
+					return fmt.Errorf("failed to write parameter value %d: %w", paramInfo.ID, err)
+				}
+				
+				// Report progress
+				ReportProgress(ctx, ProgressUpdate{
+					Completed: int64(i + 1),
+					Total:     int64(paramCount),
+					Percent:   float64(i+1) / float64(paramCount),
+					Message:   fmt.Sprintf("Saving parameter %d/%d", i+1, paramCount),
+				})
+			}
+		}
+		
+		return nil
+	}
+}
+
+// LoadStateWithContextV2 loads state with context and progress support
+func (b *PluginBase) LoadStateWithContextV2(ctx context.Context, reader StateReaderV2) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Read parameter count
+		paramCount, err := reader.ReadUint32WithContext(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to read parameter count: %w", err)
+		}
+		
+		// Read each parameter
+		for i := uint32(0); i < paramCount; i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				// Read parameter ID and value
+				paramID, err := reader.ReadUint32WithContext(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to read parameter ID %d: %w", i, err)
+				}
+				
+				value, err := reader.ReadFloat64WithContext(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to read parameter value %d: %w", paramID, err)
+				}
+				
+				// Set parameter value
+				if err := b.ParamManager.SetValue(paramID, value); err != nil {
+					return fmt.Errorf("failed to set parameter %d: %w", paramID, err)
+				}
+				
+				// Report progress
+				ReportProgress(ctx, ProgressUpdate{
+					Completed: int64(i + 1),
+					Total:     int64(paramCount),
+					Percent:   float64(i+1) / float64(paramCount),
+					Message:   fmt.Sprintf("Loading parameter %d/%d", i+1, paramCount),
+				})
+			}
+		}
+		
+		return nil
+	}
+}
+
+// BeginParameterChanges starts a batch of parameter changes
+func (b *PluginBase) BeginParameterChanges(ctx context.Context) (ParameterTransaction, error) {
+	return NewParameterTransaction(ctx, b), nil
+}
+
+// GetParameterWithContext gets a parameter value with context
+func (b *PluginBase) GetParameterWithContext(ctx context.Context, id uint32) (float64, error) {
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	default:
+		value, err := b.ParamManager.GetValue(id)
+		if err != nil {
+			return 0, &ParameterError{Op: "get", ParamID: id, Err: err}
+		}
+		return value, nil
+	}
+}
+
+// SetParameterWithContext sets a parameter value with context
+func (b *PluginBase) SetParameterWithContext(ctx context.Context, id uint32, value float64) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		err := b.ParamManager.SetValue(id, value)
+		if err != nil {
+			return &ParameterError{Op: "set", ParamID: id, Value: value, Err: err}
+		}
+		return nil
+	}
+}
