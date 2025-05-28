@@ -166,6 +166,8 @@ typedef void (*clapgo_plugin_on_main_thread_func)(void* plugin);
 typedef void* (*clapgo_create_plugin_func)(void* host, const char* plugin_id);
 typedef bool (*clapgo_get_version_func)(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
+// Reload manifest files - used by invalidation factory
+void clapgo_reload_manifests(void);
 
 #ifdef __cplusplus
 }

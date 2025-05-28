@@ -1866,3 +1866,32 @@ static void clapgo_thread_pool_exec(const clap_plugin_t* plugin, uint32_t task_i
     
     ClapGo_PluginThreadPoolExec(data->go_instance, task_index);
 }
+
+// Reload manifest files - used by invalidation factory
+void clapgo_reload_manifests(void) {
+    // Store the current plugin path if we have one loaded
+    static char stored_plugin_path[512] = {0};
+    
+    // If we have a manifest loaded, remember its path
+    if (manifest_plugin_count > 0 && stored_plugin_path[0] == '\0') {
+        // Try to reconstruct the plugin path from the first manifest
+        const char* home = getenv("HOME");
+        if (home) {
+            const char* plugin_id = manifest_plugins[0].manifest.plugin.id;
+            const char* simple_name = strrchr(plugin_id, '.');
+            simple_name = simple_name ? simple_name + 1 : plugin_id;
+            
+            snprintf(stored_plugin_path, sizeof(stored_plugin_path),
+                    "%s/.clap/%s/%s.clap", home, simple_name, simple_name);
+        }
+    }
+    
+    // Clear current manifests
+    manifest_plugin_count = 0;
+    memset(manifest_plugins, 0, sizeof(manifest_plugins));
+    
+    // Reload manifests if we have a path
+    if (stored_plugin_path[0] != '\0') {
+        clapgo_find_manifests(stored_plugin_path);
+    }
+}

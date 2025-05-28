@@ -68,7 +68,7 @@ func (b *PluginBase) InitWithHost(host unsafe.Pointer) {
 }
 
 // CommonInit performs common initialization
-func (b *PluginBase) CommonInit() bool {
+func (b *PluginBase) CommonInit() error {
 	// Mark main thread for debug builds
 	thread.SetMainThread()
 	
@@ -77,7 +77,7 @@ func (b *PluginBase) CommonInit() bool {
 		b.Logger.Debug(fmt.Sprintf("[%s] Plugin ID: %s, Version: %s", b.Info.Name, b.Info.ID, b.Info.Version))
 	}
 	
-	return true
+	return nil
 }
 
 // CommonDestroy performs common cleanup
@@ -94,11 +94,19 @@ func (b *PluginBase) CommonDestroy() {
 }
 
 // CommonActivate performs common activation
-func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uint32) bool {
+func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uint32) error {
 	// Assert main thread
 	thread.AssertMainThread("Plugin.Activate")
 	if b.ThreadCheck != nil {
 		b.ThreadCheck.AssertMainThread("Plugin.Activate")
+	}
+	
+	if sampleRate <= 0 {
+		return ErrInvalidSampleRate
+	}
+	
+	if minFrames > maxFrames {
+		return ErrInvalidFrameCount
 	}
 	
 	b.SampleRate = sampleRate
@@ -109,7 +117,7 @@ func (b *PluginBase) CommonActivate(sampleRate float64, minFrames, maxFrames uin
 			b.Info.Name, sampleRate, minFrames, maxFrames))
 	}
 	
-	return true
+	return nil
 }
 
 // CommonDeactivate performs common deactivation
@@ -128,12 +136,12 @@ func (b *PluginBase) CommonDeactivate() {
 }
 
 // CommonStartProcessing prepares for audio processing
-func (b *PluginBase) CommonStartProcessing() bool {
+func (b *PluginBase) CommonStartProcessing() error {
 	if !b.IsActivated {
 		if b.Logger != nil {
 			b.Logger.Warning(fmt.Sprintf("[%s] Cannot start processing - plugin not activated", b.Info.Name))
 		}
-		return false
+		return ErrNotActivated
 	}
 	
 	b.IsProcessing = true
@@ -142,7 +150,7 @@ func (b *PluginBase) CommonStartProcessing() bool {
 		b.Logger.Info(fmt.Sprintf("[%s] Started audio processing", b.Info.Name))
 	}
 	
-	return true
+	return nil
 }
 
 // CommonStopProcessing stops audio processing
@@ -192,25 +200,25 @@ func (b *PluginBase) OnMainThread() {
 	// Default implementation does nothing
 }
 
-// LoadPresetFromLocation returns false by default (no preset loading)
-func (b *PluginBase) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) bool {
-	return false
+// LoadPresetFromLocation returns an error by default (no preset loading)
+func (b *PluginBase) LoadPresetFromLocation(locationKind uint32, location string, loadKey string) error {
+	return ErrNotImplemented
 }
 
 // GetParamInfo gets parameter info by index - can be used directly by plugins
-func (b *PluginBase) GetParamInfo(index uint32, info unsafe.Pointer) bool {
+func (b *PluginBase) GetParamInfo(index uint32, info unsafe.Pointer) error {
 	if info == nil {
-		return false
+		return ErrInvalidParameter
 	}
 	
 	paramInfo, err := b.ParamManager.GetInfoByIndex(index)
 	if err != nil {
-		return false
+		return &ParameterError{Op: "get_info", ParamID: index, Err: err}
 	}
 	
 	param.InfoToC(paramInfo, info)
 	
-	return true
+	return nil
 }
 
 
@@ -259,7 +267,7 @@ func (b *PluginBase) OnTrackInfoChanged() {
 
 // SaveStateWithParams provides generic state saving with parameters
 // This simplifies the common pattern of saving plugin state to a stream
-func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint32]float64) bool {
+func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint32]float64) error {
 	// Create output stream
 	outStream := state.NewClapOutputStream(stream)
 	
@@ -289,7 +297,7 @@ func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint3
 		if b.Logger != nil {
 			b.Logger.Error(fmt.Sprintf("Failed to serialize state: %v", err))
 		}
-		return false
+		return fmt.Errorf("failed to serialize state: %w", err)
 	}
 	
 	// Write to stream
@@ -297,19 +305,19 @@ func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint3
 		if b.Logger != nil {
 			b.Logger.Error(fmt.Sprintf("Failed to write state: %v", err))
 		}
-		return false
+		return fmt.Errorf("failed to write state: %w", err)
 	}
 	
 	if b.Logger != nil {
 		b.Logger.Debug(fmt.Sprintf("State saved successfully (%d bytes)", len(data)))
 	}
 	
-	return true
+	return nil
 }
 
 // LoadStateWithCallback provides generic state loading with a callback
 // The callback is called for each parameter found in the saved state
-func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam func(id uint32, value float64)) bool {
+func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam func(id uint32, value float64)) error {
 	// Create input stream
 	inStream := state.NewClapInputStream(stream)
 	
@@ -326,7 +334,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 				if b.Logger != nil {
 					b.Logger.Error(fmt.Sprintf("State size exceeds maximum (%d bytes)", maxStateSize))
 				}
-				return false
+				return ErrInvalidState
 			}
 		}
 		if err != nil || n == 0 {
@@ -338,7 +346,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 		if b.Logger != nil {
 			b.Logger.Error("No state data found")
 		}
-		return false
+		return ErrInvalidState
 	}
 	
 	// Parse state
@@ -347,7 +355,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 		if b.Logger != nil {
 			b.Logger.Error(fmt.Sprintf("Failed to parse state: %v", err))
 		}
-		return false
+		return fmt.Errorf("failed to parse state: %w", err)
 	}
 	
 	// Apply parameters using callback
@@ -359,7 +367,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 		b.Logger.Debug(fmt.Sprintf("State loaded successfully (%d parameters)", len(pluginState.Parameters)))
 	}
 	
-	return true
+	return nil
 }
 
 // OnParamMappingSet provides default parameter mapping indication with logging
@@ -429,7 +437,7 @@ func (b *PluginBase) GetExtension(id string) unsafe.Pointer {
 }
 
 // SaveStateWithContext provides default implementation that logs context and calls SaveState
-func (b *PluginBase) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
+func (b *PluginBase) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) error {
 	// Log the context type
 	if b.Logger != nil {
 		switch contextType {
@@ -444,14 +452,14 @@ func (b *PluginBase) SaveStateWithContext(stream unsafe.Pointer, contextType uin
 		}
 	}
 	
-	// Default implementation calls SaveState
+	// Default implementation returns not implemented
 	// Override this method if you need context-specific saving
 	// This is a fallback - plugins should implement SaveState
-	return false
+	return ErrNotImplemented
 }
 
 // LoadStateWithContext provides default implementation that logs context and calls LoadState
-func (b *PluginBase) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
+func (b *PluginBase) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) error {
 	// Log the context type
 	if b.Logger != nil {
 		switch contextType {
@@ -466,14 +474,14 @@ func (b *PluginBase) LoadStateWithContext(stream unsafe.Pointer, contextType uin
 		}
 	}
 	
-	// Default implementation calls LoadState
+	// Default implementation returns not implemented
 	// Override this method if you need context-specific loading
 	// This is a fallback - plugins should implement LoadState
-	return false
+	return ErrNotImplemented
 }
 
 // Init delegates to CommonInit
-func (b *PluginBase) Init() bool {
+func (b *PluginBase) Init() error {
 	return b.CommonInit()
 }
 
@@ -483,7 +491,7 @@ func (b *PluginBase) Destroy() {
 }
 
 // Activate delegates to CommonActivate
-func (b *PluginBase) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+func (b *PluginBase) Activate(sampleRate float64, minFrames, maxFrames uint32) error {
 	return b.CommonActivate(sampleRate, minFrames, maxFrames)
 }
 
@@ -498,7 +506,7 @@ func (b *PluginBase) StopProcessing() {
 }
 
 // StartProcessing delegates to CommonStartProcessing
-func (b *PluginBase) StartProcessing() bool {
+func (b *PluginBase) StartProcessing() error {
 	return b.CommonStartProcessing()
 }
 

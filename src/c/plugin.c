@@ -1,6 +1,8 @@
 #include "bridge.h"
 // Note: plugin.h contains legacy declarations - we only need bridge.h
 #include "preset_discovery.h"
+#include "plugin_invalidation.h"
+#include "state_converter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -154,6 +156,26 @@ static const void *clapgo_entry_get_factory(const char *factory_id) {
             fclose(log);
         }
         return preset_discovery_get_factory();
+    }
+    
+    if (strcmp(factory_id, CLAP_PLUGIN_INVALIDATION_FACTORY_ID) == 0) {
+        printf("[INVALIDATION_DEBUG] Returning plugin invalidation factory\n");
+        if (log) {
+            fprintf(log, "  Returning plugin invalidation factory\n");
+            fprintf(log, "  Factory address: %p\n", plugin_invalidation_get_factory());
+            fclose(log);
+        }
+        return plugin_invalidation_get_factory();
+    }
+    
+    if (strcmp(factory_id, CLAP_PLUGIN_STATE_CONVERTER_FACTORY_ID) == 0) {
+        printf("[STATE_CONVERTER_DEBUG] Returning plugin state converter factory\n");
+        if (log) {
+            fprintf(log, "  Returning plugin state converter factory\n");
+            fprintf(log, "  Factory address: %p\n", state_converter_get_factory());
+            fclose(log);
+        }
+        return state_converter_get_factory();
     }
     
     printf("[PRESET_DEBUG] Unknown factory_id '%s', returning NULL\n", factory_id);

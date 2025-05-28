@@ -51,7 +51,7 @@ CFLAGS += $(shell pkg-config --cflags json-c)
 LDFLAGS += $(shell pkg-config --libs json-c)
 
 # Bridge source files
-C_BRIDGE_SRCS := src/c/bridge.c src/c/plugin.c src/c/manifest.c src/c/preset_discovery.c
+C_BRIDGE_SRCS := src/c/bridge.c src/c/plugin.c src/c/manifest.c src/c/preset_discovery.c src/c/plugin_invalidation.c src/c/state_converter.c
 
 # Directories
 C_SRC_DIR := src/c
@@ -116,10 +116,18 @@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o: $(C_SRC_DIR)/preset_discov
 	@echo "Compiling C preset discovery for $(1)..."
 	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/preset_discovery.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o
 
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin_invalidation.o: $(C_SRC_DIR)/plugin_invalidation.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C plugin invalidation for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/plugin_invalidation.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin_invalidation.o
+
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/state_converter.o: $(C_SRC_DIR)/state_converter.c | $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)
+	@echo "Compiling C state converter for $(1)..."
+	$(CC) $(CFLAGS) -I$(C_SRC_DIR) -c $(C_SRC_DIR)/state_converter.c -o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/state_converter.o
+
 # Final CLAP plugin - linked with shared Go library
-$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o
+$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap: $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/lib$(1).so $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin_invalidation.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/state_converter.o
 	@echo "Linking $(1).clap with shared library..."
-	$(LD) $(LDFLAGS) -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o -l$(1) $(shell pkg-config --libs json-c)
+	$(LD) $(LDFLAGS) -L$(EXAMPLES_DIR)/$(1)/$(BUILD_DIR) -o $$@ $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/bridge.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/manifest.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/preset_discovery.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/plugin_invalidation.o $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/state_converter.o -l$(1) $(shell pkg-config --libs json-c)
 
 # Build target for each plugin
 build-$(1): build-go $(EXAMPLES_DIR)/$(1)/$(BUILD_DIR)/$(1).clap
