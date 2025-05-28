@@ -222,6 +222,77 @@ func (b *PluginBase) GetParamInfo(index uint32, info unsafe.Pointer) error {
 	return nil
 }
 
+// GetParamValue gets parameter value - can be overridden by plugins that store values elsewhere
+func (b *PluginBase) GetParamValue(paramID uint32, value unsafe.Pointer) bool {
+	if value == nil {
+		return false
+	}
+	
+	val, err := b.ParamManager.GetValue(paramID)
+	if err != nil {
+		return false
+	}
+	
+	*(*float64)(value) = val
+	return true
+}
+
+// ParamValueToText converts parameter value to text
+// Plugins should override this if they need custom formatting
+func (b *PluginBase) ParamValueToText(paramID uint32, value float64, buffer unsafe.Pointer, size uint32) bool {
+	if buffer == nil || size == 0 {
+		return false
+	}
+	
+	// Default implementation uses default formatting
+	text := param.FormatValue(value, param.FormatDefault)
+	
+	// Copy text to C buffer
+	bytes := []byte(text)
+	if len(bytes) >= int(size) {
+		bytes = bytes[:size-1]
+	}
+	
+	// Convert to C char buffer
+	charBuf := (*[1 << 30]byte)(buffer)
+	copy(charBuf[:size], bytes)
+	charBuf[len(bytes)] = 0
+	
+	return true
+}
+
+// ParamTextToValue converts text to parameter value
+// Plugins should override this if they need custom parsing
+func (b *PluginBase) ParamTextToValue(paramID uint32, text string, value unsafe.Pointer) bool {
+	if value == nil {
+		return false
+	}
+	
+	paramInfo, err := b.ParamManager.GetInfo(paramID)
+	if err != nil {
+		return false
+	}
+	
+	// Default implementation uses default parsing
+	parser := param.NewParser(param.FormatDefault)
+	parsedValue, err := parser.ParseValue(text)
+	if err != nil {
+		return false
+	}
+	
+	// Clamp to parameter range
+	clamped := param.ClampValue(parsedValue, paramInfo.MinValue, paramInfo.MaxValue)
+	*(*float64)(value) = clamped
+	
+	return true
+}
+
+// ParamsFlush processes parameter events
+func (b *PluginBase) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
+	// Default implementation does nothing
+	// Plugins should override if they need to process events
+}
+
 
 
 

@@ -118,3 +118,47 @@ func ValidateBuffers(out, in [][]float32) bool {
 	
 	return true
 }
+
+// ProcessFunc is a function that processes a single audio sample
+type ProcessFunc func(sample float32) float32
+
+// ProcessStereo applies a processing function to stereo audio buffers
+// It processes each sample through the provided function
+func ProcessStereo(audioIn, audioOut [][]float32, processFunc ProcessFunc) {
+	// Ensure we have at least stereo channels
+	numChannels := len(audioOut)
+	if numChannels > len(audioIn) {
+		numChannels = len(audioIn)
+	}
+	if numChannels > 2 {
+		numChannels = 2 // Limit to stereo
+	}
+	
+	// Process each channel
+	for ch := 0; ch < numChannels; ch++ {
+		out := audioOut[ch]
+		in := audioIn[ch]
+		
+		minLen := len(out)
+		if len(in) < minLen {
+			minLen = len(in)
+		}
+		
+		// Apply processing function to each sample
+		for i := 0; i < minLen; i++ {
+			out[i] = processFunc(in[i])
+		}
+		
+		// Zero remaining samples if out is longer
+		for i := minLen; i < len(out); i++ {
+			out[i] = 0
+		}
+	}
+	
+	// Clear any additional output channels
+	for ch := numChannels; ch < len(audioOut); ch++ {
+		for i := range audioOut[ch] {
+			audioOut[ch][i] = 0
+		}
+	}
+}

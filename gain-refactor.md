@@ -39,31 +39,7 @@ var factoryPresets embed.FS
 // Remove all preset loading logic, return false
 ```
 
-### Phase 2: Consolidate Export Functions (CRITICAL PATH)
-
-**Current**: Lines 55-502 (447 lines of boilerplate export functions)  
-**Target**: ~50 lines using a dispatch table
-
-**Strategy**: Create a single dispatcher function that routes to plugin methods
-
-```go
-// NEW: pkg/plugin/exports.go
-package plugin
-
-type ExportDispatcher struct {
-    handlers map[string]func(unsafe.Pointer, ...unsafe.Pointer) unsafe.Pointer
-}
-
-// In main.go, REPLACE lines 55-502 with:
-//export ClapGo_Dispatch
-func ClapGo_Dispatch(plugin unsafe.Pointer, method *C.char, args ...unsafe.Pointer) unsafe.Pointer {
-    return dispatcher.Call(C.GoString(method), plugin, args...)
-}
-```
-
-**Savings**: ~400 lines
-
-### Phase 3: Extract Plugin Base (MAJOR REFACTOR)
+### Phase 2: Extract Plugin Base (MAJOR REFACTOR)
 
 **Current Structure** (Lines 516-544):
 ```go

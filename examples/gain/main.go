@@ -120,8 +120,10 @@ func (p *GainPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 		return process.ProcessError
 	}
 	
-	// Apply gain using the helper function
-	audio.ProcessWithGain(audioOut, audioIn, gain)
+	// Apply gain using ProcessStereo
+	audio.ProcessStereo(audioIn, audioOut, func(sample float32) float32 {
+		return sample * gain
+	})
 	
 	return process.ProcessContinue
 }
@@ -194,7 +196,8 @@ func (p *GainPlugin) GetParamValue(paramID uint32, value *C.double) bool {
 		return true
 	}
 	
-	return false
+	// Delegate to base for other parameters
+	return p.PluginBase.GetParamValue(paramID, unsafe.Pointer(value))
 }
 
 func (p *GainPlugin) ParamValueToText(paramID uint32, value float64, buffer *C.char, size uint32) bool {
@@ -265,7 +268,7 @@ func (p *GainPlugin) GetExtension(id string) unsafe.Pointer {
 	case extension.PresetLoad:
 		return unsafe.Pointer(&p)
 	default:
-		return nil
+		return p.PluginBase.GetExtension(id)
 	}
 }
 
