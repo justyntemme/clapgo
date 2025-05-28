@@ -82,7 +82,7 @@ func (p *GainPlugin) CreateWithHost(host unsafe.Pointer) cgo.Handle {
 }
 
 
-func (p *GainPlugin) StartProcessing() bool {
+func (p *GainPlugin) StartProcessing() error {
 	thread.AssertAudioThread("GainPlugin.StartProcessing")
 	if p.ThreadCheck != nil {
 		p.ThreadCheck.AssertAudioThread("GainPlugin.StartProcessing")
@@ -292,13 +292,13 @@ func (p *GainPlugin) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteCo
 }
 
 
-func (p *GainPlugin) SaveState(stream unsafe.Pointer) bool {
+func (p *GainPlugin) SaveState(stream unsafe.Pointer) error {
 	return p.SaveStateWithParams(stream, map[uint32]float64{
 		ParamGain: p.gain.Load(),
 	})
 }
 
-func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
+func (p *GainPlugin) LoadState(stream unsafe.Pointer) error {
 	return p.LoadStateWithCallback(stream, func(id uint32, value float64) {
 		if id == ParamGain {
 			p.gain.Store(value)
@@ -307,14 +307,18 @@ func (p *GainPlugin) LoadState(stream unsafe.Pointer) bool {
 	})
 }
 
-func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
-	p.PluginBase.SaveStateWithContext(stream, contextType)
+func (p *GainPlugin) SaveStateWithContext(stream unsafe.Pointer, contextType uint32) error {
+	if err := p.PluginBase.SaveStateWithContext(stream, contextType); err != nil {
+		return err
+	}
 	return p.SaveState(stream)
 }
 
   
-func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) bool {
-	p.PluginBase.LoadStateWithContext(stream, contextType)
+func (p *GainPlugin) LoadStateWithContext(stream unsafe.Pointer, contextType uint32) error {
+	if err := p.PluginBase.LoadStateWithContext(stream, contextType); err != nil {
+		return err
+	}
 	return p.LoadState(stream)
 }
 

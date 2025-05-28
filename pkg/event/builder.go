@@ -95,6 +95,42 @@ func NewParamValueEvent(paramID uint32, value float64) *ParamValueEventBuilder {
 	}
 }
 
+// Time sets the event time
+func (b *ParamValueEventBuilder) Time(time uint32) *ParamValueEventBuilder {
+	b.EventBuilder.Time(time)
+	return b
+}
+
+// SpaceID sets the event space ID
+func (b *ParamValueEventBuilder) SpaceID(spaceID uint16) *ParamValueEventBuilder {
+	b.EventBuilder.SpaceID(spaceID)
+	return b
+}
+
+// Flags sets the event flags
+func (b *ParamValueEventBuilder) Flags(flags uint32) *ParamValueEventBuilder {
+	b.EventBuilder.Flags(flags)
+	return b
+}
+
+// AddFlags adds additional flags
+func (b *ParamValueEventBuilder) AddFlags(flags uint32) *ParamValueEventBuilder {
+	b.EventBuilder.AddFlags(flags)
+	return b
+}
+
+// Live marks this event as live
+func (b *ParamValueEventBuilder) Live() *ParamValueEventBuilder {
+	b.EventBuilder.Live()
+	return b
+}
+
+// DontRecord marks this event as not to be recorded
+func (b *ParamValueEventBuilder) DontRecord() *ParamValueEventBuilder {
+	b.EventBuilder.DontRecord()
+	return b
+}
+
 // Cookie sets the parameter cookie
 func (b *ParamValueEventBuilder) Cookie(cookie unsafe.Pointer) *ParamValueEventBuilder {
 	if b.err != nil {
@@ -155,7 +191,7 @@ func (b *ParamValueEventBuilder) Build() (ParamValueEvent, error) {
 	}
 	
 	// Update header in event
-	b.event.Header = b.header
+	b.event.Header = b.EventBuilder.header
 	b.event.Header.Size = uint32(unsafe.Sizeof(b.event))
 	
 	return b.event, nil
@@ -212,6 +248,42 @@ func NewNoteEnd(noteID int32, port, channel, key int16) *NoteEventBuilder {
 	return NewNoteEvent(uint16(TypeNoteEnd), noteID, port, channel, key, 0.0)
 }
 
+// Time sets the event time
+func (b *NoteEventBuilder) Time(time uint32) *NoteEventBuilder {
+	b.EventBuilder.Time(time)
+	return b
+}
+
+// SpaceID sets the event space ID
+func (b *NoteEventBuilder) SpaceID(spaceID uint16) *NoteEventBuilder {
+	b.EventBuilder.SpaceID(spaceID)
+	return b
+}
+
+// Flags sets the event flags
+func (b *NoteEventBuilder) Flags(flags uint32) *NoteEventBuilder {
+	b.EventBuilder.Flags(flags)
+	return b
+}
+
+// AddFlags adds additional flags
+func (b *NoteEventBuilder) AddFlags(flags uint32) *NoteEventBuilder {
+	b.EventBuilder.AddFlags(flags)
+	return b
+}
+
+// Live marks this event as live
+func (b *NoteEventBuilder) Live() *NoteEventBuilder {
+	b.EventBuilder.Live()
+	return b
+}
+
+// DontRecord marks this event as not to be recorded
+func (b *NoteEventBuilder) DontRecord() *NoteEventBuilder {
+	b.EventBuilder.DontRecord()
+	return b
+}
+
 // Velocity sets the note velocity
 func (b *NoteEventBuilder) Velocity(velocity float64) *NoteEventBuilder {
 	if b.err != nil {
@@ -241,7 +313,7 @@ func (b *NoteEventBuilder) Build() (NoteEvent, error) {
 	}
 	
 	// Update header in event
-	b.event.Header = b.header
+	b.event.Header = b.EventBuilder.header
 	b.event.Header.Size = uint32(unsafe.Sizeof(b.event))
 	
 	return b.event, nil

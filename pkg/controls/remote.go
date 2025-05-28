@@ -138,66 +138,7 @@ func RemoteControlsPageToC(page *RemoteControlsPage, cPagePtr unsafe.Pointer) {
 	cPage.is_for_preset = C.bool(page.IsForPreset)
 }
 
-// Helper functions for building remote control pages
-
-// RemoteControlsPageBuilder helps build remote control pages
-type RemoteControlsPageBuilder struct {
-	page RemoteControlsPage
-}
-
-// NewRemoteControlsPageBuilder creates a new page builder
-func NewRemoteControlsPageBuilder() *RemoteControlsPageBuilder {
-	return &RemoteControlsPageBuilder{
-		page: RemoteControlsPage{
-			ParamIDs: [RemoteControlsCount]uint32{},
-		},
-	}
-}
-
-// SetSection sets the section name for the page
-func (b *RemoteControlsPageBuilder) SetSection(section string) *RemoteControlsPageBuilder {
-	b.page.SectionName = section
-	return b
-}
-
-// SetPageName sets the page name
-func (b *RemoteControlsPageBuilder) SetPageName(name string) *RemoteControlsPageBuilder {
-	b.page.PageName = name
-	return b
-}
-
-// SetPageID sets the page ID
-func (b *RemoteControlsPageBuilder) SetPageID(id uint64) *RemoteControlsPageBuilder {
-	b.page.PageID = id
-	return b
-}
-
-// SetForPreset marks the page as preset-specific
-func (b *RemoteControlsPageBuilder) SetForPreset(forPreset bool) *RemoteControlsPageBuilder {
-	b.page.IsForPreset = forPreset
-	return b
-}
-
-// SetParamID sets a parameter ID at the given control index (0-7)
-func (b *RemoteControlsPageBuilder) SetParamID(controlIndex int, paramID uint32) *RemoteControlsPageBuilder {
-	if controlIndex >= 0 && controlIndex < RemoteControlsCount {
-		b.page.ParamIDs[controlIndex] = paramID
-	}
-	return b
-}
-
-// SetParamIDs sets all parameter IDs at once
-func (b *RemoteControlsPageBuilder) SetParamIDs(paramIDs []uint32) *RemoteControlsPageBuilder {
-	for i := 0; i < RemoteControlsCount && i < len(paramIDs); i++ {
-		b.page.ParamIDs[i] = paramIDs[i]
-	}
-	return b
-}
-
-// Build returns the constructed page
-func (b *RemoteControlsPageBuilder) Build() RemoteControlsPage {
-	return b.page
-}
+// Helper functions for building remote control pages have been moved to builder.go
 
 // RemoteControlsManager manages multiple pages of remote controls
 type RemoteControlsManager struct {
@@ -253,27 +194,18 @@ func (m *RemoteControlsManager) Clear() {
 // CreatePresetPages creates remote control pages for common preset parameters
 func CreatePresetPages() []RemoteControlsPage {
 	// Page 1: Main controls
-	mainPage := NewRemoteControlsPageBuilder().
-		SetSection("Main").
-		SetPageName("Essential").
-		SetPageID(1).
-		SetForPreset(false).
+	mainPage, _ := NewRemoteControlsPageBuilder(1, "Essential").
+		Section("Main").
 		Build()
 
 	// Page 2: EQ controls  
-	eqPage := NewRemoteControlsPageBuilder().
-		SetSection("EQ").
-		SetPageName("Equalizer").
-		SetPageID(2).
-		SetForPreset(false).
+	eqPage, _ := NewRemoteControlsPageBuilder(2, "Equalizer").
+		Section("EQ").
 		Build()
 
 	// Page 3: Effects controls
-	fxPage := NewRemoteControlsPageBuilder().
-		SetSection("Effects").
-		SetPageName("FX Send").
-		SetPageID(3).
-		SetForPreset(false).
+	fxPage, _ := NewRemoteControlsPageBuilder(3, "FX Send").
+		Section("Effects").
 		Build()
 
 	return []RemoteControlsPage{mainPage, eqPage, fxPage}

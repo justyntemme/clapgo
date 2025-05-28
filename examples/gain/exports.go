@@ -55,7 +55,8 @@ func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 
 //export ClapGo_PluginInit
 func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	return C.bool(getPlugin(plugin).Init())
+	err := getPlugin(plugin).Init()
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginDestroy
@@ -71,7 +72,8 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginActivate
 func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames C.uint32_t, maxFrames C.uint32_t) C.bool {
-	return C.bool(getPlugin(plugin).Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames)))
+	err := getPlugin(plugin).Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginDeactivate
@@ -83,7 +85,8 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 	thread.MarkAudioThread()
 	defer thread.UnmarkAudioThread()
-	return C.bool(getPlugin(plugin).StartProcessing())
+	err := getPlugin(plugin).StartProcessing()
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginStopProcessing
@@ -122,7 +125,8 @@ func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
 
 //export ClapGo_PluginParamsGetInfo
 func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info unsafe.Pointer) C.bool {
-	return C.bool(getPlugin(plugin).GetParamInfo(uint32(index), info))
+	err := getPlugin(plugin).GetParamInfo(uint32(index), info)
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginParamsGetValue
@@ -147,27 +151,32 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 
 //export ClapGo_PluginStateSave
 func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	return C.bool(getPlugin(plugin).SaveState(stream))
+	err := getPlugin(plugin).SaveState(stream)
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginStateLoad
 func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool {
-	return C.bool(getPlugin(plugin).LoadState(stream))
+	err := getPlugin(plugin).LoadState(stream)
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginStateSaveWithContext
 func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	return C.bool(getPlugin(plugin).SaveStateWithContext(stream, uint32(contextType)))
+	err := getPlugin(plugin).SaveStateWithContext(stream, uint32(contextType))
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginStateLoadWithContext
 func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Pointer, contextType C.uint32_t) C.bool {
-	return C.bool(getPlugin(plugin).LoadStateWithContext(stream, uint32(contextType)))
+	err := getPlugin(plugin).LoadStateWithContext(stream, uint32(contextType))
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginPresetLoadFromLocation
 func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.uint32_t, location *C.char, loadKey *C.char) C.bool {
-	return C.bool(getPlugin(plugin).LoadPresetFromLocation(uint32(locationKind), C.GoString(location), C.GoString(loadKey)))
+	err := getPlugin(plugin).LoadPresetFromLocation(uint32(locationKind), C.GoString(location), C.GoString(loadKey))
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginLatencyGet
