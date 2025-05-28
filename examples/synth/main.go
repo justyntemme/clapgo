@@ -29,6 +29,7 @@ import (
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
 	"github.com/justyntemme/clapgo/pkg/manifest"
 	"github.com/justyntemme/clapgo/pkg/param"
+	"github.com/justyntemme/clapgo/pkg/plugin"
 	"github.com/justyntemme/clapgo/pkg/process"
 	"github.com/justyntemme/clapgo/pkg/state"
 	"github.com/justyntemme/clapgo/pkg/thread"
@@ -64,12 +65,12 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	id := C.GoString(pluginID)
 	if id == PluginID {
 		// Store the host pointer and create utilities
-		synthPlugin.host = host
-		synthPlugin.logger = hostpkg.NewLogger(host)
+		synthPlugin.Host = host
+		synthPlugin.Logger = hostpkg.NewLogger(host)
 		
 		// Log plugin creation
-		if synthPlugin.logger != nil {
-			synthPlugin.logger.Info("Creating synth plugin instance")
+		if synthPlugin.Logger != nil {
+			synthPlugin.Logger.Info("Creating synth plugin instance")
 		}
 		
 		handle := cgo.NewHandle(synthPlugin)
@@ -258,7 +259,7 @@ func ClapGo_PluginParamsCount(plugin unsafe.Pointer) C.uint32_t {
 		return 0
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	return C.uint32_t(p.paramManager.Count())
+	return C.uint32_t(p.ParamManager.Count())
 }
 
 //export ClapGo_PluginParamsGetInfo
@@ -267,17 +268,8 @@ func ClapGo_PluginParamsGetInfo(plugin unsafe.Pointer, index C.uint32_t, info un
 		return C.bool(false)
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Get parameter info from manager
-	paramInfo, err := p.paramManager.GetInfoByIndex(uint32(index))
-	if err != nil {
-		return C.bool(false)
-	}
-	
-	// Convert to C struct using helper
-	param.InfoToC(paramInfo, info)
-	
-	return C.bool(true)
+	err := p.GetParamInfo(uint32(index), info)
+	return C.bool(err == nil)
 }
 
 //export ClapGo_PluginParamsGetValue
@@ -286,54 +278,16 @@ func ClapGo_PluginParamsGetValue(plugin unsafe.Pointer, paramID C.uint32_t, valu
 		return C.bool(false)
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Get current value from parameter manager
-	val := p.paramManager.Get(uint32(paramID))
-	*value = C.double(val)
-	
-	return C.bool(true)
+	return C.bool(p.GetParamValue(uint32(paramID), unsafe.Pointer(value)))
 }
 
 //export ClapGo_PluginParamsValueToText
 func ClapGo_PluginParamsValueToText(plugin unsafe.Pointer, paramID C.uint32_t, value C.double, buffer *C.char, size C.uint32_t) C.bool {
-	if plugin == nil || buffer == nil || size == 0 {
+	if plugin == nil {
 		return C.bool(false)
 	}
-	// Format based on parameter type
-	var text string
-	switch uint32(paramID) {
-	case 1: // Volume
-		text = param.FormatValue(float64(value), param.FormatPercentage)
-	case 2: // Waveform
-		switch int(math.Round(float64(value))) {
-		case 0:
-			text = "Sine"
-		case 1:
-			text = "Saw"
-		case 2:
-			text = "Square"
-		default:
-			text = "Unknown"
-		}
-	case 3, 4, 6: // Attack, Decay, Release
-		text = param.FormatValue(float64(value), param.FormatMilliseconds)
-	case 5: // Sustain
-		text = param.FormatValue(float64(value), param.FormatPercentage)
-	default:
-		text = param.FormatValue(float64(value), param.FormatDefault)
-	}
-	
-	// Copy string to C buffer
-	bytes := []byte(text)
-	if len(bytes) >= int(size) {
-		bytes = bytes[:size-1]
-	}
-	for i, b := range bytes {
-		*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), i)) = C.char(b)
-	}
-	*(*C.char)(unsafe.Add(unsafe.Pointer(buffer), len(bytes))) = 0
-	
-	return C.bool(true)
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.ParamValueToText(uint32(paramID), float64(value), unsafe.Pointer(buffer), uint32(size)))
 }
 
 //export ClapGo_PluginParamsTextToValue
@@ -341,46 +295,8 @@ func ClapGo_PluginParamsTextToValue(plugin unsafe.Pointer, paramID C.uint32_t, t
 	if plugin == nil || text == nil || value == nil {
 		return C.bool(false)
 	}
-	
-	// Convert text to Go string
-	goText := C.GoString(text)
-	
-	// Parse based on parameter type
-	switch uint32(paramID) {
-	case 1: // Volume (percentage)
-		parser := param.NewParser(param.FormatPercentage)
-		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(param.ClampValue(parsedValue, 0.0, 1.0))
-			return C.bool(true)
-		}
-	case 2: // Waveform
-		// Parse waveform names
-		switch goText {
-		case "Sine":
-			*value = C.double(0.0)
-			return C.bool(true)
-		case "Saw":
-			*value = C.double(1.0)
-			return C.bool(true)
-		case "Square":
-			*value = C.double(2.0)
-			return C.bool(true)
-		}
-	case 3, 4, 6: // Attack, Decay, Release (milliseconds)
-		parser := param.NewParser(param.FormatMilliseconds)
-		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(param.ClampValue(parsedValue, 0.001, 5.0))
-			return C.bool(true)
-		}
-	case 5: // Sustain (percentage)
-		parser := param.NewParser(param.FormatPercentage)
-		if parsedValue, err := parser.ParseValue(goText); err == nil {
-			*value = C.double(param.ClampValue(parsedValue, 0.0, 1.0))
-			return C.bool(true)
-		}
-	}
-	
-	return C.bool(false)
+	p := cgo.Handle(plugin).Value().(*SynthPlugin)
+	return C.bool(p.ParamTextToValue(uint32(paramID), C.GoString(text), unsafe.Pointer(value)))
 }
 
 //export ClapGo_PluginParamsFlush
@@ -389,12 +305,7 @@ func ClapGo_PluginParamsFlush(plugin unsafe.Pointer, inEvents unsafe.Pointer, ou
 		return
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Process events using our abstraction
-	if inEvents != nil {
-		eventHandler := event.NewEventProcessor(inEvents, outEvents)
-		p.processEventHandler(eventHandler, 0)
-	}
+	p.ParamsFlush(inEvents, outEvents)
 }
 
 //export ClapGo_PluginStateSave
@@ -412,14 +323,14 @@ func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	}
 	
 	// Write parameter count
-	paramCount := p.paramManager.Count()
+	paramCount := p.ParamManager.Count()
 	if err := out.WriteUint32(paramCount); err != nil {
 		return false
 	}
 	
 	// Write each parameter ID and value
 	for i := uint32(0); i < paramCount; i++ {
-		info, err := p.paramManager.GetInfoByIndex(i)
+		info, err := p.ParamManager.GetInfoByIndex(i)
 		if err != nil {
 			return false
 		}
@@ -430,7 +341,7 @@ func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		}
 		
 		// Write parameter value
-		value := p.paramManager.Get(info.ID)
+		value := p.ParamManager.Get(info.ID)
 		if err := out.WriteFloat64(value); err != nil {
 			return false
 		}
@@ -559,18 +470,18 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		// Update parameter using helper
 		switch paramID {
 		case 1: // Volume
-			param.UpdateParameterAtomic(&p.volume, value, p.paramManager, paramID)
+			param.UpdateParameterAtomic(&p.volume, value, p.ParamManager, paramID)
 		case 2: // Waveform
 			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
-			p.paramManager.Set(paramID, value)
+			p.ParamManager.Set(paramID, value)
 		case 3: // Attack
-			param.UpdateParameterAtomic(&p.attack, value, p.paramManager, paramID)
+			param.UpdateParameterAtomic(&p.attack, value, p.ParamManager, paramID)
 		case 4: // Decay
-			param.UpdateParameterAtomic(&p.decay, value, p.paramManager, paramID)
+			param.UpdateParameterAtomic(&p.decay, value, p.ParamManager, paramID)
 		case 5: // Sustain
-			param.UpdateParameterAtomic(&p.sustain, value, p.paramManager, paramID)
+			param.UpdateParameterAtomic(&p.sustain, value, p.ParamManager, paramID)
 		case 6: // Release
-			param.UpdateParameterAtomic(&p.release, value, p.paramManager, paramID)
+			param.UpdateParameterAtomic(&p.release, value, p.ParamManager, paramID)
 		}
 	}
 	
@@ -605,16 +516,16 @@ func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
 	// Log the context type
-	if p.logger != nil {
+	if p.Logger != nil {
 		switch contextType {
 		case C.uint32_t(state.ContextForPreset):
-			p.logger.Info("Saving state for preset")
+			p.Logger.Info("Saving state for preset")
 		case C.uint32_t(state.ContextForDuplicate):
-			p.logger.Info("Saving state for duplicate")
+			p.Logger.Info("Saving state for duplicate")
 		case C.uint32_t(state.ContextForProject):
-			p.logger.Info("Saving state for project")
+			p.Logger.Info("Saving state for project")
 		default:
-			p.logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
+			p.Logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
 		}
 	}
 	
@@ -637,16 +548,16 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
 	// Log the context type
-	if p.logger != nil {
+	if p.Logger != nil {
 		switch contextType {
 		case C.uint32_t(state.ContextForPreset):
-			p.logger.Info("Loading state for preset")
+			p.Logger.Info("Loading state for preset")
 		case C.uint32_t(state.ContextForDuplicate):
-			p.logger.Info("Loading state for duplicate")
+			p.Logger.Info("Loading state for duplicate")
 		case C.uint32_t(state.ContextForProject):
-			p.logger.Info("Loading state for project")
+			p.Logger.Info("Loading state for project")
 		default:
-			p.logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
+			p.Logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
 		}
 	}
 	
@@ -687,14 +598,14 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 	}
 	
 	// Log the preset load request
-	if p.logger != nil {
+	if p.Logger != nil {
 		switch locationKind {
 		case C.uint32_t(state.PresetLocationFile):
-			p.logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", locationStr, loadKeyStr))
+			p.Logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", locationStr, loadKeyStr))
 		case C.uint32_t(state.PresetLocationPlugin):
-			p.logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKeyStr))
+			p.Logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKeyStr))
 		default:
-			p.logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
+			p.Logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
 			return C.bool(false)
 		}
 	}
@@ -710,8 +621,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Read the preset file
 		presetData, err := os.ReadFile(locationStr)
 		if err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
+			if p.Logger != nil {
+				p.Logger.Error(fmt.Sprintf("Failed to read preset file: %v", err))
 			}
 			return C.bool(false)
 		}
@@ -719,8 +630,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Parse the preset data
 		var preset map[string]interface{}
 		if err := json.Unmarshal(presetData, &preset); err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
+			if p.Logger != nil {
+				p.Logger.Error(fmt.Sprintf("Failed to parse preset file: %v", err))
 			}
 			return C.bool(false)
 		}
@@ -735,8 +646,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Load the preset state
 		p.LoadState(preset)
 		
-		if p.logger != nil {
-			p.logger.Info("Preset loaded successfully")
+		if p.Logger != nil {
+			p.Logger.Info("Preset loaded successfully")
 		}
 		return C.bool(true)
 		
@@ -747,8 +658,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Read from embedded filesystem
 		presetData, err := factoryPresets.ReadFile(presetPath)
 		if err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to load bundled preset '%s': %v", loadKeyStr, err))
+			if p.Logger != nil {
+				p.Logger.Error(fmt.Sprintf("Failed to load bundled preset '%s': %v", loadKeyStr, err))
 			}
 			return C.bool(false)
 		}
@@ -756,8 +667,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Parse the preset data
 		var preset map[string]interface{}
 		if err := json.Unmarshal(presetData, &preset); err != nil {
-			if p.logger != nil {
-				p.logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
+			if p.Logger != nil {
+				p.Logger.Error(fmt.Sprintf("Failed to parse bundled preset: %v", err))
 			}
 			return C.bool(false)
 		}
@@ -772,8 +683,8 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		// Load the preset state
 		p.LoadState(preset)
 		
-		if p.logger != nil {
-			p.logger.Info(fmt.Sprintf("Bundled preset '%s' loaded successfully", loadKeyStr))
+		if p.Logger != nil {
+			p.Logger.Info(fmt.Sprintf("Bundled preset '%s' loaded successfully", loadKeyStr))
 		}
 		return C.bool(true)
 		
@@ -810,14 +721,11 @@ type Voice struct {
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
+	*plugin.PluginBase
 	event.NoOpHandler // Embed to get default no-op implementations
 	
 	// Plugin state
 	voices       [16]*Voice  // Maximum 16 voices
-	sampleRate   float64
-	isActivated  bool
-	isProcessing bool
-	host         unsafe.Pointer
 	
 	// Parameters with atomic storage for thread safety
 	volume       int64  // atomic storage for volume (0.0-1.0)
@@ -830,19 +738,12 @@ type SynthPlugin struct {
 	// Transport state
 	transportInfo TransportInfo
 	
-	// Parameter management using our new abstraction
-	paramManager *param.Manager
-	
 	// Note port management
 	notePortManager *audio.NotePortManager
 	
-	// Host utilities
-	logger       *hostpkg.Logger
-	trackInfo    *hostpkg.TrackInfoProvider
-	threadCheck  *thread.Checker
+	// Host utilities (non-base specific)
 	transportControl *hostpkg.TransportControl
 	tuning       *extension.HostTuning
-	// contextMenuProvider - removed as it's migrated to extension package
 	
 	// Event pool diagnostics
 	poolDiagnostics *event.Diagnostics
@@ -864,14 +765,23 @@ type TransportInfo struct {
 
 // NewSynthPlugin creates a new synth plugin
 func NewSynthPlugin() *SynthPlugin {
+	pluginInfo := plugin.Info{
+		ID:          PluginID,
+		Name:        PluginName,
+		Vendor:      PluginVendor,
+		Version:     PluginVersion,
+		Description: PluginDescription,
+		URL:         "https://github.com/justyntemme/clapgo",
+		Manual:      "https://github.com/justyntemme/clapgo",
+		Support:     "https://github.com/justyntemme/clapgo/issues",
+		Features:    []string{plugin.FeatureInstrument, plugin.FeatureStereo},
+	}
+	
 	plugin := &SynthPlugin{
-		sampleRate:   44100.0,
-		isActivated:  false,
-		isProcessing: false,
+		PluginBase: plugin.NewPluginBase(pluginInfo),
 		transportInfo: TransportInfo{
 			Tempo: 120.0,
 		},
-		paramManager: param.NewManager(),
 		notePortManager: audio.NewNotePortManager(),
 		poolDiagnostics: &event.Diagnostics{},
 	}
@@ -885,14 +795,14 @@ func NewSynthPlugin() *SynthPlugin {
 	atomic.StoreInt64(&plugin.release, int64(util.AtomicFloat64ToBits(0.3)))     // 300ms
 	
 	// Register parameters using our new abstraction
-	plugin.paramManager.Register(param.Percentage(1, "Volume", 70.0))
-	plugin.paramManager.Register(param.Choice(2, "Waveform", 3, 0))
+	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
+	plugin.ParamManager.Register(param.Choice(2, "Waveform", 3, 0))
 	
 	// Register ADSR parameters
-	plugin.paramManager.Register(param.ADSR(3, "Attack", 2.0))    // Max 2 seconds
-	plugin.paramManager.Register(param.ADSR(4, "Decay", 2.0))     // Max 2 seconds  
-	plugin.paramManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
-	plugin.paramManager.Register(param.ADSR(6, "Release", 5.0))   // Max 5 seconds
+	plugin.ParamManager.Register(param.ADSR(3, "Attack", 2.0))    // Max 2 seconds
+	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))     // Max 2 seconds  
+	plugin.ParamManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
+	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))   // Max 5 seconds
 	
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
@@ -906,65 +816,65 @@ func (p *SynthPlugin) Init() bool {
 	thread.DebugSetMainThread()
 	
 	// Initialize thread checker
-	if p.host != nil {
-		p.threadCheck = thread.NewChecker(p.host)
-		if p.threadCheck.IsAvailable() && p.logger != nil {
-			p.logger.Info("Thread Check extension available - thread safety validation enabled")
+	if p.Host != nil {
+		p.ThreadCheck = thread.NewChecker(p.Host)
+		if p.ThreadCheck.IsAvailable() && p.Logger != nil {
+			p.Logger.Info("Thread Check extension available - thread safety validation enabled")
 		}
 	}
 	
 	// Initialize track info helper
-	if p.host != nil {
-		p.trackInfo = hostpkg.NewTrackInfoProvider(p.host)
+	if p.Host != nil {
+		p.TrackInfo = hostpkg.NewTrackInfoProvider(p.Host)
 	}
 	
 	// Initialize transport control
-	if p.host != nil {
-		p.transportControl = hostpkg.NewTransportControl(p.host)
-		if p.logger != nil {
-			p.logger.Info("Transport control extension initialized")
+	if p.Host != nil {
+		p.transportControl = hostpkg.NewTransportControl(p.Host)
+		if p.Logger != nil {
+			p.Logger.Info("Transport control extension initialized")
 		}
 	}
 	
 	// Initialize tuning support
-	if p.host != nil {
-		p.tuning = extension.NewHostTuning(p.host)
-		if p.logger != nil {
-			p.logger.Info("Tuning extension initialized")
+	if p.Host != nil {
+		p.tuning = extension.NewHostTuning(p.Host)
+		if p.Logger != nil {
+			p.Logger.Info("Tuning extension initialized")
 			// Log available tunings
 			tunings := p.tuning.GetAllTunings()
 			if len(tunings) > 0 {
 				for _, t := range tunings {
-					p.logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)", 
+					p.Logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)", 
 						t.Name, t.TuningID, t.IsDynamic))
 				}
 			}
 		}
 	}
 	
-	if p.logger != nil {
-		p.logger.Debug("Synth plugin initialized")
+	if p.Logger != nil {
+		p.Logger.Debug("Synth plugin initialized")
 		
 		// Log available bundled presets
 		presets := p.GetAvailablePresets()
 		if len(presets) > 0 {
-			p.logger.Info(fmt.Sprintf("Available bundled presets: %v", presets))
+			p.Logger.Info(fmt.Sprintf("Available bundled presets: %v", presets))
 		}
 	}
 	
 	// TODO: Initialize context menu provider with param.Manager support
-	// if p.host != nil {
+	// if p.Host != nil {
 	//	p.contextMenuProvider = api.NewDefaultContextMenuProvider(
-	//		p.paramManager,
+	//		p.ParamManager,
 	//		"Simple Synth", 
 	//		"1.0.0",
-	//		p.host,
+	//		p.Host,
 	//	)
 	//	p.contextMenuProvider.SetAboutMessage("Simple Synth v1.0.0 - A basic subtractive synthesizer")
 	// }
 	
 	// Check initial track info
-	if p.trackInfo != nil {
+	if p.TrackInfo != nil {
 		p.OnTrackInfoChanged()
 	}
 	
@@ -982,16 +892,16 @@ func (p *SynthPlugin) Destroy() {
 
 // Activate prepares the plugin for processing
 func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
-	p.sampleRate = sampleRate
-	p.isActivated = true
+	p.SampleRate = sampleRate
+	p.IsActivated = true
 	
 	// Clear all voices
 	for i := range p.voices {
 		p.voices[i] = nil
 	}
 	
-	if p.logger != nil {
-		p.logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
+	if p.Logger != nil {
+		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
 	}
 	
 	return true
@@ -999,21 +909,21 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 
 // Deactivate stops the plugin from processing
 func (p *SynthPlugin) Deactivate() {
-	p.isActivated = false
+	p.IsActivated = false
 }
 
 // StartProcessing begins audio processing
 func (p *SynthPlugin) StartProcessing() bool {
-	if !p.isActivated {
+	if !p.IsActivated {
 		return false
 	}
-	p.isProcessing = true
+	p.IsProcessing = true
 	return true
 }
 
 // StopProcessing ends audio processing
 func (p *SynthPlugin) StopProcessing() {
-	p.isProcessing = false
+	p.IsProcessing = false
 }
 
 // Reset resets the plugin state
@@ -1027,7 +937,7 @@ func (p *SynthPlugin) Reset() {
 // Process processes audio data using the new abstractions
 func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events *event.EventProcessor) int {
 	// Check if we're in a valid state for processing
-	if !p.isActivated || !p.isProcessing {
+	if !p.IsActivated || !p.IsProcessing {
 		return process.ProcessError
 	}
 	
@@ -1089,7 +999,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 				env := p.getEnvelopeValue(voice, j, framesCount, attack, decay, sustain, release)
 				
 				// Generate sample with optional brightness filtering
-				sample := generateSample(voice.Phase, freq, waveform)
+				sample := audio.GenerateWaveformSample(voice.Phase, audio.WaveformType(waveform))
 				
 				// Apply brightness as a simple low-pass filter simulation
 				if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
@@ -1124,10 +1034,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 				}
 				
 				// Advance oscillator phase
-				voice.Phase += freq / p.sampleRate
-				if voice.Phase >= 1.0 {
-					voice.Phase -= 1.0
-				}
+				voice.Phase = audio.AdvancePhase(voice.Phase, freq, p.SampleRate)
 			}
 			
 			// Check if voice is still active
@@ -1160,6 +1067,105 @@ func (p *SynthPlugin) processEventHandler(events *event.EventProcessor, frameCou
 	events.ProcessAll(p)
 }
 
+// ParamValueToText provides custom formatting for synth parameters
+func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer unsafe.Pointer, size uint32) bool {
+	if buffer == nil || size == 0 {
+		return false
+	}
+	
+	// Format based on parameter type
+	var text string
+	switch paramID {
+	case 1: // Volume
+		text = param.FormatValue(value, param.FormatPercentage)
+	case 2: // Waveform
+		switch int(math.Round(value)) {
+		case 0:
+			text = "Sine"
+		case 1:
+			text = "Saw"
+		case 2:
+			text = "Square"
+		default:
+			text = "Unknown"
+		}
+	case 3, 4, 6: // Attack, Decay, Release
+		text = param.FormatValue(value, param.FormatMilliseconds)
+	case 5: // Sustain
+		text = param.FormatValue(value, param.FormatPercentage)
+	default:
+		// Use base implementation for unknown parameters
+		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
+	}
+	
+	// Copy string to C buffer
+	bytes := []byte(text)
+	if len(bytes) >= int(size) {
+		bytes = bytes[:size-1]
+	}
+	
+	// Convert to C char buffer
+	charBuf := (*[1 << 30]byte)(buffer)
+	copy(charBuf[:size], bytes)
+	charBuf[len(bytes)] = 0
+	
+	return true
+}
+
+// ParamTextToValue provides custom parsing for synth parameters
+func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe.Pointer) bool {
+	if value == nil {
+		return false
+	}
+	
+	// Parse based on parameter type
+	switch paramID {
+	case 1: // Volume (percentage)
+		parser := param.NewParser(param.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
+			return true
+		}
+	case 2: // Waveform
+		// Parse waveform names
+		switch text {
+		case "Sine":
+			*(*float64)(value) = 0.0
+			return true
+		case "Saw":
+			*(*float64)(value) = 1.0
+			return true
+		case "Square":
+			*(*float64)(value) = 2.0
+			return true
+		}
+	case 3, 4, 6: // Attack, Decay, Release (milliseconds)
+		parser := param.NewParser(param.FormatMilliseconds)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.001, 5.0)
+			return true
+		}
+	case 5: // Sustain (percentage)
+		parser := param.NewParser(param.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
+			return true
+		}
+	}
+	
+	// Use base implementation for unknown parameters
+	return p.PluginBase.ParamTextToValue(paramID, text, value)
+}
+
+// ParamsFlush overrides base to use processEventHandler
+func (p *SynthPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
+	// Process events using our abstraction
+	if inEvents != nil {
+		eventHandler := event.NewEventProcessor(inEvents, outEvents)
+		p.processEventHandler(eventHandler, 0)
+	}
+}
+
 // HandleParamValue handles parameter value changes
 func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
 	// Check if this is a polyphonic parameter event (targets specific note)
@@ -1173,22 +1179,22 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 	switch paramEvent.ParamID {
 	case 1: // Volume
 		atomic.StoreInt64(&p.volume, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 2: // Waveform
 		atomic.StoreInt64(&p.waveform, int64(math.Round(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 3: // Attack
 		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 4: // Decay
 		atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 5: // Sustain
 		atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	case 6: // Release
 		atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(paramEvent.Value)))
-		p.paramManager.Set(paramEvent.ParamID, paramEvent.Value)
+		p.ParamManager.Set(paramEvent.ParamID, paramEvent.Value)
 	}
 }
 
@@ -1237,8 +1243,8 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 	// Special transport control: C0 (MIDI note 24) toggles play/pause
 	if noteEvent.Key == 24 && p.transportControl != nil {
 		p.transportControl.RequestTogglePlay()
-		if p.logger != nil {
-			p.logger.Info("Transport toggle play requested via C0")
+		if p.Logger != nil {
+			p.Logger.Info("Transport toggle play requested via C0")
 		}
 		return // Don't play the note
 	}
@@ -1268,8 +1274,8 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 		EnvelopePhase: 0,
 	}
 	
-	if p.logger != nil {
-		p.logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
 	}
 }
 
@@ -1418,12 +1424,12 @@ func (p *SynthPlugin) findFreeVoice() int {
 // getEnvelopeValue calculates the ADSR envelope value for a voice
 func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
 	// Time increment per sample
-	timeInc := 1.0 / p.sampleRate
+	timeInc := 1.0 / p.SampleRate
 	
 	// If in release phase
 	if voice.ReleasePhase >= 0.0 {
 		// Update release phase
-		releaseSamples := release * p.sampleRate
+		releaseSamples := release * p.SampleRate
 		if releaseSamples <= 0 {
 			releaseSamples = 1
 		}
@@ -1478,25 +1484,6 @@ func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uin
 	return voice.EnvelopeValue
 }
 
-// generateSample generates a single sample based on the current waveform
-func generateSample(phase, freq float64, waveform int) float64 {
-	switch waveform {
-	case 0: // Sine wave
-		return math.Sin(2.0 * math.Pi * phase)
-		
-	case 1: // Saw wave
-		return 2.0*phase - 1.0
-		
-	case 2: // Square wave
-		if phase < 0.5 {
-			return 1.0
-		}
-		return -1.0
-		
-	default:
-		return 0.0
-	}
-}
 
 
 // GetNotePortManager returns the plugin's note port manager
@@ -1509,7 +1496,9 @@ func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 	// All extensions are handled by the C bridge based on exported functions
 	// The C bridge checks for the presence of required exports and provides
 	// the extension implementation if available
-	return nil
+	
+	// Delegate to base plugin for any unhandled extensions
+	return p.PluginBase.GetExtension(id)
 }
 
 // GetPluginInfo returns information about the plugin
@@ -1584,62 +1573,62 @@ func (p *SynthPlugin) GetTail() uint32 {
 	release := util.AtomicFloat64FromBits(uint64(atomic.LoadInt64(&p.release)))
 	
 	// Convert to samples
-	tailSamples := uint32(release * p.sampleRate)
+	tailSamples := uint32(release * p.SampleRate)
 	
 	// Add some extra samples for safety
-	return tailSamples + uint32(p.sampleRate * 0.1) // 100ms extra
+	return tailSamples + uint32(p.SampleRate * 0.1) // 100ms extra
 }
 
 // OnTimer handles timer callbacks
 func (p *SynthPlugin) OnTimer(timerID uint64) {
 	// Synth doesn't currently use timers
 	// Could be used for UI updates, voice status monitoring, etc.
-	if p.logger != nil {
-		p.logger.Debug(fmt.Sprintf("Timer %d fired", timerID))
+	if p.Logger != nil {
+		p.Logger.Debug(fmt.Sprintf("Timer %d fired", timerID))
 	}
 }
 
 // OnTrackInfoChanged is called when the track information changes
 func (p *SynthPlugin) OnTrackInfoChanged() {
-	if p.trackInfo == nil {
+	if p.TrackInfo == nil {
 		return
 	}
 	
 	// Get the new track information
-	info, ok := p.trackInfo.Get()
+	info, ok := p.TrackInfo.Get()
 	if !ok {
-		if p.logger != nil {
-			p.logger.Warning("Failed to get track info")
+		if p.Logger != nil {
+			p.Logger.Warning("Failed to get track info")
 		}
 		return
 	}
 	
 	// Log the track information
-	if p.logger != nil {
-		p.logger.Info(fmt.Sprintf("Track info changed:"))
+	if p.Logger != nil {
+		p.Logger.Info(fmt.Sprintf("Track info changed:"))
 		if info.Flags&hostpkg.TrackInfoHasTrackName != 0 {
-			p.logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
+			p.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
 		}
 		if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
-			p.logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
+			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
 				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
 		}
 		if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
-			p.logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
+			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
 				info.AudioChannelCount, info.AudioPortType))
 		}
 		
 		// Adjust synth behavior based on track type
 		if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
-			p.logger.Info("  This is a return track - adjusting for wet signal")
+			p.Logger.Info("  This is a return track - adjusting for wet signal")
 			// Could adjust default mix to 100% wet
 		}
 		if info.Flags&hostpkg.TrackInfoIsForBus != 0 {
-			p.logger.Info("  This is a bus track")
+			p.Logger.Info("  This is a bus track")
 			// Could adjust polyphony or processing
 		}
 		if info.Flags&hostpkg.TrackInfoIsForMaster != 0 {
-			p.logger.Info("  This is the master track")
+			p.Logger.Info("  This is the master track")
 			// Synths typically wouldn't be on master, but if so, could adjust
 		}
 	}
@@ -1651,14 +1640,14 @@ func (p *SynthPlugin) OnTuningChanged() {
 		return
 	}
 	
-	if p.logger != nil {
-		p.logger.Info("Tuning pool changed, refreshing available tunings")
+	if p.Logger != nil {
+		p.Logger.Info("Tuning pool changed, refreshing available tunings")
 		
 		// Log all available tunings
 		tunings := p.tuning.GetAllTunings()
-		p.logger.Info(fmt.Sprintf("Available tunings: %d", len(tunings)))
+		p.Logger.Info(fmt.Sprintf("Available tunings: %d", len(tunings)))
 		for _, t := range tunings {
-			p.logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)", 
+			p.Logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)", 
 				t.Name, t.TuningID, t.IsDynamic))
 		}
 	}
@@ -1672,8 +1661,8 @@ func (p *SynthPlugin) GetAvailablePresets() []string {
 	// Read the embedded preset directory
 	entries, err := factoryPresets.ReadDir("presets/factory")
 	if err != nil {
-		if p.logger != nil {
-			p.logger.Error(fmt.Sprintf("Failed to read preset directory: %v", err))
+		if p.Logger != nil {
+			p.Logger.Error(fmt.Sprintf("Failed to read preset directory: %v", err))
 		}
 		return presets
 	}
