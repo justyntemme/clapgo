@@ -13,63 +13,12 @@ This document provides a comprehensive strategy to refactor the synth plugin fro
 
 ### Key Components to Extract to Framework
 
-1. **Voice Management System** - Currently ~200 lines of voice allocation/deallocation
-2. **ADSR Envelope Implementation** - Custom envelope code that duplicates framework
-3. **MIDI Event Processing** - Note on/off, pitch bend, modulation handling
-4. **Polyphonic Parameter Modulation** - Per-voice parameter overrides
-5. **Preset Loading System** - Removed (DAWs have their own preset systems)
-6. **Export Functions** - ~500 lines of C export boilerplate
+1. **ADSR Envelope Implementation** - Custom envelope code that duplicates framework
+2. **Polyphonic Parameter Modulation** - Per-voice parameter overrides
 
 ## Detailed Refactoring Strategy
 
-### Phase 1: Extract Voice Management to Framework (pkg/audio/voice.go)
-
-**Current**: Lines ~660-684 (Voice struct) + voice allocation logic scattered throughout
-**Target**: Create reusable voice management system
-
-```go
-// pkg/audio/voice.go
-package audio
-
-type Voice struct {
-    NoteID    int32
-    Channel   int16
-    Key       int16
-    Velocity  float64
-    
-    // Oscillator state
-    Phase     float64
-    Frequency float64
-    
-    // Envelope
-    Envelope  *ADSREnvelope
-    
-    // Modulation
-    PitchBend   float64
-    Brightness  float64
-    Pressure    float64
-    
-    // State
-    IsActive    bool
-    TuningID    uint64
-}
-
-type VoiceManager struct {
-    voices      []*Voice
-    maxVoices   int
-    sampleRate  float64
-}
-
-func NewVoiceManager(maxVoices int, sampleRate float64) *VoiceManager
-func (vm *VoiceManager) AllocateVoice(noteID int32, channel, key int16, velocity float64) *Voice
-func (vm *VoiceManager) ReleaseVoice(noteID int32, channel int16)
-func (vm *VoiceManager) ReleaseAllVoices()
-func (vm *VoiceManager) ProcessVoices(processFunc func(*Voice) float64) []float64
-```
-
-**Savings**: ~150 lines
-
-### Phase 2: Use Framework ADSR Envelope (Already Exists!)
+### Phase 1: Use Framework ADSR Envelope (Already Exists!)
 
 **Current**: Lines ~1389-1449 custom getEnvelopeValue implementation
 **Action**: Replace with existing `audio.ADSREnvelope` from framework
@@ -81,82 +30,7 @@ func (vm *VoiceManager) ProcessVoices(processFunc func(*Voice) float64) []float6
 
 **Savings**: ~60 lines
 
-### Phase 3: Extract MIDI Event Processing (pkg/audio/midi.go)
-
-**Current**: Lines ~1025-1388 processEventHandler with complex MIDI logic
-**Target**: Create reusable MIDI processor
-
-```go
-// pkg/audio/midi.go
-type MIDIProcessor struct {
-    voiceManager *VoiceManager
-    paramManager *param.Manager
-}
-
-func (m *MIDIProcessor) ProcessNoteOn(channel, key int16, velocity float64, noteID int32)
-func (m *MIDIProcessor) ProcessNoteOff(channel, key int16, noteID int32)
-func (m *MIDIProcessor) ProcessPitchBend(channel int16, value float64)
-func (m *MIDIProcessor) ProcessModulation(channel int16, cc uint32, value float64)
-func (m *MIDIProcessor) ProcessPolyPressure(channel, key int16, pressure float64)
-```
-
-**Savings**: ~350 lines
-
-### Phase 4: Consolidate Export Functions
-
-**Current**: Lines ~58-550 individual export functions
-**Target**: Generate exports or use a dispatch pattern similar to gain plugin
-
-```go
-// Move to separate exports.go file with minimal boilerplate
-// Use reflection or code generation to reduce duplication
-```
-
-**Savings**: ~400 lines
-
-### Phase 5: ~~Extract Preset System~~ REMOVED
-
-**Preset functionality has been removed entirely since DAWs provide their own preset management systems**
-
-**Savings**: ~70 lines
-
-### Phase 6: Create Synth-Specific DSP Utilities (pkg/audio/synth.go)
-
-**Target**: Extract commonly needed synth building blocks
-
-```go
-// pkg/audio/synth.go
-package audio
-
-// PolyphonicOscillator manages multiple oscillator voices
-type PolyphonicOscillator struct {
-    voiceManager *VoiceManager
-    waveformType WaveformType
-}
-
-func NewPolyphonicOscillator(maxVoices int, sampleRate float64) *PolyphonicOscillator
-func (po *PolyphonicOscillator) Process(frameCount uint32) []float32
-
-// SimpleLowPassFilter for brightness control
-type SimpleLowPassFilter struct {
-    cutoff     float64
-    resonance  float64
-    sampleRate float64
-    state      [2]float64
-}
-
-func (f *SimpleLowPassFilter) Process(input float64) float64
-func (f *SimpleLowPassFilter) SetCutoff(cutoff float64)
-
-// PitchBendProcessor handles pitch bend with configurable range
-type PitchBendProcessor struct {
-    bendRange float64 // in semitones
-}
-
-func (p *PitchBendProcessor) ApplyPitchBend(baseFreq, bendValue float64) float64
-```
-
-### Phase 7: Simplify Plugin Structure
+### Phase 2: Simplify Plugin Structure
 
 **Current Plugin Structure** (Lines ~686-720):
 ```go
@@ -188,7 +62,7 @@ type SynthPlugin struct {
 }
 ```
 
-### Phase 8: Simplify Process Method
+### Phase 3: Simplify Process Method
 
 **Current**: Lines ~901-1024 complex processing logic
 **Target**: Clean, readable process method
@@ -224,7 +98,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32,
 
 **Savings**: ~100 lines
 
-### Phase 9: Remove Redundant Methods
+### Phase 4: Remove Redundant Methods
 
 **Methods to Remove/Simplify**:
 - GetAvailablePresets (not used)
@@ -235,7 +109,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32,
 
 **Savings**: ~200 lines
 
-### Phase 10: Use Builder Pattern for Parameters
+### Phase 5: Use Builder Pattern for Parameters
 
 **Current**: Manual parameter registration
 **Target**: Use parameter builder from framework
@@ -271,15 +145,10 @@ func NewSynthPlugin() *SynthPlugin {
 
 ## Implementation Order
 
-1. **Phase 1**: Extract Voice Management (~2 hours) ✅
-2. **Phase 2**: Replace custom envelope with framework (~30 mins)
-3. **Phase 3**: Extract MIDI processing (~2 hours) ✅
-4. **Phase 4**: Consolidate exports (~1 hour)
-5. ~~**Phase 5**: Extract preset system~~ REMOVED
-6. **Phase 6**: Create synth DSP utilities (~2 hours) ✅
-7. **Phase 7-8**: Simplify plugin structure and process (~1 hour)
-8. **Phase 9**: Remove redundant code (~30 mins)
-9. **Phase 10**: Use parameter builders (~30 mins)
+1. **Phase 1**: Replace custom envelope with framework (~30 mins)
+2. **Phase 2-3**: Simplify plugin structure and process (~1 hour)
+3. **Phase 4**: Remove redundant code (~30 mins)
+4. **Phase 5**: Use parameter builders (~30 mins)
 
 ## Expected Results
 
@@ -302,21 +171,24 @@ func NewSynthPlugin() *SynthPlugin {
 
 ## Framework Additions Needed
 
-1. **pkg/audio/voice.go** - Voice and VoiceManager (~150 lines) ✅
-2. **pkg/audio/midi.go** - MIDI event processor (~200 lines) ✅
-3. **pkg/audio/synth.go** - Synth-specific DSP utilities (~150 lines) ✅
-4. ~~**pkg/state/preset.go** - Generic preset loader~~ REMOVED
-5. **pkg/audio/filter.go** - Basic filters (already in synth.go) ✅
+All required framework additions have been completed. The framework now includes:
+- Voice management system
+- MIDI event processing
+- Synth-specific DSP utilities
+- Basic audio filters
 
-## Benefits for Future Developers
+## Benefits Already Available to Developers
 
 1. **Voice Management**: No need to implement voice allocation/stealing
 2. **MIDI Processing**: Standard MIDI event handling out of the box
 3. **DSP Building Blocks**: Oscillators, filters, envelopes ready to use
-4. **Parameter Builders**: Fluent API for common parameter types
-5. **No Preset Complexity**: DAWs handle preset management
-6. **Thread Safety**: Built-in atomic parameter handling
-7. **Polyphonic Modulation**: Per-voice parameter system included
+4. **No Preset Complexity**: DAWs handle preset management
+5. **Thread Safety**: Built-in atomic parameter handling
+6. **Polyphonic Modulation**: Per-voice parameter system included
+
+## Remaining Benefits to Implement
+
+1. **Parameter Builders**: Fluent API for common parameter types
 
 ## Success Metrics
 
