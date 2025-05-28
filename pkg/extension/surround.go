@@ -174,8 +174,6 @@ func Create714ChannelMap() []uint8 {
 
 // Channel mask helpers
 
-// ChannelMaskStereo is the channel mask for stereo
-const ChannelMaskStereo = (1 << SurroundChannelFL) | (1 << SurroundChannelFR)
 
 // ChannelMask51 is the channel mask for 5.1 surround
 const ChannelMask51 = (1 << SurroundChannelFL) | (1 << SurroundChannelFR) | 

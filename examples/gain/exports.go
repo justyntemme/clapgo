@@ -214,10 +214,12 @@ func ClapGo_PluginRemoteControlsGet(plugin unsafe.Pointer, pageIndex C.uint32_t,
 
 //export ClapGo_PluginParamIndicationSetMapping
 func ClapGo_PluginParamIndicationSetMapping(plugin unsafe.Pointer, paramID C.uint64_t, hasMapping C.bool, color unsafe.Pointer, label *C.char, description *C.char) {
-	getPlugin(plugin).OnParamMappingSet(uint32(paramID), bool(hasMapping), api.ColorFromC(color), C.GoString(label), C.GoString(description))
+	// TODO: ColorFromC needs to be migrated from api package
+	// getPlugin(plugin).OnParamMappingSet(uint32(paramID), bool(hasMapping), api.ColorFromC(color), C.GoString(label), C.GoString(description))
 }
 
 //export ClapGo_PluginParamIndicationSetAutomation
 func ClapGo_PluginParamIndicationSetAutomation(plugin unsafe.Pointer, paramID C.uint64_t, automationState C.uint32_t, color unsafe.Pointer) {
-	getPlugin(plugin).OnParamAutomationSet(uint32(paramID), uint32(automationState), api.ColorFromC(color))
+	// TODO: ColorFromC needs to be migrated from api package
+	// getPlugin(plugin).OnParamAutomationSet(uint32(paramID), uint32(automationState), api.ColorFromC(color))
 }

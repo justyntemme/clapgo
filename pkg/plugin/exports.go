@@ -49,7 +49,7 @@ func (h *ExportHelpers) PluginDestroy(plugin unsafe.Pointer) {
 		p.Destroy()
 		// Unregister from any providers
 		api.UnregisterAudioPortsProvider(plugin)
-		api.UnregisterVoiceInfoProvider(plugin)
+		// Voice info provider unregistration moved to extension system
 		// Delete the handle to free the Go object
 		if plugin != nil {
 			cgo.Handle(plugin).Delete()

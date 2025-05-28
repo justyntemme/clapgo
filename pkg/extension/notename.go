@@ -1,5 +1,9 @@
 package extension
 
+// #include "../../include/clap/include/clap/ext/note-name.h"
+import "C"
+import "unsafe"
+
 // NoteNameProvider is an extension for plugins that provide custom note names.
 // It allows plugins to provide human-readable names for notes/keys.
 type NoteNameProvider interface {
@@ -89,4 +93,47 @@ func GetDrumNoteName(key int16) string {
 		return name
 	}
 	return GetStandardNoteName(key)
+}
+
+// StandardNoteNames provides standard note names (C-2 to G8) - compatible with api package
+func StandardNoteNames() []NoteName {
+	noteNames := []string{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"}
+	names := make([]NoteName, 128)
+	
+	for i := 0; i < 128; i++ {
+		noteName := noteNames[i%12]
+		octave := (i / 12) - 2 // MIDI octave numbering starts at C-2
+		names[i] = NoteName{
+			Name:    noteName + string(rune('0'+octave)),
+			Port:    -1, // All ports
+			Key:     int16(i),
+			Channel: -1, // All channels
+		}
+	}
+	
+	return names
+}
+
+// NoteNameToC converts a Go NoteName to a C structure
+func NoteNameToC(noteName *NoteName, cNoteNamePtr unsafe.Pointer) {
+	if noteName == nil || cNoteNamePtr == nil {
+		return
+	}
+	
+	cNoteName := (*C.clap_note_name_t)(cNoteNamePtr)
+	
+	// Copy name string
+	nameBytes := []byte(noteName.Name)
+	if len(nameBytes) >= C.CLAP_NAME_SIZE {
+		nameBytes = nameBytes[:C.CLAP_NAME_SIZE-1]
+	}
+	for i, b := range nameBytes {
+		cNoteName.name[i] = C.char(b)
+	}
+	cNoteName.name[len(nameBytes)] = 0
+	
+	// Copy port, key, and channel
+	cNoteName.port = C.int16_t(noteName.Port)
+	cNoteName.key = C.int16_t(noteName.Key)
+	cNoteName.channel = C.int16_t(noteName.Channel)
 }

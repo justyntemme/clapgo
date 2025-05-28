@@ -5,6 +5,7 @@ import (
 	"unsafe"
 	
 	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
 	"github.com/justyntemme/clapgo/pkg/param"
@@ -399,15 +400,15 @@ func (b *PluginBase) OnParamAutomationSet(paramID uint32, automationState uint32
 	if b.Logger != nil {
 		var stateStr string
 		switch automationState {
-		case api.ParamIndicationAutomationNone:
+		case param.IndicationAutomationNone:
 			stateStr = "None"
-		case api.ParamIndicationAutomationPresent:
+		case param.IndicationAutomationPresent:
 			stateStr = "Present"
-		case api.ParamIndicationAutomationPlaying:
+		case param.IndicationAutomationPlaying:
 			stateStr = "Playing"
-		case api.ParamIndicationAutomationRecording:
+		case param.IndicationAutomationRecording:
 			stateStr = "Recording"
-		case api.ParamIndicationAutomationOverriding:
+		case param.IndicationAutomationOverriding:
 			stateStr = "Overriding"
 		default:
 			stateStr = "Unknown"
@@ -426,7 +427,7 @@ func (b *PluginBase) GetRemoteControlsPageCount() uint32 {
 }
 
 // GetRemoteControlsPage returns nil by default
-func (b *PluginBase) GetRemoteControlsPage(pageIndex uint32) (*api.RemoteControlsPage, bool) {
+func (b *PluginBase) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteControlsPage, bool) {
 	return nil, false
 }
 

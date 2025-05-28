@@ -15,7 +15,7 @@ const (
 	PosixFDSupport       = "clap.posix-fd-support"
 	ThreadCheck          = "clap.thread-check"
 	ThreadPool           = "clap.thread-pool"
-	VoiceInfo            = "clap.voice-info"
+	VoiceInfoID          = "clap.voice-info"
 	TrackInfo            = "clap.track-info"
 	LogSupport           = "clap.log"
 	PresetLoad           = "clap.preset-load"
@@ -24,12 +24,12 @@ const (
 	EventRegistry        = "clap.event-registry"
 	ParamIndication      = "clap.param-indication"
 	ConfigurableAudioPorts = "clap.configurable-audio-ports"
-	AudioPortsConfig     = "clap.audio-ports-config"
+	AudioPortsConfigID   = "clap.audio-ports-config"
 	AudioPortsActivation = "clap.audio-ports-activation/2"
 	AudioPortsActivationCompat = "clap.audio-ports-activation/draft-2"
 	Ambisonic            = "clap.ambisonic"
 	Surround             = "clap.surround"
-	NoteName             = "clap.note-name"
+	NoteNameID           = "clap.note-name"
 	ContextMenu          = "clap.context-menu"
 	
 	// Draft extensions

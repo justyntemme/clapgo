@@ -26,8 +26,11 @@ import (
 	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/event"
+	"github.com/justyntemme/clapgo/pkg/extension"
+	hostpkg "github.com/justyntemme/clapgo/pkg/host"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/process"
+	"github.com/justyntemme/clapgo/pkg/thread"
 	"github.com/justyntemme/clapgo/pkg/util"
 	"math"
 	"os"
@@ -61,7 +64,7 @@ func ClapGo_CreatePlugin(host unsafe.Pointer, pluginID *C.char) unsafe.Pointer {
 	if id == PluginID {
 		// Store the host pointer and create utilities
 		synthPlugin.host = host
-		synthPlugin.logger = api.NewHostLogger(host)
+		synthPlugin.logger = hostpkg.NewLogger(host)
 		
 		// Log plugin creation
 		if synthPlugin.logger != nil {
@@ -121,7 +124,7 @@ func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	if p.Init() {
 		// Register as voice info provider after successful init
-		api.RegisterVoiceInfoProvider(plugin, p)
+		// Voice info provider registration moved to extension system
 		return C.bool(true)
 	}
 	return C.bool(false)
@@ -135,7 +138,7 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 	handle := cgo.Handle(plugin)
 	p := handle.Value().(*SynthPlugin)
 	// Unregister voice info provider before destroying
-	api.UnregisterVoiceInfoProvider(plugin)
+	// Voice info provider unregistration moved to extension system
 	p.Destroy()
 	handle.Delete()
 }
@@ -833,11 +836,11 @@ type SynthPlugin struct {
 	notePortManager *api.NotePortManager
 	
 	// Host utilities
-	logger       *api.HostLogger
-	trackInfo    *api.HostTrackInfo
-	threadCheck  *api.ThreadChecker
-	transportControl *api.HostTransportControl
-	tuning       *api.HostTuning
+	logger       *hostpkg.Logger
+	trackInfo    *hostpkg.TrackInfoProvider
+	threadCheck  *thread.Checker
+	transportControl *hostpkg.TransportControl
+	tuning       *extension.HostTuning
 	// contextMenuProvider - removed as it's migrated to extension package
 	
 	// Event pool diagnostics
@@ -903,7 +906,7 @@ func (p *SynthPlugin) Init() bool {
 	
 	// Initialize thread checker
 	if p.host != nil {
-		p.threadCheck = api.NewThreadChecker(p.host)
+		p.threadCheck = thread.NewChecker(p.host)
 		if p.threadCheck.IsAvailable() && p.logger != nil {
 			p.logger.Info("Thread Check extension available - thread safety validation enabled")
 		}
@@ -911,12 +914,12 @@ func (p *SynthPlugin) Init() bool {
 	
 	// Initialize track info helper
 	if p.host != nil {
-		p.trackInfo = api.NewHostTrackInfo(p.host)
+		p.trackInfo = hostpkg.NewTrackInfoProvider(p.host)
 	}
 	
 	// Initialize transport control
 	if p.host != nil {
-		p.transportControl = api.NewHostTransportControl(p.host)
+		p.transportControl = hostpkg.NewTransportControl(p.host)
 		if p.logger != nil {
 			p.logger.Info("Transport control extension initialized")
 		}
@@ -924,7 +927,7 @@ func (p *SynthPlugin) Init() bool {
 	
 	// Initialize tuning support
 	if p.host != nil {
-		p.tuning = api.NewHostTuning(p.host)
+		p.tuning = extension.NewHostTuning(p.host)
 		if p.logger != nil {
 			p.logger.Info("Tuning extension initialized")
 			// Log available tunings
@@ -1602,7 +1605,7 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 	}
 	
 	// Get the new track information
-	info, ok := p.trackInfo.GetTrackInfo()
+	info, ok := p.trackInfo.Get()
 	if !ok {
 		if p.logger != nil {
 			p.logger.Warning("Failed to get track info")
@@ -1660,135 +1663,6 @@ func (p *SynthPlugin) OnTuningChanged() {
 	}
 }
 
-// Context Menu Extension Methods
-
-// PopulateContextMenu builds the context menu for the plugin
-func (p *SynthPlugin) PopulateContextMenu(target *api.ContextMenuTarget, builder *api.ContextMenuBuilder) bool {
-	// Check main thread (context menu is always on main thread)
-	api.DebugAssertMainThread("SynthPlugin.PopulateContextMenu")
-	
-	if target != nil && target.Kind == api.ContextMenuTargetKindParam {
-		// TODO: Use helper for common parameter menu items
-		// p.contextMenuProvider.PopulateParameterMenu(uint32(target.ID), builder)
-		
-		// Add parameter-specific items
-		// No parameter-specific items for this synth currently
-	} else {
-		// TODO: Use helper for common global menu items
-		// p.contextMenuProvider.PopulateGlobalMenu(builder)
-		
-		// Add synth-specific items
-		builder.AddItem(&api.ContextMenuSeparator{})
-		
-		// Voice management submenu
-		builder.AddItem(&api.ContextMenuSubmenu{
-			Label:     "Voice Management",
-			IsEnabled: true,
-		})
-		
-		// Show current voice count
-		activeVoices := 0
-		for _, voice := range p.voices {
-			if voice != nil && voice.IsActive {
-				activeVoices++
-			}
-		}
-		builder.AddItem(&api.ContextMenuEntry{
-			Label:     fmt.Sprintf("Active Voices: %d/%d", activeVoices, len(p.voices)),
-			IsEnabled: false, // Just informational
-			ActionID:  0,
-		})
-		
-		builder.AddItem(&api.ContextMenuSeparator{})
-		
-		builder.AddItem(&api.ContextMenuEntry{
-			Label:     "Kill All Voices",
-			IsEnabled: activeVoices > 0,
-			ActionID:  2001,
-		})
-		
-		builder.AddItem(&api.ContextMenuEndSubmenu{})
-	}
-	
-	return true
-}
-
-// PerformContextMenuAction handles context menu actions
-func (p *SynthPlugin) PerformContextMenuAction(target *api.ContextMenuTarget, actionID uint64) bool {
-	// Check main thread (context menu is always on main thread)
-	api.DebugAssertMainThread("SynthPlugin.PerformContextMenuAction")
-	
-	// TODO: Check for common actions first
-	// if isReset, paramID := p.contextMenuProvider.IsResetAction(actionID); isReset {
-	// 	// For synth parameters, also update atomic values
-	// 	info, _ := p.paramManager.GetInfo(paramID)
-	// 	switch paramID {
-	// 	case 1: // Volume
-	// 		atomic.StoreInt64(&p.volume, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
-	// 	case 2: // Waveform
-	// 		atomic.StoreInt64(&p.waveform, int64(info.DefaultValue))
-	// 	case 3: // Attack
-	// 		atomic.StoreInt64(&p.attack, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
-	// 	case 4: // Decay
-	// 		atomic.StoreInt64(&p.decay, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
-	// 	case 5: // Sustain
-	// 		atomic.StoreInt64(&p.sustain, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
-	// 	case 6: // Release
-	// 		atomic.StoreInt64(&p.release, int64(util.AtomicFloat64ToBits(info.DefaultValue)))
-	// 	}
-	// 	return p.contextMenuProvider.HandleResetParameter(paramID)
-	// }
-	
-	if false { // p.contextMenuProvider.IsAboutAction(actionID) {
-		if p.logger != nil {
-			p.logger.Info("Simple Synth v1.0.0 - A basic subtractive synthesizer")
-		}
-		return true
-	}
-	
-	// Handle synth-specific actions
-	switch actionID {
-	case 1101: // Sine wave preset
-		p.paramManager.Set(2, 0.0)
-		atomic.StoreInt64(&p.waveform, 0)
-		if p.host != nil {
-			// TODO: Request parameter flush to notify host
-		}
-		return true
-		
-	case 1102: // Saw wave preset
-		p.paramManager.Set(2, 1.0)
-		atomic.StoreInt64(&p.waveform, 1)
-		if p.host != nil {
-			// TODO: Request parameter flush to notify host
-		}
-		return true
-		
-	case 1103: // Square wave preset
-		p.paramManager.Set(2, 2.0)
-		atomic.StoreInt64(&p.waveform, 2)
-		if p.host != nil {
-			// TODO: Request parameter flush to notify host
-		}
-		return true
-		
-	case 2001: // Kill all voices
-		for i := range p.voices {
-			if p.voices[i] != nil {
-				p.voices[i].IsActive = false
-				p.voices[i].Phase = 0.0
-				p.voices[i].EnvelopeValue = 0.0
-				p.voices[i].EnvelopePhase = 0
-			}
-		}
-		if p.logger != nil {
-			p.logger.Info("All voices killed")
-		}
-		return true
-	}
-	
-	return false
-}
 
 // GetAvailablePresets returns a list of available bundled preset names
 func (p *SynthPlugin) GetAvailablePresets() []string {
@@ -1954,59 +1828,17 @@ func ClapGo_PluginNoteNameGet(plugin unsafe.Pointer, index C.uint32_t, noteName 
 	_ = cgo.Handle(plugin).Value().(*SynthPlugin)
 	
 	// Get standard note name for this index
-	noteNames := api.StandardNoteNames()
+	noteNames := extension.StandardNoteNames()
 	if int(index) >= len(noteNames) {
 		return C.bool(false)
 	}
 	
 	// Convert to C structure
-	api.NoteNameToC(&noteNames[index], noteName)
+	extension.NoteNameToC(&noteNames[index], noteName)
 	
 	return C.bool(true)
 }
 
-// Context Menu Extension Exports
-
-//export ClapGo_PluginContextMenuPopulate
-func ClapGo_PluginContextMenuPopulate(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, builder unsafe.Pointer) C.bool {
-	if plugin == nil || builder == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: uint32(targetKind),
-			ID:   uint64(targetID),
-		}
-	}
-	
-	// Create builder wrapper
-	menuBuilder := api.NewContextMenuBuilder(builder)
-	
-	return C.bool(p.PopulateContextMenu(target, menuBuilder))
-}
-
-//export ClapGo_PluginContextMenuPerform
-func ClapGo_PluginContextMenuPerform(plugin unsafe.Pointer, targetKind C.uint32_t, targetID C.uint64_t, actionID C.uint64_t) C.bool {
-	if plugin == nil {
-		return C.bool(false)
-	}
-	p := cgo.Handle(plugin).Value().(*SynthPlugin)
-	
-	// Create target
-	var target *api.ContextMenuTarget
-	if targetKind != api.ContextMenuTargetKindGlobal {
-		target = &api.ContextMenuTarget{
-			Kind: uint32(targetKind),
-			ID:   uint64(targetID),
-		}
-	}
-	
-	return C.bool(p.PerformContextMenuAction(target, uint64(actionID)))
-}
 
 func main() {
 	// This is not called when used as a plugin,

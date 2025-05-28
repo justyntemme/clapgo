@@ -49,24 +49,6 @@ type AudioPortsConfig struct {
 	MainOutputPortType     string
 }
 
-// SurroundProvider is an extension for plugins that support surround sound.
-type SurroundProvider interface {
-	// IsChannelMaskSupported returns true if the channel mask is supported.
-	IsChannelMaskSupported(channelMask uint64) bool
-
-	// GetChannelMap returns the channel map for the given port.
-	GetChannelMap(isInput bool, portIndex uint32, channelMask uint64) []uint8
-}
-
-// AmbisonicProvider is an extension for plugins that support ambisonic audio.
-type AmbisonicProvider interface {
-	// IsChannelMaskSupported returns true if the ambisonic channel mask is supported.
-	IsChannelMaskSupported(channelMask uint64) bool
-
-	// GetChannelMap returns the ambisonic channel map.
-	GetChannelMap(isInput bool, portIndex uint32, channelMask uint64) []uint8
-}
-
 // Common surround channel masks
 const (
 	ChannelMaskMono              = 0x1
