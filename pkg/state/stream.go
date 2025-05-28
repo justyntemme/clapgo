@@ -1,9 +1,31 @@
 package state
 
+// #include <stdint.h>
+// #include <string.h>
+//
+// typedef struct clap_istream {
+//    void *ctx;
+//    int64_t (*read)(const struct clap_istream *stream, void *buffer, uint64_t size);
+// } clap_istream_t;
+//
+// typedef struct clap_ostream {
+//    void *ctx;
+//    int64_t (*write)(const struct clap_ostream *stream, const void *buffer, uint64_t size);
+// } clap_ostream_t;
+//
+// static int64_t clap_stream_read(const clap_istream_t *stream, void *buffer, uint64_t size) {
+//     return stream->read(stream, buffer, size);
+// }
+//
+// static int64_t clap_stream_write(const clap_ostream_t *stream, const void *buffer, uint64_t size) {
+//     return stream->write(stream, buffer, size);
+// }
+import "C"
 import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"unsafe"
 )
 
 // Common stream errors
@@ -112,6 +134,21 @@ func (s *InputStream) ReadString() (string, error) {
 	return string(data), nil
 }
 
+// Read reads raw bytes from the stream (for compatibility)
+func (s *InputStream) Read(data []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	
+	n, err := s.reader.Read(data)
+	if err != nil {
+		s.err = err
+		return n, err
+	}
+	
+	return n, nil
+}
+
 // OutputStream provides methods for writing binary data
 type OutputStream struct {
 	writer io.Writer
@@ -202,4 +239,85 @@ func (s *OutputStream) WriteString(value string) error {
 	}
 	
 	return nil
+}
+
+// Write writes raw bytes to the stream (for compatibility)
+func (s *OutputStream) Write(data []byte) (int, error) {
+	err := s.WriteBytes(data)
+	if err != nil {
+		return 0, err
+	}
+	return len(data), nil
+}
+
+// C Stream Adapters - these implement io.Reader/Writer for CLAP streams
+
+// ClapReader adapts a CLAP input stream to io.Reader
+type ClapReader struct {
+	stream *C.clap_istream_t
+}
+
+// NewClapReader creates a new CLAP stream reader
+func NewClapReader(stream unsafe.Pointer) *ClapReader {
+	return &ClapReader{
+		stream: (*C.clap_istream_t)(stream),
+	}
+}
+
+// Read implements io.Reader
+func (r *ClapReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	
+	bytesRead := C.clap_stream_read(r.stream, unsafe.Pointer(&p[0]), C.uint64_t(len(p)))
+	if bytesRead < 0 {
+		return 0, ErrReadFailed
+	}
+	
+	if bytesRead == 0 {
+		return 0, io.EOF
+	}
+	
+	return int(bytesRead), nil
+}
+
+// ClapWriter adapts a CLAP output stream to io.Writer
+type ClapWriter struct {
+	stream *C.clap_ostream_t
+}
+
+// NewClapWriter creates a new CLAP stream writer
+func NewClapWriter(stream unsafe.Pointer) *ClapWriter {
+	return &ClapWriter{
+		stream: (*C.clap_ostream_t)(stream),
+	}
+}
+
+// Write implements io.Writer
+func (w *ClapWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	
+	bytesWritten := C.clap_stream_write(w.stream, unsafe.Pointer(&p[0]), C.uint64_t(len(p)))
+	if bytesWritten < 0 {
+		return 0, ErrWriteFailed
+	}
+	
+	return int(bytesWritten), nil
+}
+
+// Convenience functions for CLAP streams
+
+// NewClapInputStream creates an InputStream that wraps a CLAP input stream
+func NewClapInputStream(stream unsafe.Pointer) *InputStream {
+	reader := NewClapReader(stream)
+	return NewInputStream(reader)
+}
+
+// NewClapOutputStream creates an OutputStream that wraps a CLAP output stream
+func NewClapOutputStream(stream unsafe.Pointer) *OutputStream {
+	writer := NewClapWriter(stream)
+	return NewOutputStream(writer)
 }

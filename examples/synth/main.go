@@ -23,13 +23,14 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/extension"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
+	"github.com/justyntemme/clapgo/pkg/manifest"
 	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/process"
+	"github.com/justyntemme/clapgo/pkg/state"
 	"github.com/justyntemme/clapgo/pkg/thread"
 	"github.com/justyntemme/clapgo/pkg/util"
 	"math"
@@ -191,8 +192,8 @@ func ClapGo_PluginReset(plugin unsafe.Pointer) {
 //export ClapGo_PluginProcess
 func ClapGo_PluginProcess(plugin unsafe.Pointer, processPtr unsafe.Pointer) C.int32_t {
 	// Mark this thread as audio thread for debug builds
-	api.DebugMarkAudioThread()
-	defer api.DebugUnmarkAudioThread()
+	thread.DebugMarkAudioThread()
+	defer thread.DebugUnmarkAudioThread()
 	
 	if plugin == nil || processPtr == nil {
 		return C.int32_t(process.ProcessError)
@@ -209,8 +210,8 @@ func ClapGo_PluginProcess(plugin unsafe.Pointer, processPtr unsafe.Pointer) C.in
 	framesCount := uint32(cProcess.frames_count)
 	
 	// Convert audio buffers using our abstraction - NO MORE MANUAL CONVERSION!
-	audioIn := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
-	audioOut := api.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
+	audioIn := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_inputs), uint32(cProcess.audio_inputs_count), framesCount)
+	audioOut := audio.ConvertFromCBuffers(unsafe.Pointer(cProcess.audio_outputs), uint32(cProcess.audio_outputs_count), framesCount)
 	
 	// Create event handler using the new abstraction - NO MORE MANUAL EVENT HANDLING!
 	eventHandler := event.NewEventProcessor(
@@ -403,7 +404,7 @@ func ClapGo_PluginStateSave(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
-	out := api.NewOutputStream(stream)
+	out := state.NewClapOutputStream(stream)
 	
 	// Write state version
 	if err := out.WriteUint32(1); err != nil {
@@ -487,7 +488,7 @@ func ClapGo_PluginNotePortsGet(plugin unsafe.Pointer, index C.uint32_t, isInput 
 		return false
 	}
 	
-	var portInfo *api.NotePortInfo
+	var portInfo *audio.NotePortInfo
 	if isInput {
 		portInfo = npm.GetInputPort(uint32(index))
 	} else {
@@ -527,7 +528,7 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 	}
 	p := cgo.Handle(plugin).Value().(*SynthPlugin)
 	
-	in := api.NewInputStream(stream)
+	in := state.NewClapInputStream(stream)
 	
 	// Read state version
 	version, err := in.ReadUint32()
@@ -606,11 +607,11 @@ func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	// Log the context type
 	if p.logger != nil {
 		switch contextType {
-		case C.uint32_t(api.StateContextForPreset):
+		case C.uint32_t(state.ContextForPreset):
 			p.logger.Info("Saving state for preset")
-		case C.uint32_t(api.StateContextForDuplicate):
+		case C.uint32_t(state.ContextForDuplicate):
 			p.logger.Info("Saving state for duplicate")
-		case C.uint32_t(api.StateContextForProject):
+		case C.uint32_t(state.ContextForProject):
 			p.logger.Info("Saving state for project")
 		default:
 			p.logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
@@ -619,7 +620,7 @@ func ClapGo_PluginStateSaveWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	
 	// For preset saves, we might want to clear voice state
 	// For duplicate/project saves, we keep everything
-	if contextType == C.uint32_t(api.StateContextForPreset) {
+	if contextType == C.uint32_t(state.ContextForPreset) {
 		// Save without active voice data for presets
 		return ClapGo_PluginStateSave(plugin, stream)
 	}
@@ -638,11 +639,11 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	// Log the context type
 	if p.logger != nil {
 		switch contextType {
-		case C.uint32_t(api.StateContextForPreset):
+		case C.uint32_t(state.ContextForPreset):
 			p.logger.Info("Loading state for preset")
-		case C.uint32_t(api.StateContextForDuplicate):
+		case C.uint32_t(state.ContextForDuplicate):
 			p.logger.Info("Loading state for duplicate")
-		case C.uint32_t(api.StateContextForProject):
+		case C.uint32_t(state.ContextForProject):
 			p.logger.Info("Loading state for project")
 		default:
 			p.logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))
@@ -653,7 +654,7 @@ func ClapGo_PluginStateLoadWithContext(plugin unsafe.Pointer, stream unsafe.Poin
 	result := ClapGo_PluginStateLoad(plugin, stream)
 	
 	// For preset loads, we might want to reset voice allocation
-	if contextType == C.uint32_t(api.StateContextForPreset) && result {
+	if contextType == C.uint32_t(state.ContextForPreset) && result {
 		// Clear all active voices when loading a preset
 		// Note: This assumes preset loads happen on the main thread
 		// Additional synchronization may be needed for multi-threaded hosts
@@ -688,9 +689,9 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 	// Log the preset load request
 	if p.logger != nil {
 		switch locationKind {
-		case C.uint32_t(api.PresetLocationFile):
+		case C.uint32_t(state.PresetLocationFile):
 			p.logger.Info(fmt.Sprintf("Loading preset from file: %s (key: %s)", locationStr, loadKeyStr))
-		case C.uint32_t(api.PresetLocationPlugin):
+		case C.uint32_t(state.PresetLocationPlugin):
 			p.logger.Info(fmt.Sprintf("Loading bundled preset (key: %s)", loadKeyStr))
 		default:
 			p.logger.Warning(fmt.Sprintf("Unknown preset location kind: %d", locationKind))
@@ -700,7 +701,7 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 	
 	// Handle different location kinds
 	switch locationKind {
-	case C.uint32_t(api.PresetLocationFile):
+	case C.uint32_t(state.PresetLocationFile):
 		// Load preset from file
 		if locationStr == "" {
 			return C.bool(false)
@@ -739,7 +740,7 @@ func ClapGo_PluginPresetLoadFromLocation(plugin unsafe.Pointer, locationKind C.u
 		}
 		return C.bool(true)
 		
-	case C.uint32_t(api.PresetLocationPlugin):
+	case C.uint32_t(state.PresetLocationPlugin):
 		// Load bundled preset from embedded files
 		presetPath := filepath.Join("presets", "factory", loadKeyStr+".json")
 		
@@ -833,7 +834,7 @@ type SynthPlugin struct {
 	paramManager *param.Manager
 	
 	// Note port management
-	notePortManager *api.NotePortManager
+	notePortManager *audio.NotePortManager
 	
 	// Host utilities
 	logger       *hostpkg.Logger
@@ -871,7 +872,7 @@ func NewSynthPlugin() *SynthPlugin {
 			Tempo: 120.0,
 		},
 		paramManager: param.NewManager(),
-		notePortManager: api.NewNotePortManager(),
+		notePortManager: audio.NewNotePortManager(),
 		poolDiagnostics: &event.Diagnostics{},
 	}
 	
@@ -894,7 +895,7 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.paramManager.Register(param.ADSR(6, "Release", 5.0))   // Max 5 seconds
 	
 	// Configure note port for instrument
-	plugin.notePortManager.AddInputPort(api.CreateDefaultInstrumentPort())
+	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
 	
 	return plugin
 }
@@ -902,7 +903,7 @@ func NewSynthPlugin() *SynthPlugin {
 // Init initializes the plugin
 func (p *SynthPlugin) Init() bool {
 	// Mark this as main thread for debug builds
-	api.DebugSetMainThread()
+	thread.DebugSetMainThread()
 	
 	// Initialize thread checker
 	if p.host != nil {
@@ -1499,7 +1500,7 @@ func generateSample(phase, freq float64, waveform int) float64 {
 
 
 // GetNotePortManager returns the plugin's note port manager
-func (p *SynthPlugin) GetNotePortManager() *api.NotePortManager {
+func (p *SynthPlugin) GetNotePortManager() *audio.NotePortManager {
 	return p.notePortManager
 }
 
@@ -1512,8 +1513,8 @@ func (p *SynthPlugin) GetExtension(id string) unsafe.Pointer {
 }
 
 // GetPluginInfo returns information about the plugin
-func (p *SynthPlugin) GetPluginInfo() api.PluginInfo {
-	return api.PluginInfo{
+func (p *SynthPlugin) GetPluginInfo() manifest.PluginInfo {
+	return manifest.PluginInfo{
 		ID:          PluginID,
 		Name:        PluginName,
 		Vendor:      PluginVendor, 
@@ -1616,28 +1617,28 @@ func (p *SynthPlugin) OnTrackInfoChanged() {
 	// Log the track information
 	if p.logger != nil {
 		p.logger.Info(fmt.Sprintf("Track info changed:"))
-		if info.Flags&api.TrackInfoHasTrackName != 0 {
+		if info.Flags&hostpkg.TrackInfoHasTrackName != 0 {
 			p.logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
 		}
-		if info.Flags&api.TrackInfoHasTrackColor != 0 {
+		if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
 			p.logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
 				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
 		}
-		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
+		if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
 			p.logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
 				info.AudioChannelCount, info.AudioPortType))
 		}
 		
 		// Adjust synth behavior based on track type
-		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
 			p.logger.Info("  This is a return track - adjusting for wet signal")
 			// Could adjust default mix to 100% wet
 		}
-		if info.Flags&api.TrackInfoIsForBus != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForBus != 0 {
 			p.logger.Info("  This is a bus track")
 			// Could adjust polyphony or processing
 		}
-		if info.Flags&api.TrackInfoIsForMaster != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForMaster != 0 {
 			p.logger.Info("  This is the master track")
 			// Synths typically wouldn't be on master, but if so, could adjust
 		}
@@ -1689,7 +1690,7 @@ func (p *SynthPlugin) GetAvailablePresets() []string {
 }
 
 // GetVoiceInfo returns voice count and capacity information
-func (p *SynthPlugin) GetVoiceInfo() api.VoiceInfo {
+func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
 	// Count active voices
 	activeVoices := uint32(0)
 	for _, voice := range p.voices {
@@ -1698,10 +1699,10 @@ func (p *SynthPlugin) GetVoiceInfo() api.VoiceInfo {
 		}
 	}
 	
-	return api.VoiceInfo{
+	return extension.VoiceInfo{
 		VoiceCount:    uint32(len(p.voices)), // Maximum polyphony
 		VoiceCapacity: uint32(len(p.voices)), // Same as count in our implementation
-		Flags:         api.VoiceInfoSupportsOverlappingNotes, // We support note IDs
+		Flags:         extension.VoiceInfoFlagSupportsOverlappingNotes, // We support note IDs
 	}
 }
 

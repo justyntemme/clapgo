@@ -3,15 +3,15 @@ package clap
 import (
 	"sync"
 
-	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/param"
 )
 
 // ParamManager provides parameter management functionality for plugins.
-// It implements the api.ParamsProvider interface and can be used
+// It implements the param.Provider interface and can be used
 // to add parameter support to plugins.
 type ParamManager struct {
 	mutex      sync.RWMutex
-	params     map[uint32]api.ParamInfo
+	params     map[uint32]param.Info
 	values     map[uint32]float64
 	paramOrder []uint32
 }
@@ -19,14 +19,14 @@ type ParamManager struct {
 // NewParamManager creates a new parameter manager.
 func NewParamManager() *ParamManager {
 	return &ParamManager{
-		params:     make(map[uint32]api.ParamInfo),
+		params:     make(map[uint32]param.Info),
 		values:     make(map[uint32]float64),
 		paramOrder: make([]uint32, 0),
 	}
 }
 
 // RegisterParam registers a parameter with the manager.
-func (m *ParamManager) RegisterParam(info api.ParamInfo) {
+func (m *ParamManager) RegisterParam(info param.Info) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -49,7 +49,7 @@ func (m *ParamManager) GetParamCount() uint32 {
 }
 
 // GetParamInfo returns information about a parameter.
-func (m *ParamManager) GetParamInfo(paramID uint32) api.ParamInfo {
+func (m *ParamManager) GetParamInfo(paramID uint32) param.Info {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -58,16 +58,16 @@ func (m *ParamManager) GetParamInfo(paramID uint32) api.ParamInfo {
 	}
 
 	// Return empty info if parameter doesn't exist
-	return api.ParamInfo{}
+	return param.Info{}
 }
 
 // GetParamInfoByIndex returns information about a parameter by index.
-func (m *ParamManager) GetParamInfoByIndex(index uint32) api.ParamInfo {
+func (m *ParamManager) GetParamInfoByIndex(index uint32) param.Info {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
 	if int(index) >= len(m.paramOrder) {
-		return api.ParamInfo{}
+		return param.Info{}
 	}
 
 	paramID := m.paramOrder[index]
@@ -94,10 +94,10 @@ func (m *ParamManager) SetParamValue(paramID uint32, value float64) {
 	if _, exists := m.params[paramID]; exists {
 		// Clamp value to parameter range if bounded
 		info := m.params[paramID]
-		if info.Flags&api.ParamIsBoundedBelow != 0 && value < info.MinValue {
+		if info.Flags&param.FlagBoundedBelow != 0 && value < info.MinValue {
 			value = info.MinValue
 		}
-		if info.Flags&api.ParamIsBoundedAbove != 0 && value > info.MaxValue {
+		if info.Flags&param.FlagBoundedAbove != 0 && value > info.MaxValue {
 			value = info.MaxValue
 		}
 

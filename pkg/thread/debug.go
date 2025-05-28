@@ -116,3 +116,35 @@ func AssertAudioThread(operation string) {
 func AssertNotAudioThread(operation string) {
 	debugChecker.ValidateNotAudioThread(operation)
 }
+
+// Debug-prefixed aliases for compatibility with existing code
+
+// DebugSetMainThread marks the current thread as main (debug builds only)
+func DebugSetMainThread() {
+	SetMainThread()
+}
+
+// DebugMarkAudioThread marks the current thread as audio (debug builds only)
+func DebugMarkAudioThread() {
+	MarkAudioThread()
+}
+
+// DebugUnmarkAudioThread unmarks the current thread as audio (debug builds only)
+func DebugUnmarkAudioThread() {
+	UnmarkAudioThread()
+}
+
+// DebugAssertMainThread panics if not on main thread (debug builds only)
+func DebugAssertMainThread(operation string) {
+	AssertMainThread(operation)
+}
+
+// DebugAssertAudioThread panics if not on audio thread (debug builds only)
+func DebugAssertAudioThread(operation string) {
+	AssertAudioThread(operation)
+}
+
+// DebugAssertNotAudioThread panics if on audio thread (debug builds only)
+func DebugAssertNotAudioThread(operation string) {
+	AssertNotAudioThread(operation)
+}

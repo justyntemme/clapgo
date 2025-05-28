@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"unsafe"
 	
-	"github.com/justyntemme/clapgo/pkg/api"
 	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
@@ -15,7 +14,7 @@ import (
 
 // PluginBase provides comprehensive base functionality for all plugins
 type PluginBase struct {
-	api.NoOpEventHandler // Embed no-op event handlers from api package
+	event.NoOpHandler // Embed no-op event handlers from event package
 	
 	// Core plugin state
 	Host         unsafe.Pointer
@@ -30,7 +29,7 @@ type PluginBase struct {
 	
 	// Extensions
 	ThreadCheck  *thread.Checker
-	TrackInfo    *api.HostTrackInfo
+	TrackInfo    *hostpkg.TrackInfoProvider
 	
 	// Plugin info
 	Info Info
@@ -64,7 +63,7 @@ func (b *PluginBase) InitWithHost(host unsafe.Pointer) {
 		}
 		
 		// Initialize track info
-		b.TrackInfo = api.NewHostTrackInfo(host)
+		b.TrackInfo = hostpkg.NewTrackInfoProvider(host)
 	}
 }
 
@@ -162,19 +161,9 @@ func (b *PluginBase) CommonReset() {
 	}
 }
 
-// GetPluginInfo returns plugin information in API format
-func (b *PluginBase) GetPluginInfo() api.PluginInfo {
-	return api.PluginInfo{
-		ID:          b.Info.ID,
-		Name:        b.Info.Name,
-		Vendor:      b.Info.Vendor,
-		URL:         b.Info.URL,
-		ManualURL:   b.Info.Manual,
-		SupportURL:  b.Info.Support,
-		Version:     b.Info.Version,
-		Description: b.Info.Description,
-		Features:    b.Info.Features,
-	}
+// GetPluginInfo returns plugin information
+func (b *PluginBase) GetPluginInfo() Info {
+	return b.Info
 }
 
 // GetPluginID returns the plugin ID
@@ -234,7 +223,7 @@ func (b *PluginBase) OnTrackInfoChanged() {
 	}
 	
 	// Get the new track information
-	info, ok := b.TrackInfo.GetTrackInfo()
+	info, ok := b.TrackInfo.Get()
 	if !ok {
 		if b.Logger != nil {
 			b.Logger.Warning("Failed to get track info")
@@ -245,24 +234,24 @@ func (b *PluginBase) OnTrackInfoChanged() {
 	// Log the track information
 	if b.Logger != nil {
 		b.Logger.Info("Track info changed:")
-		if info.Flags&api.TrackInfoHasTrackName != 0 {
+		if info.Flags&hostpkg.TrackInfoHasTrackName != 0 {
 			b.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
 		}
-		if info.Flags&api.TrackInfoHasTrackColor != 0 {
+		if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
 			b.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d", 
 				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
 		}
-		if info.Flags&api.TrackInfoHasAudioChannel != 0 {
+		if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
 			b.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s", 
 				info.AudioChannelCount, info.AudioPortType))
 		}
-		if info.Flags&api.TrackInfoIsForReturnTrack != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
 			b.Logger.Info("  This is a return track")
 		}
-		if info.Flags&api.TrackInfoIsForBus != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForBus != 0 {
 			b.Logger.Info("  This is a bus track")
 		}
-		if info.Flags&api.TrackInfoIsForMaster != 0 {
+		if info.Flags&hostpkg.TrackInfoIsForMaster != 0 {
 			b.Logger.Info("  This is the master track")
 		}
 	}
@@ -272,7 +261,7 @@ func (b *PluginBase) OnTrackInfoChanged() {
 // This simplifies the common pattern of saving plugin state to a stream
 func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint32]float64) bool {
 	// Create output stream
-	outStream := api.NewOutputStream(stream)
+	outStream := state.NewClapOutputStream(stream)
 	
 	// Convert parameter map to slice
 	var parameters []state.Parameter
@@ -304,7 +293,7 @@ func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint3
 	}
 	
 	// Write to stream
-	if _, err := outStream.Write(data); err != nil {
+	if err := outStream.WriteBytes(data); err != nil {
 		if b.Logger != nil {
 			b.Logger.Error(fmt.Sprintf("Failed to write state: %v", err))
 		}
@@ -322,7 +311,7 @@ func (b *PluginBase) SaveStateWithParams(stream unsafe.Pointer, params map[uint3
 // The callback is called for each parameter found in the saved state
 func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam func(id uint32, value float64)) bool {
 	// Create input stream
-	inStream := api.NewInputStream(stream)
+	inStream := state.NewClapInputStream(stream)
 	
 	// Read all data from stream
 	const maxStateSize = 1024 * 1024 // 1MB max state size
@@ -374,7 +363,7 @@ func (b *PluginBase) LoadStateWithCallback(stream unsafe.Pointer, applyParam fun
 }
 
 // OnParamMappingSet provides default parameter mapping indication with logging
-func (b *PluginBase) OnParamMappingSet(paramID uint32, hasMapping bool, color *api.Color, label string, description string) {
+func (b *PluginBase) OnParamMappingSet(paramID uint32, hasMapping bool, color *hostpkg.Color, label string, description string) {
 	// Check main thread (param indication is always on main thread)
 	thread.AssertMainThread("PluginBase.OnParamMappingSet")
 	
@@ -392,7 +381,7 @@ func (b *PluginBase) OnParamMappingSet(paramID uint32, hasMapping bool, color *a
 }
 
 // OnParamAutomationSet provides default parameter automation indication with logging
-func (b *PluginBase) OnParamAutomationSet(paramID uint32, automationState uint32, color *api.Color) {
+func (b *PluginBase) OnParamAutomationSet(paramID uint32, automationState uint32, color *hostpkg.Color) {
 	// Check main thread (param indication is always on main thread)
 	thread.AssertMainThread("PluginBase.OnParamAutomationSet")
 	
@@ -444,11 +433,11 @@ func (b *PluginBase) SaveStateWithContext(stream unsafe.Pointer, contextType uin
 	// Log the context type
 	if b.Logger != nil {
 		switch contextType {
-		case api.StateContextForPreset:
+		case state.ContextForPreset:
 			b.Logger.Info("Saving state for preset")
-		case api.StateContextForDuplicate:
+		case state.ContextForDuplicate:
 			b.Logger.Info("Saving state for duplicate")
-		case api.StateContextForProject:
+		case state.ContextForProject:
 			b.Logger.Info("Saving state for project")
 		default:
 			b.Logger.Info(fmt.Sprintf("Saving state with unknown context: %d", contextType))
@@ -466,11 +455,11 @@ func (b *PluginBase) LoadStateWithContext(stream unsafe.Pointer, contextType uin
 	// Log the context type
 	if b.Logger != nil {
 		switch contextType {
-		case api.StateContextForPreset:
+		case state.ContextForPreset:
 			b.Logger.Info("Loading state for preset")
-		case api.StateContextForDuplicate:
+		case state.ContextForDuplicate:
 			b.Logger.Info("Loading state for duplicate")
-		case api.StateContextForProject:
+		case state.ContextForProject:
 			b.Logger.Info("Loading state for project")
 		default:
 			b.Logger.Info(fmt.Sprintf("Loading state with unknown context: %d", contextType))

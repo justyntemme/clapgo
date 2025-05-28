@@ -6,14 +6,16 @@ package clap
 import (
 	"unsafe"
 
-	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/event"
+	"github.com/justyntemme/clapgo/pkg/plugin"
+	"github.com/justyntemme/clapgo/pkg/process"
 )
 
-// BasePlugin provides a base implementation of the api.Plugin interface.
+// BasePlugin provides a base implementation of the plugin.Interface.
 // It can be embedded in plugin implementations to provide common functionality.
 type BasePlugin struct {
 	// Info contains the plugin information
-	Info api.PluginInfo
+	Info plugin.Info
 
 	// IsActivated indicates whether the plugin is activated
 	IsActivated bool
@@ -26,7 +28,7 @@ type BasePlugin struct {
 }
 
 // NewBasePlugin creates a new BasePlugin instance.
-func NewBasePlugin(info api.PluginInfo) *BasePlugin {
+func NewBasePlugin(info plugin.Info) *BasePlugin {
 	return &BasePlugin{
 		Info:        info,
 		IsActivated: false,
@@ -79,15 +81,16 @@ func (p *BasePlugin) Reset() {
 // Process handles audio processing.
 // This implementation just copies input to output.
 // Plugin implementations should override this method.
-func (p *BasePlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events api.EventHandler) int {
+func (p *BasePlugin) Process(steadyTime int64, framesCount uint32, audioIn, audioOut [][]float32, events event.Handler) int {
 	// Check state
 	if !p.IsActivated || !p.IsProcessing {
-		return api.ProcessError
+		return process.ProcessError
 	}
 
 	// Process events
 	if events != nil {
-		events.ProcessInputEvents()
+		// Note: would need to implement ProcessInputEvents in event.Handler
+		// For now, this is a placeholder
 	}
 
 	// Copy input to output
@@ -97,14 +100,14 @@ func (p *BasePlugin) Process(steadyTime int64, framesCount uint32, audioIn, audi
 
 		// Make sure we have enough buffer space
 		if len(inChannel) < int(framesCount) || len(outChannel) < int(framesCount) {
-			return api.ProcessError
+			return process.ProcessError
 		}
 
 		// Copy samples
 		copy(outChannel[:framesCount], inChannel[:framesCount])
 	}
 
-	return api.ProcessContinue
+	return process.ProcessContinue
 }
 
 // GetExtension retrieves a plugin extension.
@@ -126,6 +129,6 @@ func (p *BasePlugin) GetPluginID() string {
 }
 
 // GetPluginInfo returns the plugin information.
-func (p *BasePlugin) GetPluginInfo() api.PluginInfo {
+func (p *BasePlugin) GetPluginInfo() plugin.Info {
 	return p.Info
 }

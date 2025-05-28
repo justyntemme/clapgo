@@ -2,6 +2,43 @@
 
 This document outlines the remaining CLAP extensions and functionality that need to be implemented in ClapGo's Go library to provide complete CLAP support to plugin developers.
 
+## 🔧 IMMEDIATE: Final pkg/api Migration Cleanup
+
+**Status**: 🚧 In Progress  
+**Goal**: Complete the refactoring by migrating remaining pkg/api usage to proper domain packages
+
+### Remaining pkg/api Usage (excluding generate-manifest, gain-with-gui, generate_exports.go):
+1. **examples/synth/main.go** (2 occurrences)
+   - `api.DebugMarkAudioThread()` / `api.DebugUnmarkAudioThread()` → migrate to `pkg/thread`
+   - `api.ConvertFromCBuffers()` → migrate to `pkg/audio`
+   
+2. **examples/gain/exports.go** (1 occurrence)
+   - Uses `api` package - needs migration to proper domain package exports
+
+3. **pkg/plugin/exports.go** (1 occurrence)
+   - `api.UnregisterAudioPortsProvider()` → migrate to `pkg/extension` or `pkg/audio`
+
+4. **pkg/plugin/base.go** (1 occurrence)
+   - Various `api` references → complete migration to domain packages
+
+5. **pkg/clap/params.go** (1 occurrence)
+   - `api.ParamInfo` and related types → already have `pkg/param`, complete migration
+
+6. **pkg/clap/base.go** (1 occurrence)
+   - `api.Plugin` interface and related → migrate to `pkg/plugin` interface
+
+### Migration Tasks:
+- [ ] Move thread marking functions from pkg/api to pkg/thread
+- [ ] Move audio buffer conversion from pkg/api to pkg/audio  
+- [ ] Update audio ports provider registration to use extension package
+- [ ] Complete migration of param types in pkg/clap to use pkg/param
+- [ ] Define proper plugin interface in pkg/plugin instead of pkg/api
+- [ ] Update all imports and references in affected files
+- [ ] Ensure no functionality is lost during migration
+- [ ] Run tests to verify everything still works
+
+**Note**: This is the final cleanup to complete the domain-driven refactoring. Once done, pkg/api should only contain minimal C interop helpers that don't fit into domain packages.
+
 ## 🏗️ CRITICAL ARCHITECTURE DECISION: C Export Requirements
 
 **Important**: We previously attempted to remove all CGO code from plugin examples, but discovered that the ClapGo_* functions MUST be exported from the plugin's main package to be properly exposed in the shared library. This led to our hybrid approach:

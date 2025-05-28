@@ -8,7 +8,7 @@ import (
 	"runtime/cgo"
 	"unsafe"
 	
-	"github.com/justyntemme/clapgo/pkg/api"
+	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/thread"
 )
 
@@ -48,7 +48,7 @@ func (h *ExportHelpers) PluginDestroy(plugin unsafe.Pointer) {
 	if p := h.GetPlugin(plugin); p != nil {
 		p.Destroy()
 		// Unregister from any providers
-		api.UnregisterAudioPortsProvider(plugin)
+		audio.UnregisterPortsProvider(plugin)
 		// Voice info provider unregistration moved to extension system
 		// Delete the handle to free the Go object
 		if plugin != nil {

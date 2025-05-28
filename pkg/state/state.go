@@ -18,6 +18,19 @@ const (
 	Version3       Version = 3
 )
 
+// State context types for load/save operations
+const (
+	ContextForPreset    = 1 // Suitable for storing and loading a state as a preset
+	ContextForDuplicate = 2 // Suitable for duplicating a plugin instance
+	ContextForProject   = 3 // Suitable for storing and loading a state within a project/song
+)
+
+// Preset location types for preset loading
+const (
+	PresetLocationFile   = 0 // Load preset from file path
+	PresetLocationPlugin = 1 // Load preset from plugin bundle
+)
+
 // Common errors
 var (
 	ErrInvalidVersion     = errors.New("invalid state version")
