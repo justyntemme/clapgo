@@ -50,36 +50,15 @@ func init() {
 	synthPlugin = NewSynthPlugin()
 }
 
-// Voice represents a single active note
-type Voice struct {
-	NoteID   int32
-	Channel  int16
-	Key      int16
-	Velocity float64
-	Phase    float64
-	IsActive bool
-
-	// Tuning support
-	TuningID uint64 // ID of tuning to use (0 for equal temperament)
-
-	// Per-voice parameter values (for polyphonic modulation)
-	// These override the global values when non-zero
-	VolumeModulation float64 // Additional volume modulation (0.0 = no change)
-	PitchBend        float64 // Pitch bend in semitones
-	Brightness       float64 // Filter/brightness modulation (0.0-1.0)
-	Pressure         float64 // Aftertouch/pressure value (0.0-1.0)
-
-	// ADSR envelope
-	Envelope *audio.ADSREnvelope
-}
+// Voice is now using audio.Voice from the framework
 
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
 	*plugin.PluginBase
 	event.NoOpHandler // Embed to get default no-op implementations
 
-	// Plugin state
-	voices [16]*Voice // Maximum 16 voices
+	// Voice management
+	voiceManager *audio.VoiceManager
 
 	// Parameters with atomic storage for thread safety
 	volume   int64 // atomic storage for volume (0.0-1.0)
@@ -138,6 +117,7 @@ func NewSynthPlugin() *SynthPlugin {
 		},
 		notePortManager: audio.NewNotePortManager(),
 		poolDiagnostics: &event.Diagnostics{},
+		voiceManager:    audio.NewVoiceManager(16, 44100), // 16 voice polyphony
 	}
 
 	// Set default values atomically
@@ -243,10 +223,8 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 	p.SampleRate = sampleRate
 	p.IsActivated = true
 
-	// Clear all voices
-	for i := range p.voices {
-		p.voices[i] = nil
-	}
+	// Update voice manager sample rate
+	p.voiceManager.SetSampleRate(sampleRate)
 
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
@@ -276,10 +254,8 @@ func (p *SynthPlugin) StopProcessing() {
 
 // Reset resets the plugin state
 func (p *SynthPlugin) Reset() {
-	// Reset all voices
-	for i := range p.voices {
-		p.voices[i] = nil
-	}
+	// Reset voice manager
+	p.voiceManager.Reset()
 }
 
 // Process processes audio data using the new abstractions
@@ -322,83 +298,77 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 		}
 	}
 
-	// Process each voice
-	var hasActiveVoices bool
-	for i, voice := range p.voices {
-		if voice != nil && voice.IsActive {
-			hasActiveVoices = true
-
-			// Calculate frequency for this note with pitch bend
-			baseFreq := audio.NoteToFrequency(int(voice.Key))
-
-			// Apply tuning if available
-			if p.tuning != nil && voice.TuningID != 0 {
-				// Apply tuning at the start of the frame
-				baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID,
-					int32(voice.Channel), int32(voice.Key), 0)
+	// Process voices using VoiceManager
+	output := p.voiceManager.ProcessVoices(framesCount, func(voice *audio.Voice, frameCount uint32) []float32 {
+		// Create voice output buffer
+		voiceOutput := make([]float32, frameCount)
+		
+		// Calculate frequency for this note with pitch bend
+		baseFreq := voice.Frequency
+		
+		// Apply tuning if available
+		if p.tuning != nil && voice.TuningID != 0 {
+			baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID,
+				int32(voice.Channel), int32(voice.Key), 0)
+		}
+		
+		// Apply pitch bend (in semitones)
+		freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
+		
+		// Generate audio for this voice
+		for i := uint32(0); i < frameCount; i++ {
+			// Update envelope parameters
+			voice.Envelope.SetADSR(attack, decay, sustain, release)
+			
+			// Get envelope value
+			env := voice.Envelope.Process()
+			
+			// Generate sample
+			sample := audio.GenerateWaveformSample(voice.Phase, audio.WaveformType(waveform))
+			
+			// Apply brightness as a simple low-pass filter simulation
+			if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
+				sample *= (voice.Brightness*0.7 + 0.3)
 			}
-
-			// Apply pitch bend (in semitones)
-			freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
-
-			// Generate audio for this voice
-			for j := uint32(0); j < framesCount; j++ {
-				// Get envelope value
-				env := p.getEnvelopeValue(voice, j, framesCount, attack, decay, sustain, release)
-
-				// Generate sample with optional brightness filtering
-				sample := audio.GenerateWaveformSample(voice.Phase, audio.WaveformType(waveform))
-
-				// Apply brightness as a simple low-pass filter simulation
-				if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
-					// Simple brightness simulation (in real implementation, use proper filter)
-					sample *= (voice.Brightness*0.7 + 0.3)
-				}
-
-				// Apply envelope and velocity
-				sample *= env * voice.Velocity
-
-				// Apply per-voice volume modulation
-				voiceVolume := 1.0 + voice.VolumeModulation
-				if voiceVolume < 0.0 {
-					voiceVolume = 0.0
-				}
-				sample *= voiceVolume
-
-				// Apply pressure (aftertouch) as additional volume modulation
-				if voice.Pressure > 0.0 {
-					// Pressure affects volume (could also affect other parameters)
-					sample *= (1.0 + voice.Pressure*0.3)
-				}
-
-				// Apply master volume
-				sample *= volume
-
-				// Add to all output channels
-				for ch := 0; ch < numChannels; ch++ {
-					if len(audioOut[ch]) > int(j) {
-						audioOut[ch][j] += float32(sample)
-					}
-				}
-
-				// Advance oscillator phase
-				voice.Phase = audio.AdvancePhase(voice.Phase, freq, p.SampleRate)
+			
+			// Apply envelope and velocity
+			sample *= env * voice.Velocity
+			
+			// Apply per-voice volume modulation
+			sample *= voice.Volume
+			
+			// Apply pressure (aftertouch) as additional volume modulation
+			if voice.Pressure > 0.0 {
+				sample *= (1.0 + voice.Pressure*0.3)
 			}
-
-			// Check if voice is still active
-			if !voice.Envelope.IsActive() {
-				// Send note end event to host if we have a valid note ID
-				if voice.NoteID >= 0 && events != nil {
-					endEvent := event.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
-					events.PushOutputEvent(endEvent)
-				}
-				p.voices[i] = nil
+			
+			// Apply master volume
+			voiceOutput[i] = float32(sample * volume)
+			
+			// Advance oscillator phase
+			voice.Phase = audio.AdvancePhase(voice.Phase, freq, p.SampleRate)
+		}
+		
+		// Send note end event if voice is finished
+		if !voice.Envelope.IsActive() && voice.NoteID >= 0 && events != nil {
+			endEvent := event.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
+			events.PushOutputEvent(endEvent)
+		}
+		
+		return voiceOutput
+	})
+	
+	// Copy mono output to all channels
+	if len(output) > 0 {
+		for ch := 0; ch < numChannels; ch++ {
+			for i := uint32(0); i < framesCount && i < uint32(len(output)); i++ {
+				audioOut[ch][i] = output[i]
 			}
 		}
 	}
-
+	
 	// Check if we have any active voices
-	if !hasActiveVoices {
+	if p.voiceManager.GetActiveVoiceCount() == 0 {
 		return process.ProcessSleep
 	}
 
@@ -548,29 +518,25 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 
 // handlePolyphonicParameter processes polyphonic parameter changes
 func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent) {
-	// Find matching voices
-	for _, voice := range p.voices {
-		if voice == nil || !voice.IsActive {
-			continue
-		}
-
+	// Apply parameter to matching voices using VoiceManager
+	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
 		// Match by note ID if specified
 		if paramEvent.NoteID >= 0 && voice.NoteID != paramEvent.NoteID {
-			continue
+			return
 		}
 
 		// Match by key/channel if specified
 		if paramEvent.Key >= 0 && voice.Key != paramEvent.Key {
-			continue
+			return
 		}
 		if paramEvent.Channel >= 0 && voice.Channel != paramEvent.Channel {
-			continue
+			return
 		}
 
 		// Apply parameter to this voice
 		switch paramEvent.ParamID {
 		case 1: // Volume modulation
-			voice.VolumeModulation = paramEvent.Value - 1.0 // Store as offset from 1.0
+			voice.Volume = paramEvent.Value // VoiceManager uses direct volume, not offset
 		case 7: // Pitch bend (new parameter we'll add)
 			voice.PitchBend = paramEvent.Value*2.0 - 1.0 // Convert 0-1 to -1 to +1 semitones
 		case 8: // Brightness (new parameter)
@@ -578,7 +544,7 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent
 		case 9: // Pressure (new parameter)
 			voice.Pressure = paramEvent.Value
 		}
-	}
+	})
 }
 
 // HandleNoteOn handles note on events
@@ -603,93 +569,71 @@ func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
 		velocity = 0.01 // Very quiet but not silent
 	}
 
-	// Find a free voice slot or steal an existing one
-	voiceIndex := p.findFreeVoice()
-
-	// Create a new voice with validated data
-	// (envelope parameters will be used directly in processing)
-
-	p.voices[voiceIndex] = &Voice{
-		NoteID:   noteEvent.NoteID,
-		Channel:  noteEvent.Channel,
-		Key:      noteEvent.Key,
-		Velocity: velocity,
-		Phase:    0.0,
-		IsActive: true,
-		Envelope: audio.NewADSREnvelope(p.SampleRate),
+	// Allocate a voice using VoiceManager
+	voice := p.voiceManager.AllocateVoice(noteEvent.NoteID, noteEvent.Channel, noteEvent.Key, velocity)
+	if voice == nil {
+		if p.Logger != nil {
+			p.Logger.Warning("Failed to allocate voice for note")
+		}
+		return
 	}
-	
-	// Trigger the envelope to start the attack phase
-	p.voices[voiceIndex].Envelope.Trigger()
 
 	if p.Logger != nil {
-		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f, voice=%d", noteEvent.Key, velocity, voiceIndex))
+		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f", noteEvent.Key, velocity))
 	}
 }
 
 // HandleNoteOff handles note off events
 func (p *SynthPlugin) HandleNoteOff(noteEvent *event.NoteEvent, time uint32) {
-	// Find the voice with this note ID or key/channel combination
-	for _, voice := range p.voices {
-		// Safety check
-		if voice == nil || !voice.IsActive {
-			continue
-		}
-
-		// Match on note ID if provided (non-negative), otherwise match on key and channel
-		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
-			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
-				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
-			// Start the release phase
-			voice.Envelope.Release()
-		}
+	// Release voice using VoiceManager
+	if noteEvent.NoteID >= 0 {
+		p.voiceManager.ReleaseVoice(noteEvent.NoteID, noteEvent.Channel)
+	} else {
+		// If no note ID, find voice by key/channel
+		p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
+			if voice.Key == noteEvent.Key &&
+				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel) {
+				voice.Envelope.Release()
+			}
+		})
 	}
 }
 
 // HandleNoteChoke handles note choke events (immediate stop)
 func (p *SynthPlugin) HandleNoteChoke(noteEvent *event.NoteEvent, time uint32) {
-	// Find the voice with this note ID or key/channel combination
-	for i, voice := range p.voices {
-		// Safety check
-		if voice == nil || !voice.IsActive {
-			continue
-		}
-
+	// Immediately deactivate voices using VoiceManager
+	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
 		// Match on note ID if provided (non-negative), otherwise match on key and channel
 		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
 			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
 				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
 			// Immediately deactivate the voice
-			p.voices[i] = nil
+			voice.IsActive = false
 		}
-	}
+	})
 }
 
 // HandleNoteExpression handles note expression events (MPE)
 func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEvent, time uint32) {
-	// Find matching voices
-	for _, voice := range p.voices {
-		if voice == nil || !voice.IsActive {
-			continue
-		}
-
+	// Apply expression to matching voices using VoiceManager
+	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
 		// Match by note ID if specified
 		if noteExprEvent.NoteID >= 0 && voice.NoteID != noteExprEvent.NoteID {
-			continue
+			return
 		}
 
 		// Match by key/channel if specified
 		if noteExprEvent.Key >= 0 && voice.Key != noteExprEvent.Key {
-			continue
+			return
 		}
 		if noteExprEvent.Channel >= 0 && voice.Channel != noteExprEvent.Channel {
-			continue
+			return
 		}
 
 		// Apply expression to this voice
 		switch noteExprEvent.ExpressionID {
 		case event.NoteExpressionVolume:
-			voice.VolumeModulation = noteExprEvent.Value - 1.0 // Store as offset
+			voice.Volume = noteExprEvent.Value // Direct volume value
 		case event.NoteExpressionPan:
 			// Could implement stereo panning here
 		case event.NoteExpressionTuning:
@@ -701,7 +645,7 @@ func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEv
 		case event.NoteExpressionPressure:
 			voice.Pressure = noteExprEvent.Value
 		}
-	}
+	})
 }
 
 // HandleMIDI handles MIDI 1.0 events
@@ -726,48 +670,6 @@ func (p *SynthPlugin) HandleMIDI(midiEvent *event.MIDIEvent, time uint32) {
 	}
 }
 
-// findFreeVoice finds a free voice slot or steals an existing one
-func (p *SynthPlugin) findFreeVoice() int {
-	// First, look for an empty slot
-	for i, voice := range p.voices {
-		if voice == nil {
-			return i
-		}
-	}
-
-	// If no empty slots, find the voice in release phase
-	for i, voice := range p.voices {
-		if voice != nil && voice.Envelope.Stage == audio.EnvelopeStageRelease {
-			return i
-		}
-	}
-
-	// No voices in release, steal the quietest voice
-	quietestIdx := 0
-	quietestLevel := 1.0
-
-	for i, voice := range p.voices {
-		if voice != nil && voice.IsActive {
-			// Consider current envelope value and velocity
-			level := voice.Envelope.CurrentValue * voice.Velocity
-			if level < quietestLevel {
-				quietestLevel = level
-				quietestIdx = i
-			}
-		}
-	}
-
-	return quietestIdx
-}
-
-// getEnvelopeValue updates the envelope parameters and returns the current value
-func (p *SynthPlugin) getEnvelopeValue(voice *Voice, sampleIndex, frameCount uint32, attack, decay, sustain, release float64) float64 {
-	// Update envelope parameters if they changed
-	voice.Envelope.SetADSR(attack, decay, sustain, release)
-	
-	// Process one sample and return the value
-	return voice.Envelope.Process()
-}
 
 // GetNotePortManager returns the plugin's note port manager
 func (p *SynthPlugin) GetNotePortManager() *audio.NotePortManager {
@@ -938,17 +840,9 @@ func (p *SynthPlugin) OnTuningChanged() {
 
 // GetVoiceInfo returns voice count and capacity information
 func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
-	// Count active voices
-	activeVoices := uint32(0)
-	for _, voice := range p.voices {
-		if voice != nil && voice.IsActive {
-			activeVoices++
-		}
-	}
-
 	return extension.VoiceInfo{
-		VoiceCount:    uint32(len(p.voices)),                           // Maximum polyphony
-		VoiceCapacity: uint32(len(p.voices)),                           // Same as count in our implementation
+		VoiceCount:    uint32(p.voiceManager.GetActiveVoiceCount()),    // Active voices
+		VoiceCapacity: 16,                                              // Maximum polyphony
 		Flags:         extension.VoiceInfoFlagSupportsOverlappingNotes, // We support note IDs
 	}
 }
