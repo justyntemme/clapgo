@@ -1,200 +1,30 @@
-# Reducing Boilerplate in ClapGo Plugins
+# Reducing Boilerplate in ClapGo Plugins - Phase 2
 
-This document identifies common patterns in the synth plugin that could be abstracted into the ClapGo library to reduce boilerplate code and make plugin development easier.
+After successfully implementing the Parameter Binding System, this document identifies remaining boilerplate patterns in the synth plugin that should be abstracted into the ClapGo library.
 
-## 1. Parameter Management Boilerplate
+## Completed ✅
 
-### Current State
-Plugin developers must:
-- Define atomic storage for each parameter
-- Initialize atomic parameters in the constructor
-- Handle parameter updates in HandleParamValue with switch statements
-- Implement ParamValueToText for custom formatting
-- Implement ParamTextToValue for custom parsing
+### 1. Parameter Binding System 
+- Automatic parameter registration and storage
+- Unified text/value conversion
+- Eliminated ~150 lines of switch statements
 
-### Proposed Abstraction: Parameter Binding System
+## Remaining Boilerplate Patterns
 
-```go
-// In the library (pkg/param/binding.go)
-type ParameterBinding struct {
-    ID        uint32
-    Atomic    *AtomicFloat64
-    Format    FormatType
-    Choices   []string // For choice parameters
-    OnChange  func(value float64) // Optional callback
-}
+### 1. Extension Bundle Initialization
 
-type ParameterBinder struct {
-    bindings map[uint32]*ParameterBinding
-    manager  *ParamManager
-}
-
-// Usage in plugin:
-type SynthPlugin struct {
-    *plugin.PluginBase
-    params *param.ParameterBinder
-    
-    // Direct access to parameters
-    volume     *param.AtomicFloat64
-    filterType *param.AtomicFloat64
-}
-
-func NewSynthPlugin() *SynthPlugin {
-    p := &SynthPlugin{
-        PluginBase: plugin.NewPluginBase(info),
-    }
-    
-    // Create parameter binder
-    p.params = param.NewParameterBinder(p.ParamManager)
-    
-    // Bind parameters - this creates atomic storage AND registers with manager
-    p.volume = p.params.BindPercentage(1, "Volume", 70.0)
-    p.filterType = p.params.BindChoice(9, "Filter Type", []string{
-        "Lowpass", "Highpass", "Bandpass", "Notch",
-    }, 0)
-    
-    return p
-}
-```
-
-The ParameterBinder would automatically:
-- Create atomic storage
-- Register with ParamManager
-- Handle value updates in a generic HandleParamValue
-- Provide automatic text/value conversion based on format type
-- Support choice parameters with string arrays
-
-## 2. Filter Chain Abstraction
-
-### Current State
-Plugin developers must:
-- Manually switch between filter types in the process loop
-- Handle NaN/Inf checking for each filter output
-- Reset filter state on errors
-
-### Proposed Abstraction: Filter Chain with Type Selection
-
-```go
-// In the library (pkg/audio/filterchain.go)
-type FilterType int
-
-const (
-    FilterTypeLowpass FilterType = iota
-    FilterTypeHighpass
-    FilterTypeBandpass
-    FilterTypeNotch
-    FilterTypeBypass
-)
-
-type SelectableFilter struct {
-    filter     *StateVariableFilter
-    filterType FilterType
-    sampleRate float64
-}
-
-func (f *SelectableFilter) Process(input float64) float64 {
-    var output float64
-    
-    switch f.filterType {
-    case FilterTypeLowpass:
-        output = f.filter.ProcessLowpass(input)
-    case FilterTypeHighpass:
-        output = f.filter.ProcessHighpass(input)
-    case FilterTypeBandpass:
-        output = f.filter.ProcessBandpass(input)
-    case FilterTypeNotch:
-        _, _, _, output = f.filter.Process(input)
-    default:
-        output = input
-    }
-    
-    // Built-in safety
-    if math.IsNaN(output) || math.IsInf(output, 0) {
-        f.filter.Reset()
-        return 0
-    }
-    
-    return output
-}
-
-// Usage in plugin:
-filter := audio.NewSelectableFilter(sampleRate)
-filter.SetType(audio.FilterType(filterTypeParam))
-filter.SetFrequency(cutoff)
-filter.SetResonance(resonance)
-
-// Process is now one line
-output[i] = float32(filter.Process(float64(input[i])))
-```
-
-## 3. Standard Audio Processing Pipeline
-
-### Current State
-Plugin developers must:
-- Get all parameter values at the start of process
-- Update voice parameters manually
-- Apply filter to output manually
-- Apply volume and copy to channels manually
-- Check for finished voices and send note end events
-
-### Proposed Abstraction: ProcessorChain
-
-```go
-// In the library (pkg/audio/processor.go)
-type ProcessorChain struct {
-    voiceManager *VoiceManager
-    oscillator   *PolyphonicOscillator
-    filter       *SelectableFilter
-    params       *ParameterBinder
-}
-
-type ProcessConfig struct {
-    Volume      *AtomicFloat64
-    FilterType  *AtomicFloat64
-    FilterCutoff *AtomicFloat64
-    FilterResonance *AtomicFloat64
-    // ... other parameters
-}
-
-func (p *ProcessorChain) Process(config ProcessConfig, frameCount uint32, audioOut [][]float32, events *event.EventProcessor) []float32 {
-    // Get parameters once
-    volume := config.Volume.Load()
-    filterType := int(config.FilterType.Load())
-    
-    // Update filter
-    p.filter.SetType(FilterType(filterType))
-    p.filter.SetFrequency(config.FilterCutoff.Load())
-    p.filter.SetResonance(config.FilterResonance.Load())
-    
-    // Generate and filter
-    output := p.oscillator.Process(frameCount)
-    for i := range output {
-        output[i] = float32(p.filter.Process(float64(output[i])))
-    }
-    
-    // Apply volume and distribute to channels
-    audio.DistributeToChannels(output, audioOut, float32(volume))
-    
-    // Handle finished voices
-    p.voiceManager.CleanupFinishedVoices(events)
-    
-    return output
-}
-```
-
-## 4. Extension Initialization Boilerplate
-
-### Current State
-Plugin developers must:
-- Check if host is available
-- Create each extension helper
-- Log initialization status
+**Current State:**
+Every plugin must:
+- Check if Host is not nil repeatedly
+- Initialize each extension individually
+- Log initialization status for each
 - Handle nil checks throughout
 
-### Proposed Abstraction: Extension Bundle
+**Lines of boilerplate:** ~40 lines in Init()
 
+**Proposed Abstraction:**
 ```go
-// In the library (pkg/extension/bundle.go)
+// In pkg/extension/bundle.go
 type ExtensionBundle struct {
     ThreadCheck      *thread.Checker
     TrackInfo        *host.TrackInfoProvider
@@ -203,21 +33,21 @@ type ExtensionBundle struct {
     Logger          *host.Logger
 }
 
-func NewExtensionBundle(host unsafe.Pointer) *ExtensionBundle {
+func NewExtensionBundle(host unsafe.Pointer, pluginName string) *ExtensionBundle {
     bundle := &ExtensionBundle{}
     
     if host == nil {
         return bundle
     }
     
-    // Initialize all extensions with nil checks
+    // Initialize all extensions with automatic nil checks
+    bundle.Logger = host.NewLogger(host, pluginName)
     bundle.ThreadCheck = thread.NewChecker(host)
     bundle.TrackInfo = host.NewTrackInfoProvider(host)
     bundle.TransportControl = host.NewTransportControl(host)
     bundle.Tuning = NewHostTuning(host)
-    bundle.Logger = host.NewLogger(host, "Plugin")
     
-    // Log initialization status
+    // Log initialization status once
     if bundle.Logger != nil {
         bundle.logInitStatus()
     }
@@ -227,160 +57,348 @@ func NewExtensionBundle(host unsafe.Pointer) *ExtensionBundle {
 
 // Usage in plugin:
 func (p *SynthPlugin) Init() bool {
-    p.Extensions = extension.NewExtensionBundle(p.Host)
-    // All extensions are now available through p.Extensions
+    thread.DebugSetMainThread()
+    p.Extensions = extension.NewExtensionBundle(p.Host, PluginName)
+    
+    // Set up MIDI mappings...
     return true
 }
 ```
 
-## 5. MIDI Processing Setup
+### 2. MIDI CC Mapping System
 
-### Current State
-Plugin developers must:
-- Create MIDI processor
-- Set up callbacks with inline functions
-- Handle special cases (transport control, CC mappings)
+**Current State:**
+Plugins must:
+- Call SetCallbacks with inline functions
+- Manually map CC numbers to parameters
+- Handle value scaling inline
+- Repeat similar patterns for each CC
 
-### Proposed Abstraction: MIDI Mapping Builder
+**Lines of boilerplate:** ~30 lines per CC mapping
 
+**Proposed Abstraction:**
 ```go
-// In the library (pkg/audio/midimapping.go)
-type MIDIMapping struct {
+// In pkg/audio/ccmapping.go
+type CCMapper struct {
     processor *MIDIProcessor
-    ccMap     map[uint32]CCMapping
+    mappings  map[uint32]CCMapping
 }
 
 type CCMapping struct {
-    ParamID    uint32
-    Atomic     *AtomicFloat64
-    MapFunc    func(ccValue float64) float64 // Optional value mapping
+    ParamID   uint32
+    Atomic    *param.AtomicFloat64
+    Transform func(float64) float64 // Optional value transformation
 }
 
-func NewMIDIMapping(processor *MIDIProcessor) *MIDIMapping {
-    return &MIDIMapping{
+func NewCCMapper(processor *MIDIProcessor) *CCMapper {
+    mapper := &CCMapper{
         processor: processor,
-        ccMap:     make(map[uint32]CCMapping),
+        mappings:  make(map[uint32]CCMapping),
     }
+    
+    // Set up the modulation callback
+    processor.SetCallbacks(nil, nil, mapper.handleCC, nil, nil)
+    return mapper
 }
 
-func (m *MIDIMapping) MapCC(cc uint32, paramID uint32, atomic *AtomicFloat64) *MIDIMapping {
-    m.ccMap[cc] = CCMapping{ParamID: paramID, Atomic: atomic}
+// Builder pattern for easy configuration
+func (m *CCMapper) MapCC(cc uint32, paramID uint32, atomic *param.AtomicFloat64) *CCMapper {
+    m.mappings[cc] = CCMapping{ParamID: paramID, Atomic: atomic}
     return m
 }
 
-func (m *MIDIMapping) MapCCWithFunction(cc uint32, paramID uint32, atomic *AtomicFloat64, mapFunc func(float64) float64) *MIDIMapping {
-    m.ccMap[cc] = CCMapping{ParamID: paramID, Atomic: atomic, MapFunc: mapFunc}
+func (m *CCMapper) MapCCWithTransform(cc uint32, paramID uint32, atomic *param.AtomicFloat64, transform func(float64) float64) *CCMapper {
+    m.mappings[cc] = CCMapping{
+        ParamID:   paramID,
+        Atomic:    atomic,
+        Transform: transform,
+    }
     return m
 }
 
 // Usage in plugin:
-midiMapping := audio.NewMIDIMapping(p.midiProcessor).
+ccMapper := audio.NewCCMapper(p.midiProcessor).
     MapCC(7, 1, p.volume).  // CC7 -> Volume
-    MapCCWithFunction(74, 7, p.cutoff, func(value float64) float64 {
-        // Exponential mapping for filter cutoff
-        return 20.0 * math.Pow(1000.0, value)
-    })
+    MapCCWithTransform(74, 7, p.cutoff, audio.ExpFrequencyMap(20, 20000)) // CC74 -> Cutoff with exponential mapping
 ```
 
-## 6. Parameter Text Formatting
+### 3. Filter Processing Abstraction
 
-### Current State
-Plugin developers must implement large switch statements for ParamValueToText and ParamTextToValue.
+**Current State:**
+Plugins must:
+- Switch between filter types manually
+- Check for NaN/Inf after each sample
+- Reset filter on errors
+- Handle filter type switching in process loop
 
-### Proposed Solution
-The ParameterBinder (from section 1) would handle this automatically based on parameter type.
+**Lines of boilerplate:** ~30 lines in Process()
 
-## Implementation Guide
+**Proposed Abstraction:**
+```go
+// In pkg/audio/selectablefilter.go
+type SelectableFilter struct {
+    filter     *StateVariableFilter
+    filterType FilterType
+    safeMode   bool // Auto NaN/Inf protection
+}
 
-### Phase 1: Parameter Binding System (Priority: High)
-1. Create `pkg/param/binding.go` with ParameterBinding and ParameterBinder types
-2. Add convenience methods for all parameter types (Percentage, Choice, ADSR, etc.)
-3. Implement automatic HandleParamValue routing
-4. Add automatic text conversion based on format type
-5. Update examples to use the new system
+type FilterType int
 
-### Phase 2: Filter Abstractions (Priority: Medium)
-1. Create `pkg/audio/filterchain.go` with SelectableFilter
-2. Add built-in NaN/Inf protection
-3. Support for filter chains and parallel processing
-4. Update synth example to use SelectableFilter
+const (
+    FilterLowpass FilterType = iota
+    FilterHighpass
+    FilterBandpass
+    FilterNotch
+    FilterBypass
+)
 
-### Phase 3: Audio Processing Pipeline (Priority: Medium)
-1. Create `pkg/audio/processor.go` with ProcessorChain
-2. Add common audio distribution utilities
-3. Add voice cleanup utilities
-4. Create templates for common synth architectures
+func (f *SelectableFilter) Process(input float64) float64 {
+    var output float64
+    
+    switch f.filterType {
+    case FilterLowpass:
+        output = f.filter.ProcessLowpass(input)
+    case FilterHighpass:
+        output = f.filter.ProcessHighpass(input)
+    case FilterBandpass:
+        output = f.filter.ProcessBandpass(input)
+    case FilterNotch:
+        _, _, _, output = f.filter.Process(input)
+    default:
+        output = input
+    }
+    
+    // Built-in safety when enabled
+    if f.safeMode && (math.IsNaN(output) || math.IsInf(output, 0)) {
+        f.filter.Reset()
+        return 0
+    }
+    
+    return output
+}
 
-### Phase 4: Extension Bundle (Priority: Low)
-1. Create `pkg/extension/bundle.go`
-2. Consolidate all extension initialization
-3. Add convenience methods for common patterns
-4. Update examples
+// Usage in plugin:
+p.filter = audio.NewSelectableFilter(sampleRate, true) // true = safe mode
 
-### Phase 5: MIDI Mapping (Priority: Low)
-1. Create `pkg/audio/midimapping.go`
-2. Add builder pattern for CC mappings
-3. Support for custom mapping functions
-4. Integration with ParameterBinder
+// In Process:
+p.filter.SetType(audio.FilterType(filterType))
+for i := range output {
+    output[i] = float32(p.filter.Process(float64(output[i])))
+}
+```
 
-## Benefits
+### 4. Process Method Boilerplate
 
-1. **Reduced Code**: The synth plugin would shrink from ~880 lines to ~400 lines
-2. **Fewer Errors**: Automatic handling of common issues (NaN, parameter updates)
-3. **Faster Development**: Developers focus on DSP, not boilerplate
-4. **Consistency**: All plugins handle parameters and filters the same way
-5. **Type Safety**: Builder patterns ensure correct usage
+**Current State:**
+Every Process method must:
+- Check activation state
+- Process events
+- Load all parameters
+- Update voice parameters
+- Apply filter with safety checks
+- Distribute to channels
+- Check for finished voices
 
-## Example: Simplified Synth Plugin
+**Lines of boilerplate:** ~50 lines of repeated patterns
 
-With these abstractions, the synth plugin would look like:
+**Proposed Abstraction:**
+```go
+// In pkg/audio/processor.go
+type SynthProcessor struct {
+    voiceManager *VoiceManager
+    oscillator   *PolyphonicOscillator
+    filter       *SelectableFilter
+}
+
+type ProcessParams struct {
+    Volume      float64
+    Waveform    int
+    FilterType  int
+    FilterCutoff float64
+    FilterResonance float64
+    Attack, Decay, Sustain, Release float64
+}
+
+func (sp *SynthProcessor) Process(params ProcessParams, frameCount uint32, audioOut [][]float32, events *event.EventProcessor) int {
+    // Update voice envelopes
+    sp.voiceManager.ApplyToAllVoices(func(voice *Voice) {
+        voice.Envelope.SetADSR(params.Attack, params.Decay, params.Sustain, params.Release)
+    })
+    
+    // Configure processing
+    sp.oscillator.SetWaveform(WaveformType(params.Waveform))
+    sp.filter.SetType(FilterType(params.FilterType))
+    sp.filter.SetFrequency(Clamp(params.FilterCutoff, 20.0, 20000.0))
+    sp.filter.SetResonance(0.5 + params.FilterResonance*19.5)
+    
+    // Generate and filter audio
+    output := sp.oscillator.Process(frameCount)
+    for i := range output {
+        output[i] = float32(sp.filter.Process(float64(output[i])))
+    }
+    
+    // Apply volume and distribute
+    DistributeToChannels(output, audioOut, float32(params.Volume))
+    
+    // Cleanup finished voices
+    sp.voiceManager.CleanupFinishedVoices(events)
+    
+    if sp.voiceManager.GetActiveVoiceCount() == 0 {
+        return process.ProcessSleep
+    }
+    return process.ProcessContinue
+}
+
+// Usage in plugin - Process becomes much simpler:
+func (p *SynthPlugin) Process(...) int {
+    if !p.IsActivated || !p.IsProcessing {
+        return process.ProcessError
+    }
+    
+    if events != nil {
+        p.midiProcessor.ProcessEvents(events, p)
+    }
+    
+    params := audio.ProcessParams{
+        Volume:          p.volume.Load(),
+        Waveform:        int(p.waveform.Load()),
+        FilterType:      int(p.filterType.Load()),
+        FilterCutoff:    p.cutoff.Load(),
+        FilterResonance: p.resonance.Load(),
+        Attack:          p.attack.Load(),
+        Decay:           p.decay.Load(),
+        Sustain:         p.sustain.Load(),
+        Release:         p.release.Load(),
+    }
+    
+    return p.processor.Process(params, frameCount, audioOut, events)
+}
+```
+
+### 5. Plugin Info Duplication
+
+**Current State:**
+Plugin info is defined in:
+- constants.go
+- NewSynthPlugin() 
+- GetPluginInfo()
+
+**Proposed Solution:**
+```go
+// In pkg/plugin/info.go
+type PluginInfoBuilder struct {
+    info plugin.Info
+}
+
+func NewPluginInfo(id, name, vendor, version string) *PluginInfoBuilder {
+    return &PluginInfoBuilder{
+        info: plugin.Info{
+            ID:      id,
+            Name:    name,
+            Vendor:  vendor,
+            Version: version,
+        },
+    }
+}
+
+// Usage in constants.go:
+var PluginInfo = plugin.NewPluginInfo(PluginID, PluginName, PluginVendor, PluginVersion).
+    WithDescription(PluginDescription).
+    WithURLs("https://github.com/justyntemme/clapgo").
+    WithFeatures(plugin.FeatureInstrument, plugin.FeatureStereo).
+    Build()
+
+// Then use PluginInfo everywhere
+```
+
+### 6. Common DSP Utilities
+
+**Current State:**
+Plugins implement their own:
+- findPeak function
+- Channel distribution logic
+- Parameter clamping
+- Frequency mapping
+
+**Proposed Solution:**
+```go
+// In pkg/audio/dsp.go
+package audio
+
+// Common DSP utilities
+func FindPeak(buffer []float32) float32
+func DistributeToChannels(mono []float32, stereo [][]float32, gain float32)
+func ExpFrequencyMap(min, max float64) func(float64) float64
+func DbToLinear(db float64) float64
+func LinearToDb(linear float64) float64
+```
+
+## Implementation Priority
+
+1. **Extension Bundle** (High) - Reduces Init() from 100+ lines to ~10 lines
+2. **Filter Abstraction** (High) - Eliminates error-prone NaN checking
+3. **Process Pipeline** (Medium) - Reduces Process() by 50%
+4. **MIDI CC Mapping** (Medium) - Makes MIDI learn trivial
+5. **Plugin Info Builder** (Low) - Eliminates duplication
+6. **DSP Utilities** (Low) - Prevents reinventing the wheel
+
+## Benefits Summary
+
+With all abstractions implemented:
+- **Synth plugin**: ~760 lines → ~400 lines (47% reduction)
+- **New plugin creation**: Hours → Minutes
+- **Common bugs eliminated**: NaN checks, parameter updates, channel distribution
+- **Focus on DSP**: Developers write audio algorithms, not infrastructure
+
+## Example: Minimal Synth with All Abstractions
 
 ```go
-type SynthPlugin struct {
+type MinimalSynth struct {
     *plugin.PluginBase
     *extension.ExtensionBundle
     
     params    *param.ParameterBinder
-    processor *audio.ProcessorChain
+    processor *audio.SynthProcessor
+    ccMapper  *audio.CCMapper
     
     // Direct parameter access
-    volume      *param.AtomicFloat64
-    filterType  *param.AtomicFloat64
-    filterCutoff *param.AtomicFloat64
+    volume   *param.AtomicFloat64
+    cutoff   *param.AtomicFloat64
 }
 
-func NewSynthPlugin() *SynthPlugin {
-    p := &SynthPlugin{
-        PluginBase: plugin.NewPluginBase(info),
+func NewMinimalSynth() *MinimalSynth {
+    s := &MinimalSynth{
+        PluginBase: plugin.NewPluginBase(PluginInfo),
+        processor:  audio.NewSynthProcessor(16, 44100),
     }
     
-    // Bind all parameters
-    p.params = param.NewParameterBinder(p.ParamManager)
-    p.volume = p.params.BindPercentage(1, "Volume", 70.0)
-    p.filterType = p.params.BindChoice(9, "Filter Type", 
-        []string{"Lowpass", "Highpass", "Bandpass", "Notch"}, 0)
-    p.filterCutoff = p.params.BindCutoff(7, "Filter Cutoff", 1000.0)
+    // Bind parameters
+    s.params = param.NewParameterBinder(s.ParamManager)
+    s.volume = s.params.BindPercentage(1, "Volume", 70.0)
+    s.cutoff = s.params.BindCutoff(2, "Cutoff", 1000.0)
     
-    // Create processor chain
-    p.processor = audio.NewProcessorChain(16, 44100) // 16 voices, 44.1kHz
+    // Setup MIDI
+    s.ccMapper = audio.NewCCMapper(s.processor.MIDIProcessor).
+        MapCC(7, 1, s.volume).
+        MapCC(74, 2, s.cutoff)
     
-    return p
+    return s
 }
 
-func (p *SynthPlugin) Process(...) int {
-    // Process events
-    p.processor.ProcessEvents(events)
-    
-    // Generate audio with automatic filtering, volume, and distribution
-    config := audio.ProcessConfig{
-        Volume: p.volume,
-        FilterType: p.filterType,
-        FilterCutoff: p.filterCutoff,
-    }
-    p.processor.Process(config, frameCount, audioOut, events)
-    
-    return process.ProcessContinue
+func (s *MinimalSynth) Init() bool {
+    s.ExtensionBundle = extension.NewExtensionBundle(s.Host, PluginName)
+    return true
 }
+
+func (s *MinimalSynth) Process(...) int {
+    return s.processor.ProcessSimple(
+        s.volume.Load(),
+        s.cutoff.Load(),
+        frameCount,
+        audioOut,
+        events,
+    )
+}
+
+// That's it! A working synth in ~50 lines
 ```
-
-This reduces boilerplate by ~60% while maintaining flexibility for custom DSP.

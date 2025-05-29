@@ -58,7 +58,7 @@ type SynthPlugin struct {
 	// Audio processing components
 	voiceManager   *audio.VoiceManager
 	oscillator     *audio.PolyphonicOscillator
-	filter         *audio.StateVariableFilter
+	filter         *audio.SelectableFilter
 	midiProcessor  *audio.MIDIProcessor
 
 	// Parameter binding system
@@ -84,9 +84,8 @@ type SynthPlugin struct {
 	// Note port management
 	notePortManager *audio.NotePortManager
 
-	// Host utilities (non-base specific)
-	transportControl *hostpkg.TransportControl
-	tuning           *extension.HostTuning
+	// Extension bundle for host integration
+	extensions *extension.ExtensionBundle
 
 	// Event pool diagnostics
 	poolDiagnostics *event.Diagnostics
@@ -132,7 +131,7 @@ func NewSynthPlugin() *SynthPlugin {
 		poolDiagnostics: &event.Diagnostics{},
 		voiceManager:    voiceManager,
 		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
-		filter:          audio.NewStateVariableFilter(44100),
+		filter:          audio.NewSelectableFilter(44100, true), // Enable safe mode
 	}
 	
 	// Create MIDI processor
@@ -164,52 +163,17 @@ func (p *SynthPlugin) Init() bool {
 	// Mark this as main thread for debug builds
 	thread.DebugSetMainThread()
 
-	// Initialize thread checker
-	if p.Host != nil {
-		p.ThreadCheck = thread.NewChecker(p.Host)
-		if p.ThreadCheck.IsAvailable() && p.Logger != nil {
-			p.Logger.Info("Thread Check extension available - thread safety validation enabled")
-		}
-	}
-
-	// Initialize track info helper
-	if p.Host != nil {
-		p.TrackInfo = hostpkg.NewTrackInfoProvider(p.Host)
-	}
-
-	// Initialize transport control
-	if p.Host != nil {
-		p.transportControl = hostpkg.NewTransportControl(p.Host)
-		if p.Logger != nil {
-			p.Logger.Info("Transport control extension initialized")
-		}
-	}
-
-	// Initialize tuning support
-	if p.Host != nil {
-		p.tuning = extension.NewHostTuning(p.Host)
-		if p.Logger != nil {
-			p.Logger.Info("Tuning extension initialized")
-			// Log available tunings
-			tunings := p.tuning.GetAllTunings()
-			if len(tunings) > 0 {
-				for _, t := range tunings {
-					p.Logger.Info(fmt.Sprintf("Available tuning: %s (ID: %d, Dynamic: %v)",
-						t.Name, t.TuningID, t.IsDynamic))
-				}
-			}
-		}
-	}
+	// Initialize all extensions in one call
+	p.extensions = extension.NewExtensionBundle(p.Host, PluginName)
 	
 	// Set up custom MIDI callbacks
 	p.midiProcessor.SetCallbacks(
 		// onNoteOn - handle transport control via C0
 		func(channel, key int16, velocity float64) {
 			// Special transport control: C0 (MIDI note 24) toggles play/pause
-			if key == 24 && p.transportControl != nil {
-				p.transportControl.RequestTogglePlay()
-				if p.Logger != nil {
-					p.Logger.Info("Transport toggle play requested via C0")
+			if key == 24 {
+				if p.extensions.RequestTogglePlay() {
+					p.extensions.LogInfo("Transport toggle play requested via C0")
 				}
 			}
 		},
@@ -233,9 +197,7 @@ func (p *SynthPlugin) Init() bool {
 		nil, // onPolyPressure
 	)
 
-	if p.Logger != nil {
-		p.Logger.Debug("Synth plugin initialized")
-	}
+	p.extensions.LogDebug("Synth plugin initialized")
 
 	// TODO: Initialize context menu provider with param.Manager support
 	// if p.Host != nil {
@@ -249,7 +211,7 @@ func (p *SynthPlugin) Init() bool {
 	// }
 
 	// Check initial track info
-	if p.TrackInfo != nil {
+	if p.extensions.HasTrackInfo() {
 		p.OnTrackInfoChanged()
 	}
 
@@ -272,12 +234,10 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 
 	// Update voice manager and filter sample rate
 	p.voiceManager.SetSampleRate(sampleRate)
-	p.filter = audio.NewStateVariableFilter(sampleRate)
+	p.filter.SetSampleRate(sampleRate)
 	p.filter.Reset() // Ensure clean state
 
-	if p.Logger != nil {
-		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
-	}
+	p.extensions.LogInfo(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
 
 	return true
 }
@@ -340,10 +300,10 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 		voice.Envelope.SetADSR(attack, decay, sustain, release)
 		
 		// Apply tuning if available
-		if p.tuning != nil && voice.TuningID != 0 {
-			voice.Frequency = p.tuning.ApplyTuning(
+		if voice.TuningID != 0 {
+			voice.Frequency = p.extensions.ApplyTuning(
 				audio.NoteToFrequency(int(voice.Key)), 
-				voice.TuningID,
+				int64(voice.TuningID),
 				int32(voice.Channel), 
 				int32(voice.Key), 
 				0,
@@ -354,14 +314,8 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	// Set oscillator waveform
 	p.oscillator.SetWaveform(audio.WaveformType(waveform))
 	
-	// Update filter parameters with safety checks
-	// Ensure cutoff is in valid range
-	if cutoff < 20.0 || cutoff > 20000.0 {
-		if p.Logger != nil {
-			p.Logger.Warning(fmt.Sprintf("Invalid cutoff frequency: %.1f Hz, clamping to range", cutoff))
-		}
-		cutoff = audio.Clamp(cutoff, 20.0, 20000.0)
-	}
+	// Update filter parameters - SelectableFilter handles clamping automatically
+	p.filter.SetType(audio.MapFilterTypeFromInt(filterType))
 	p.filter.SetFrequency(cutoff)
 	
 	// Map resonance from 0-1 to Q factor 0.5-20
@@ -371,38 +325,8 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	// Generate audio using PolyphonicOscillator
 	output := p.oscillator.Process(framesCount)
 	
-	// Apply filter processing - process each sample through the state variable filter
-	
-	for i := range output {
-		preFilter := float64(output[i])
-		var postFilter float64
-		
-		// Apply filter based on selected type
-		switch filterType {
-		case 0: // Lowpass
-			postFilter = p.filter.ProcessLowpass(preFilter)
-		case 1: // Highpass
-			postFilter = p.filter.ProcessHighpass(preFilter)
-		case 2: // Bandpass
-			postFilter = p.filter.ProcessBandpass(preFilter)
-		case 3: // Notch
-			_, _, _, notch := p.filter.Process(preFilter)
-			postFilter = notch
-		default:
-			postFilter = preFilter // Bypass
-		}
-		
-		// Check for NaN or Inf
-		if math.IsNaN(postFilter) || math.IsInf(postFilter, 0) {
-			if p.Logger != nil {
-				p.Logger.Error(fmt.Sprintf("Filter produced invalid output: pre=%.4f, post=%v", preFilter, postFilter))
-			}
-			output[i] = 0 // Safety: zero out invalid samples
-			p.filter.Reset() // Reset filter state
-		} else {
-			output[i] = float32(postFilter)
-		}
-	}
+	// Apply filter processing - SelectableFilter handles type switching and safety automatically
+	p.filter.ProcessBuffer(output)
 	
 
 	// Apply master volume and copy to all output channels
@@ -621,73 +545,61 @@ func (p *SynthPlugin) GetTail() uint32 {
 func (p *SynthPlugin) OnTimer(timerID uint64) {
 	// Synth doesn't currently use timers
 	// Could be used for UI updates, voice status monitoring, etc.
-	if p.Logger != nil {
-		p.Logger.Debug(fmt.Sprintf("Timer %d fired", timerID))
-	}
+	p.extensions.LogDebug(fmt.Sprintf("Timer %d fired", timerID))
 }
 
 // OnTrackInfoChanged is called when the track information changes
 func (p *SynthPlugin) OnTrackInfoChanged() {
-	if p.TrackInfo == nil {
-		return
-	}
-
 	// Get the new track information
-	info, ok := p.TrackInfo.Get()
+	info, ok := p.extensions.GetTrackInfo()
 	if !ok {
-		if p.Logger != nil {
-			p.Logger.Warning("Failed to get track info")
-		}
+		p.extensions.LogWarning("Failed to get track info")
 		return
 	}
 
 	// Log the track information
-	if p.Logger != nil {
-		p.Logger.Info(fmt.Sprintf("Track info changed:"))
-		if info.Flags&hostpkg.TrackInfoHasTrackName != 0 {
-			p.Logger.Info(fmt.Sprintf("  Track name: %s", info.Name))
-		}
-		if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
-			p.Logger.Info(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d",
-				info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
-		}
-		if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
-			p.Logger.Info(fmt.Sprintf("  Audio channels: %d, port type: %s",
-				info.AudioChannelCount, info.AudioPortType))
-		}
+	p.extensions.LogInfo("Track info changed:")
+	if info.Flags&hostpkg.TrackInfoHasTrackName != 0 {
+		p.extensions.LogInfo(fmt.Sprintf("  Track name: %s", info.Name))
+	}
+	if info.Flags&hostpkg.TrackInfoHasTrackColor != 0 {
+		p.extensions.LogInfo(fmt.Sprintf("  Track color: R=%d G=%d B=%d A=%d",
+			info.Color.Red, info.Color.Green, info.Color.Blue, info.Color.Alpha))
+	}
+	if info.Flags&hostpkg.TrackInfoHasAudioChannel != 0 {
+		p.extensions.LogInfo(fmt.Sprintf("  Audio channels: %d, port type: %s",
+			info.AudioChannelCount, info.AudioPortType))
+	}
 
-		// Adjust synth behavior based on track type
-		if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
-			p.Logger.Info("  This is a return track - adjusting for wet signal")
-			// Could adjust default mix to 100% wet
-		}
-		if info.Flags&hostpkg.TrackInfoIsForBus != 0 {
-			p.Logger.Info("  This is a bus track")
-			// Could adjust polyphony or processing
-		}
-		if info.Flags&hostpkg.TrackInfoIsForMaster != 0 {
-			p.Logger.Info("  This is the master track")
-			// Synths typically wouldn't be on master, but if so, could adjust
-		}
+	// Adjust synth behavior based on track type
+	if info.Flags&hostpkg.TrackInfoIsForReturnTrack != 0 {
+		p.extensions.LogInfo("  This is a return track - adjusting for wet signal")
+		// Could adjust default mix to 100% wet
+	}
+	if info.Flags&hostpkg.TrackInfoIsForBus != 0 {
+		p.extensions.LogInfo("  This is a bus track")
+		// Could adjust polyphony or processing
+	}
+	if info.Flags&hostpkg.TrackInfoIsForMaster != 0 {
+		p.extensions.LogInfo("  This is the master track")
+		// Synths typically wouldn't be on master, but if so, could adjust
 	}
 }
 
 // OnTuningChanged is called when tunings are added or removed
 func (p *SynthPlugin) OnTuningChanged() {
-	if p.tuning == nil {
+	if !p.extensions.HasTuning() {
 		return
 	}
 
-	if p.Logger != nil {
-		p.Logger.Info("Tuning pool changed, refreshing available tunings")
+	p.extensions.LogInfo("Tuning pool changed, refreshing available tunings")
 
-		// Log all available tunings
-		tunings := p.tuning.GetAllTunings()
-		p.Logger.Info(fmt.Sprintf("Available tunings: %d", len(tunings)))
-		for _, t := range tunings {
-			p.Logger.Info(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)",
-				t.Name, t.TuningID, t.IsDynamic))
-		}
+	// Log all available tunings
+	tunings := p.extensions.GetAvailableTunings()
+	p.extensions.LogInfo(fmt.Sprintf("Available tunings: %d", len(tunings)))
+	for _, t := range tunings {
+		p.extensions.LogInfo(fmt.Sprintf("  - %s (ID: %d, Dynamic: %v)",
+			t.Name, t.TuningID, t.IsDynamic))
 	}
 }
 
