@@ -57,8 +57,10 @@ type SynthPlugin struct {
 	*plugin.PluginBase
 	event.NoOpHandler // Embed to get default no-op implementations
 
-	// Voice management
+	// Audio processing components
 	voiceManager *audio.VoiceManager
+	oscillator   *audio.PolyphonicOscillator
+	filter       *audio.SimpleLowPassFilter
 
 	// Parameters with atomic storage for thread safety
 	volume   int64 // atomic storage for volume (0.0-1.0)
@@ -110,6 +112,9 @@ func NewSynthPlugin() *SynthPlugin {
 		Features:    []string{plugin.FeatureInstrument, plugin.FeatureStereo},
 	}
 
+	// Create voice manager first
+	voiceManager := audio.NewVoiceManager(16, 44100) // 16 voice polyphony
+
 	plugin := &SynthPlugin{
 		PluginBase: plugin.NewPluginBase(pluginInfo),
 		transportInfo: TransportInfo{
@@ -117,7 +122,9 @@ func NewSynthPlugin() *SynthPlugin {
 		},
 		notePortManager: audio.NewNotePortManager(),
 		poolDiagnostics: &event.Diagnostics{},
-		voiceManager:    audio.NewVoiceManager(16, 44100), // 16 voice polyphony
+		voiceManager:    voiceManager,
+		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
+		filter:          audio.NewSimpleLowPassFilter(44100),
 	}
 
 	// Set default values atomically
@@ -223,8 +230,9 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 	p.SampleRate = sampleRate
 	p.IsActivated = true
 
-	// Update voice manager sample rate
+	// Update voice manager and filter sample rate
 	p.voiceManager.SetSampleRate(sampleRate)
+	p.filter = audio.NewSimpleLowPassFilter(sampleRate)
 
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
@@ -265,7 +273,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 		return process.ProcessError
 	}
 
-	// Process events using our new abstraction - NO MORE MANUAL EVENT PARSING!
+	// Process events using our new abstraction
 	if events != nil {
 		p.processEventHandler(events, framesCount)
 	}
@@ -283,91 +291,50 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	sustain := param.LoadParameterAtomic(&p.sustain)
 	release := param.LoadParameterAtomic(&p.release)
 
-	// Get the number of output channels
-	numChannels := len(audioOut)
-
-	// Clear the output buffer
-	for ch := 0; ch < numChannels; ch++ {
-		outChannel := audioOut[ch]
-		if len(outChannel) < int(framesCount) {
-			continue
-		}
-
-		for i := uint32(0); i < framesCount; i++ {
-			outChannel[i] = 0.0
-		}
-	}
-
-	// Process voices using VoiceManager
-	output := p.voiceManager.ProcessVoices(framesCount, func(voice *audio.Voice, frameCount uint32) []float32 {
-		// Create voice output buffer
-		voiceOutput := make([]float32, frameCount)
-		
-		// Calculate frequency for this note with pitch bend
-		baseFreq := voice.Frequency
+	// Update envelope parameters for all voices
+	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
+		voice.Envelope.SetADSR(attack, decay, sustain, release)
 		
 		// Apply tuning if available
 		if p.tuning != nil && voice.TuningID != 0 {
-			baseFreq = p.tuning.ApplyTuning(baseFreq, voice.TuningID,
-				int32(voice.Channel), int32(voice.Key), 0)
+			voice.Frequency = p.tuning.ApplyTuning(
+				audio.NoteToFrequency(int(voice.Key)), 
+				voice.TuningID,
+				int32(voice.Channel), 
+				int32(voice.Key), 
+				0,
+			)
 		}
-		
-		// Apply pitch bend (in semitones)
-		freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
-		
-		// Generate audio for this voice
-		for i := uint32(0); i < frameCount; i++ {
-			// Update envelope parameters
-			voice.Envelope.SetADSR(attack, decay, sustain, release)
-			
-			// Get envelope value
-			env := voice.Envelope.Process()
-			
-			// Generate sample
-			sample := audio.GenerateWaveformSample(voice.Phase, audio.WaveformType(waveform))
-			
-			// Apply brightness as a simple low-pass filter simulation
-			if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
-				sample *= (voice.Brightness*0.7 + 0.3)
-			}
-			
-			// Apply envelope and velocity
-			sample *= env * voice.Velocity
-			
-			// Apply per-voice volume modulation
-			sample *= voice.Volume
-			
-			// Apply pressure (aftertouch) as additional volume modulation
-			if voice.Pressure > 0.0 {
-				sample *= (1.0 + voice.Pressure*0.3)
-			}
-			
-			// Apply master volume
-			voiceOutput[i] = float32(sample * volume)
-			
-			// Advance oscillator phase
-			voice.Phase = audio.AdvancePhase(voice.Phase, freq, p.SampleRate)
+	})
+
+	// Set oscillator waveform
+	p.oscillator.SetWaveform(audio.WaveformType(waveform))
+
+	// Generate audio using PolyphonicOscillator
+	output := p.oscillator.Process(framesCount)
+
+	// Apply filter if needed (brightness control)
+	// The PolyphonicOscillator already applies brightness, but we can add extra filtering
+	// p.filter.ProcessBuffer(output)
+
+	// Apply master volume and copy to all output channels
+	numChannels := len(audioOut)
+	for ch := 0; ch < numChannels; ch++ {
+		for i := uint32(0); i < framesCount && i < uint32(len(output)); i++ {
+			audioOut[ch][i] = output[i] * float32(volume)
 		}
-		
-		// Send note end event if voice is finished
+	}
+
+	// Check for finished voices and send note end events
+	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
 		if !voice.Envelope.IsActive() && voice.NoteID >= 0 && events != nil {
 			endEvent := event.CreateNoteEndEvent(0, voice.NoteID, -1, voice.Channel, voice.Key)
 			events.PushOutputEvent(endEvent)
+			voice.IsActive = false
 		}
-		
-		return voiceOutput
 	})
-	
-	// Copy mono output to all channels
-	if len(output) > 0 {
-		for ch := 0; ch < numChannels; ch++ {
-			for i := uint32(0); i < framesCount && i < uint32(len(output)); i++ {
-				audioOut[ch][i] = output[i]
-			}
-		}
-	}
-	
-	// Check if we have any active voices
+
+	// Return appropriate status
 	if p.voiceManager.GetActiveVoiceCount() == 0 {
 		return process.ProcessSleep
 	}
