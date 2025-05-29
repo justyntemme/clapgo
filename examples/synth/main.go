@@ -70,6 +70,7 @@ type SynthPlugin struct {
 	release    *param.AtomicFloat64
 	cutoff     *param.AtomicFloat64
 	resonance  *param.AtomicFloat64
+	filterType *param.AtomicFloat64
 	
 	// Debug counter for periodic logging
 	debugFrameCounter uint64
@@ -143,6 +144,7 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.release = param.NewAtomicFloat64(0.3)   // 300ms
 	plugin.cutoff = param.NewAtomicFloat64(1000.0) // 1kHz default
 	plugin.resonance = param.NewAtomicFloat64(0.5) // 50% resonance
+	plugin.filterType = param.NewAtomicFloat64(0)  // lowpass
 
 	// Register parameters using factory functions
 	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
@@ -157,6 +159,7 @@ func NewSynthPlugin() *SynthPlugin {
 	// Register filter parameters
 	plugin.ParamManager.Register(param.Cutoff(7, "Filter Cutoff"))   // 20Hz-20kHz
 	plugin.ParamManager.Register(param.Resonance(8, "Filter Resonance")) // 0-1
+	plugin.ParamManager.Register(param.Choice(9, "Filter Type", 4, 0)) // 0=LP, 1=HP, 2=BP, 3=Notch
 
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
@@ -338,6 +341,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	release := p.release.Load()
 	cutoff := p.cutoff.Load()
 	resonance := p.resonance.Load()
+	filterType := int(p.filterType.Load())
 
 	// Update envelope parameters for all voices
 	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
@@ -379,7 +383,22 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	
 	for i := range output {
 		preFilter := float64(output[i])
-		postFilter := p.filter.ProcessLowpass(preFilter)
+		var postFilter float64
+		
+		// Apply filter based on selected type
+		switch filterType {
+		case 0: // Lowpass
+			postFilter = p.filter.ProcessLowpass(preFilter)
+		case 1: // Highpass
+			postFilter = p.filter.ProcessHighpass(preFilter)
+		case 2: // Bandpass
+			postFilter = p.filter.ProcessBandpass(preFilter)
+		case 3: // Notch
+			_, _, _, notch := p.filter.Process(preFilter)
+			postFilter = notch
+		default:
+			postFilter = preFilter // Bypass
+		}
 		
 		// Check for NaN or Inf
 		if math.IsNaN(postFilter) || math.IsInf(postFilter, 0) {
@@ -390,7 +409,6 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 			p.filter.Reset() // Reset filter state
 		} else {
 			output[i] = float32(postFilter)
-			
 		}
 	}
 	
@@ -460,6 +478,19 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 		text = param.FormatValue(value, param.FormatHertz)
 	case 8: // Filter Resonance
 		text = param.FormatValue(value, param.FormatPercentage)
+	case 9: // Filter Type
+		switch int(math.Round(value)) {
+		case 0:
+			text = "Lowpass"
+		case 1:
+			text = "Highpass"
+		case 2:
+			text = "Bandpass"
+		case 3:
+			text = "Notch"
+		default:
+			text = "Unknown"
+		}
 	default:
 		// Use base implementation for unknown parameters
 		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
@@ -530,6 +561,22 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
 			return true
 		}
+	case 9: // Filter Type
+		// Parse filter type names
+		switch text {
+		case "Lowpass", "LP":
+			*(*float64)(value) = 0.0
+			return true
+		case "Highpass", "HP":
+			*(*float64)(value) = 1.0
+			return true
+		case "Bandpass", "BP":
+			*(*float64)(value) = 2.0
+			return true
+		case "Notch":
+			*(*float64)(value) = 3.0
+			return true
+		}
 	}
 
 	// Use base implementation for unknown parameters
@@ -572,6 +619,8 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 		p.cutoff.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
 	case 8: // Filter Resonance
 		p.resonance.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+	case 9: // Filter Type
+		p.filterType.UpdateWithManager(math.Round(paramEvent.Value), p.ParamManager, paramEvent.ParamID)
 	}
 }
 
