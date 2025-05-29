@@ -55,8 +55,8 @@ func ClapGo_GetPluginDescription(pluginID *C.char) *C.char {
 
 //export ClapGo_PluginInit
 func ClapGo_PluginInit(plugin unsafe.Pointer) C.bool {
-	err := getPlugin(plugin).Init()
-	return C.bool(err == nil)
+	result := getPlugin(plugin).Init()
+	return C.bool(result)
 }
 
 //export ClapGo_PluginDestroy
@@ -72,8 +72,8 @@ func ClapGo_PluginDestroy(plugin unsafe.Pointer) {
 
 //export ClapGo_PluginActivate
 func ClapGo_PluginActivate(plugin unsafe.Pointer, sampleRate C.double, minFrames C.uint32_t, maxFrames C.uint32_t) C.bool {
-	err := getPlugin(plugin).Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
-	return C.bool(err == nil)
+	result := getPlugin(plugin).Activate(float64(sampleRate), uint32(minFrames), uint32(maxFrames))
+	return C.bool(result)
 }
 
 //export ClapGo_PluginDeactivate
@@ -85,8 +85,8 @@ func ClapGo_PluginDeactivate(plugin unsafe.Pointer) {
 func ClapGo_PluginStartProcessing(plugin unsafe.Pointer) C.bool {
 	thread.MarkAudioThread()
 	defer thread.UnmarkAudioThread()
-	err := getPlugin(plugin).StartProcessing()
-	return C.bool(err == nil)
+	result := getPlugin(plugin).StartProcessing()
+	return C.bool(result)
 }
 
 //export ClapGo_PluginStopProcessing
