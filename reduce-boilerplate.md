@@ -1,404 +1,347 @@
-# Reducing Boilerplate in ClapGo Plugins - Phase 2
+# Phase 3: Function-Level Boilerplate Reduction
 
-After successfully implementing the Parameter Binding System, this document identifies remaining boilerplate patterns in the synth plugin that should be abstracted into the ClapGo library.
+After implementing Extension Bundle and Selectable Filter, this document analyzes all 23 functions in the synth plugin to identify which can be moved to the framework.
 
-## Completed ✅
+## Function Analysis
 
-### 1. Parameter Binding System 
-- Automatic parameter registration and storage
-- Unified text/value conversion
-- Eliminated ~150 lines of switch statements
+### ✅ Already Optimized (5 functions)
+1. `init()` - Global initialization, must stay
+2. `NewSynthPlugin()` - Constructor, plugin-specific 
+3. `Init()` - Now uses ExtensionBundle (3 lines vs 40)
+4. `Process()` - Uses SelectableFilter, still needs more work
+5. `GetPluginInfo()` - Plugin metadata, must stay
 
-## Remaining Boilerplate Patterns
+### 🎯 High-Priority Boilerplate (8 functions)
 
-### 1. Extension Bundle Initialization
-
-**Current State:**
-Every plugin must:
-- Check if Host is not nil repeatedly
-- Initialize each extension individually
-- Log initialization status for each
-- Handle nil checks throughout
-
-**Lines of boilerplate:** ~40 lines in Init()
-
-**Proposed Abstraction:**
+#### 1. **Parameter Text Conversion** (100% boilerplate)
 ```go
-// In pkg/extension/bundle.go
-type ExtensionBundle struct {
-    ThreadCheck      *thread.Checker
-    TrackInfo        *host.TrackInfoProvider
-    TransportControl *host.TransportControl
-    Tuning          *HostTuning
-    Logger          *host.Logger
+// Current: 30+ lines each
+func (p *SynthPlugin) ParamValueToText(...) bool
+func (p *SynthPlugin) ParamTextToValue(...) bool
+```
+**Solution**: ParameterBinder already handles this - make it automatic
+
+#### 2. **Event Processing** (90% boilerplate)
+```go
+// Current: 15 lines
+func (p *SynthPlugin) processEventHandler(events *event.EventProcessor, frameCount uint32)
+func (p *SynthPlugin) ParamsFlush(inEvents, outEvents unsafe.Pointer)
+func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32)
+```
+**Solution**: Create AutoEventHandler that uses ParameterBinder
+
+#### 3. **State Management** (95% boilerplate)
+```go
+// Current: 20 lines total
+func (p *SynthPlugin) SaveState() map[string]interface{}
+func (p *SynthPlugin) LoadState(data map[string]interface{})
+```
+**Solution**: AutoStateManager using ParameterBinder
+
+#### 4. **Lifecycle Methods** (80% boilerplate)
+```go
+// Current: Simple delegations, 2-5 lines each
+func (p *SynthPlugin) Destroy()
+func (p *SynthPlugin) Deactivate() 
+func (p *SynthPlugin) StartProcessing() bool
+func (p *SynthPlugin) StopProcessing()
+func (p *SynthPlugin) Reset()
+```
+**Solution**: DefaultLifecycleHandler
+
+### 🎯 Medium-Priority Boilerplate (6 functions)
+
+#### 5. **Extension Callbacks** (70% boilerplate)
+```go
+// Current: Mostly logging, 15-20 lines each
+func (p *SynthPlugin) OnTrackInfoChanged()
+func (p *SynthPlugin) OnTuningChanged() 
+func (p *SynthPlugin) OnTimer(timerID uint64)
+```
+**Solution**: ExtensionBundle can provide default handlers
+
+#### 6. **Plugin Metadata** (60% boilerplate)
+```go
+// Current: Simple getters, 3-8 lines each
+func (p *SynthPlugin) OnMainThread()
+func (p *SynthPlugin) GetPluginID() string
+func (p *SynthPlugin) GetLatency() uint32
+```
+**Solution**: AutoMetadataProvider
+
+### 🟡 Plugin-Specific but Improvable (4 functions)
+
+#### 7. **Audio-Specific** (40% boilerplate)
+```go
+// Current: Plugin-specific but common patterns
+func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool
+func (p *SynthPlugin) GetTail() uint32
+func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo
+func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent)
+```
+**Solution**: PolyphonicInstrumentBase helper
+
+### ⚪ Keep Plugin-Specific (2 functions)
+```go
+// Current: Truly plugin-specific
+func (p *SynthPlugin) GetRemoteControlsPageCount() uint32
+func (p *SynthPlugin) GetRemoteControlsPage(...) (...)
+```
+
+### 🔧 Utility Functions (2 functions)
+```go
+// Current: Generic utilities that belong in framework
+func findPeak(buffer []float32) float32
+func main() // Test function
+```
+**Solution**: Move to `pkg/audio/dsp.go`
+
+## Implementation Strategy
+
+### Phase 3A: Auto Parameter Handlers
+
+```go
+// In pkg/param/autohandler.go
+type AutoParamHandler struct {
+    binder *ParameterBinder
 }
 
-func NewExtensionBundle(host unsafe.Pointer, pluginName string) *ExtensionBundle {
-    bundle := &ExtensionBundle{}
-    
-    if host == nil {
-        return bundle
+func (h *AutoParamHandler) ParamValueToText(paramID uint32, value float64, buffer unsafe.Pointer, size uint32) bool {
+    text, ok := h.binder.ValueToText(paramID, value)
+    if !ok {
+        return false
     }
-    
-    // Initialize all extensions with automatic nil checks
-    bundle.Logger = host.NewLogger(host, pluginName)
-    bundle.ThreadCheck = thread.NewChecker(host)
-    bundle.TrackInfo = host.NewTrackInfoProvider(host)
-    bundle.TransportControl = host.NewTransportControl(host)
-    bundle.Tuning = NewHostTuning(host)
-    
-    // Log initialization status once
-    if bundle.Logger != nil {
-        bundle.logInitStatus()
-    }
-    
-    return bundle
-}
-
-// Usage in plugin:
-func (p *SynthPlugin) Init() bool {
-    thread.DebugSetMainThread()
-    p.Extensions = extension.NewExtensionBundle(p.Host, PluginName)
-    
-    // Set up MIDI mappings...
+    // Copy to C buffer...
     return true
 }
-```
 
-### 2. MIDI CC Mapping System
-
-**Current State:**
-Plugins must:
-- Call SetCallbacks with inline functions
-- Manually map CC numbers to parameters
-- Handle value scaling inline
-- Repeat similar patterns for each CC
-
-**Lines of boilerplate:** ~30 lines per CC mapping
-
-**Proposed Abstraction:**
-```go
-// In pkg/audio/ccmapping.go
-type CCMapper struct {
-    processor *MIDIProcessor
-    mappings  map[uint32]CCMapping
-}
-
-type CCMapping struct {
-    ParamID   uint32
-    Atomic    *param.AtomicFloat64
-    Transform func(float64) float64 // Optional value transformation
-}
-
-func NewCCMapper(processor *MIDIProcessor) *CCMapper {
-    mapper := &CCMapper{
-        processor: processor,
-        mappings:  make(map[uint32]CCMapping),
+func (h *AutoParamHandler) ParamTextToValue(paramID uint32, text string, value unsafe.Pointer) bool {
+    parsedValue, err := h.binder.TextToValue(paramID, text)
+    if err != nil {
+        return false
     }
-    
-    // Set up the modulation callback
-    processor.SetCallbacks(nil, nil, mapper.handleCC, nil, nil)
-    return mapper
+    *(*float64)(value) = parsedValue
+    return true
 }
 
-// Builder pattern for easy configuration
-func (m *CCMapper) MapCC(cc uint32, paramID uint32, atomic *param.AtomicFloat64) *CCMapper {
-    m.mappings[cc] = CCMapping{ParamID: paramID, Atomic: atomic}
-    return m
-}
-
-func (m *CCMapper) MapCCWithTransform(cc uint32, paramID uint32, atomic *param.AtomicFloat64, transform func(float64) float64) *CCMapper {
-    m.mappings[cc] = CCMapping{
-        ParamID:   paramID,
-        Atomic:    atomic,
-        Transform: transform,
-    }
-    return m
-}
-
-// Usage in plugin:
-ccMapper := audio.NewCCMapper(p.midiProcessor).
-    MapCC(7, 1, p.volume).  // CC7 -> Volume
-    MapCCWithTransform(74, 7, p.cutoff, audio.ExpFrequencyMap(20, 20000)) // CC74 -> Cutoff with exponential mapping
-```
-
-### 3. Filter Processing Abstraction
-
-**Current State:**
-Plugins must:
-- Switch between filter types manually
-- Check for NaN/Inf after each sample
-- Reset filter on errors
-- Handle filter type switching in process loop
-
-**Lines of boilerplate:** ~30 lines in Process()
-
-**Proposed Abstraction:**
-```go
-// In pkg/audio/selectablefilter.go
-type SelectableFilter struct {
-    filter     *StateVariableFilter
-    filterType FilterType
-    safeMode   bool // Auto NaN/Inf protection
-}
-
-type FilterType int
-
-const (
-    FilterLowpass FilterType = iota
-    FilterHighpass
-    FilterBandpass
-    FilterNotch
-    FilterBypass
-)
-
-func (f *SelectableFilter) Process(input float64) float64 {
-    var output float64
-    
-    switch f.filterType {
-    case FilterLowpass:
-        output = f.filter.ProcessLowpass(input)
-    case FilterHighpass:
-        output = f.filter.ProcessHighpass(input)
-    case FilterBandpass:
-        output = f.filter.ProcessBandpass(input)
-    case FilterNotch:
-        _, _, _, output = f.filter.Process(input)
-    default:
-        output = input
-    }
-    
-    // Built-in safety when enabled
-    if f.safeMode && (math.IsNaN(output) || math.IsInf(output, 0)) {
-        f.filter.Reset()
-        return 0
-    }
-    
-    return output
-}
-
-// Usage in plugin:
-p.filter = audio.NewSelectableFilter(sampleRate, true) // true = safe mode
-
-// In Process:
-p.filter.SetType(audio.FilterType(filterType))
-for i := range output {
-    output[i] = float32(p.filter.Process(float64(output[i])))
+func (h *AutoParamHandler) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
+    h.binder.HandleParamValue(paramEvent.ParamID, paramEvent.Value)
 }
 ```
 
-### 4. Process Method Boilerplate
+### Phase 3B: Auto Event Processing
 
-**Current State:**
-Every Process method must:
-- Check activation state
-- Process events
-- Load all parameters
-- Update voice parameters
-- Apply filter with safety checks
-- Distribute to channels
-- Check for finished voices
-
-**Lines of boilerplate:** ~50 lines of repeated patterns
-
-**Proposed Abstraction:**
 ```go
-// In pkg/audio/processor.go
-type SynthProcessor struct {
-    voiceManager *VoiceManager
-    oscillator   *PolyphonicOscillator
-    filter       *SelectableFilter
+// In pkg/event/autoprocessor.go
+type AutoEventProcessor struct {
+    midiProcessor *audio.MIDIProcessor
+    paramHandler  *param.AutoParamHandler
 }
 
-type ProcessParams struct {
-    Volume      float64
-    Waveform    int
-    FilterType  int
-    FilterCutoff float64
-    FilterResonance float64
-    Attack, Decay, Sustain, Release float64
+func (p *AutoEventProcessor) ProcessEvents(events *event.EventProcessor, plugin param.Handler) {
+    p.midiProcessor.ProcessEvents(events, plugin)
 }
 
-func (sp *SynthProcessor) Process(params ProcessParams, frameCount uint32, audioOut [][]float32, events *event.EventProcessor) int {
-    // Update voice envelopes
-    sp.voiceManager.ApplyToAllVoices(func(voice *Voice) {
-        voice.Envelope.SetADSR(params.Attack, params.Decay, params.Sustain, params.Release)
-    })
-    
-    // Configure processing
-    sp.oscillator.SetWaveform(WaveformType(params.Waveform))
-    sp.filter.SetType(FilterType(params.FilterType))
-    sp.filter.SetFrequency(Clamp(params.FilterCutoff, 20.0, 20000.0))
-    sp.filter.SetResonance(0.5 + params.FilterResonance*19.5)
-    
-    // Generate and filter audio
-    output := sp.oscillator.Process(frameCount)
-    for i := range output {
-        output[i] = float32(sp.filter.Process(float64(output[i])))
+func (p *AutoEventProcessor) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
+    if inEvents != nil {
+        eventHandler := event.NewEventProcessor(inEvents, outEvents)
+        p.ProcessEvents(eventHandler, p.paramHandler)
     }
-    
-    // Apply volume and distribute
-    DistributeToChannels(output, audioOut, float32(params.Volume))
-    
-    // Cleanup finished voices
-    sp.voiceManager.CleanupFinishedVoices(events)
-    
-    if sp.voiceManager.GetActiveVoiceCount() == 0 {
-        return process.ProcessSleep
-    }
-    return process.ProcessContinue
-}
-
-// Usage in plugin - Process becomes much simpler:
-func (p *SynthPlugin) Process(...) int {
-    if !p.IsActivated || !p.IsProcessing {
-        return process.ProcessError
-    }
-    
-    if events != nil {
-        p.midiProcessor.ProcessEvents(events, p)
-    }
-    
-    params := audio.ProcessParams{
-        Volume:          p.volume.Load(),
-        Waveform:        int(p.waveform.Load()),
-        FilterType:      int(p.filterType.Load()),
-        FilterCutoff:    p.cutoff.Load(),
-        FilterResonance: p.resonance.Load(),
-        Attack:          p.attack.Load(),
-        Decay:           p.decay.Load(),
-        Sustain:         p.sustain.Load(),
-        Release:         p.release.Load(),
-    }
-    
-    return p.processor.Process(params, frameCount, audioOut, events)
 }
 ```
 
-### 5. Plugin Info Duplication
+### Phase 3C: Auto State Management
 
-**Current State:**
-Plugin info is defined in:
-- constants.go
-- NewSynthPlugin() 
-- GetPluginInfo()
-
-**Proposed Solution:**
 ```go
-// In pkg/plugin/info.go
-type PluginInfoBuilder struct {
-    info plugin.Info
+// In pkg/state/automanager.go
+type AutoStateManager struct {
+    binder *param.ParameterBinder
+    customState map[string]interface{}
 }
 
-func NewPluginInfo(id, name, vendor, version string) *PluginInfoBuilder {
-    return &PluginInfoBuilder{
-        info: plugin.Info{
-            ID:      id,
-            Name:    name,
-            Vendor:  vendor,
-            Version: version,
-        },
+func (s *AutoStateManager) SaveState() map[string]interface{} {
+    state := make(map[string]interface{})
+    
+    // Auto-save all parameters
+    for id, binding := range s.binder.GetAllBindings() {
+        state[fmt.Sprintf("param_%d", id)] = binding.Atomic.Load()
+    }
+    
+    // Add custom state
+    for k, v := range s.customState {
+        state[k] = v
+    }
+    
+    return state
+}
+
+func (s *AutoStateManager) LoadState(data map[string]interface{}) {
+    // Auto-load parameters
+    for key, value := range data {
+        if strings.HasPrefix(key, "param_") {
+            if id, err := strconv.ParseUint(key[6:], 10, 32); err == nil {
+                if binding, ok := s.binder.GetBinding(uint32(id)); ok {
+                    if floatVal, ok := value.(float64); ok {
+                        binding.Atomic.Store(floatVal)
+                    }
+                }
+            }
+        }
     }
 }
-
-// Usage in constants.go:
-var PluginInfo = plugin.NewPluginInfo(PluginID, PluginName, PluginVendor, PluginVersion).
-    WithDescription(PluginDescription).
-    WithURLs("https://github.com/justyntemme/clapgo").
-    WithFeatures(plugin.FeatureInstrument, plugin.FeatureStereo).
-    Build()
-
-// Then use PluginInfo everywhere
 ```
 
-### 6. Common DSP Utilities
-
-**Current State:**
-Plugins implement their own:
-- findPeak function
-- Channel distribution logic
-- Parameter clamping
-- Frequency mapping
-
-**Proposed Solution:**
-```go
-// In pkg/audio/dsp.go
-package audio
-
-// Common DSP utilities
-func FindPeak(buffer []float32) float32
-func DistributeToChannels(mono []float32, stereo [][]float32, gain float32)
-func ExpFrequencyMap(min, max float64) func(float64) float64
-func DbToLinear(db float64) float64
-func LinearToDb(linear float64) float64
-```
-
-## Implementation Priority
-
-1. **Extension Bundle** (High) - Reduces Init() from 100+ lines to ~10 lines
-2. **Filter Abstraction** (High) - Eliminates error-prone NaN checking
-3. **Process Pipeline** (Medium) - Reduces Process() by 50%
-4. **MIDI CC Mapping** (Medium) - Makes MIDI learn trivial
-5. **Plugin Info Builder** (Low) - Eliminates duplication
-6. **DSP Utilities** (Low) - Prevents reinventing the wheel
-
-## Benefits Summary
-
-With all abstractions implemented:
-- **Synth plugin**: ~760 lines → ~400 lines (47% reduction)
-- **New plugin creation**: Hours → Minutes
-- **Common bugs eliminated**: NaN checks, parameter updates, channel distribution
-- **Focus on DSP**: Developers write audio algorithms, not infrastructure
-
-## Example: Minimal Synth with All Abstractions
+### Phase 3D: Polyphonic Instrument Base
 
 ```go
-type MinimalSynth struct {
-    *plugin.PluginBase
+// In pkg/plugin/polybase.go
+type PolyphonicInstrumentBase struct {
+    *PluginBase
     *extension.ExtensionBundle
     
-    params    *param.ParameterBinder
-    processor *audio.SynthProcessor
-    ccMapper  *audio.CCMapper
-    
-    // Direct parameter access
-    volume   *param.AtomicFloat64
-    cutoff   *param.AtomicFloat64
+    params          *param.ParameterBinder
+    paramHandler    *param.AutoParamHandler
+    eventProcessor  *event.AutoEventProcessor
+    stateManager    *state.AutoStateManager
+    voiceManager    *audio.VoiceManager
+    notePortManager *audio.NotePortManager
 }
 
-func NewMinimalSynth() *MinimalSynth {
-    s := &MinimalSynth{
-        PluginBase: plugin.NewPluginBase(PluginInfo),
-        processor:  audio.NewSynthProcessor(16, 44100),
+func NewPolyphonicInstrumentBase(info plugin.Info, polyphony int) *PolyphonicInstrumentBase {
+    base := &PolyphonicInstrumentBase{
+        PluginBase:      plugin.NewPluginBase(info),
+        voiceManager:    audio.NewVoiceManager(polyphony, 44100),
+        notePortManager: audio.NewNotePortManager(),
+    }
+    
+    base.params = param.NewParameterBinder(base.ParamManager)
+    base.paramHandler = param.NewAutoParamHandler(base.params)
+    base.eventProcessor = event.NewAutoEventProcessor(base.paramHandler)
+    base.stateManager = state.NewAutoStateManager(base.params)
+    
+    return base
+}
+
+// Auto-implemented methods
+func (p *PolyphonicInstrumentBase) Init() bool {
+    p.ExtensionBundle = extension.NewExtensionBundle(p.Host, p.Info.Name)
+    return true
+}
+
+func (p *PolyphonicInstrumentBase) ParamValueToText(paramID uint32, value float64, buffer unsafe.Pointer, size uint32) bool {
+    return p.paramHandler.ParamValueToText(paramID, value, buffer, size)
+}
+
+func (p *PolyphonicInstrumentBase) ParamTextToValue(paramID uint32, text string, value unsafe.Pointer) bool {
+    return p.paramHandler.ParamTextToValue(paramID, text, value)
+}
+
+func (p *PolyphonicInstrumentBase) HandleParamValue(paramEvent *event.ParamValueEvent, time uint32) {
+    p.paramHandler.HandleParamValue(paramEvent, time)
+}
+
+func (p *PolyphonicInstrumentBase) ParamsFlush(inEvents, outEvents unsafe.Pointer) {
+    p.eventProcessor.ParamsFlush(inEvents, outEvents)
+}
+
+func (p *PolyphonicInstrumentBase) SaveState() map[string]interface{} {
+    return p.stateManager.SaveState()
+}
+
+func (p *PolyphonicInstrumentBase) LoadState(data map[string]interface{}) {
+    p.stateManager.LoadState(data)
+}
+
+func (p *PolyphonicInstrumentBase) GetVoiceInfo() extension.VoiceInfo {
+    return extension.VoiceInfo{
+        VoiceCount:    uint32(p.voiceManager.GetActiveVoiceCount()),
+        VoiceCapacity: uint32(p.voiceManager.GetMaxVoices()),
+        Flags:         extension.VoiceInfoFlagSupportsOverlappingNotes,
+    }
+}
+
+// Standard lifecycle methods with sensible defaults
+func (p *PolyphonicInstrumentBase) Destroy() {}
+func (p *PolyphonicInstrumentBase) Deactivate() { p.IsActivated = false }
+func (p *PolyphonicInstrumentBase) StartProcessing() bool { p.IsProcessing = true; return p.IsActivated }
+func (p *PolyphonicInstrumentBase) StopProcessing() { p.IsProcessing = false }
+func (p *PolyphonicInstrumentBase) Reset() { p.voiceManager.Reset() }
+func (p *PolyphonicInstrumentBase) OnMainThread() {}
+func (p *PolyphonicInstrumentBase) GetPluginID() string { return p.Info.ID }
+func (p *PolyphonicInstrumentBase) GetLatency() uint32 { return 0 }
+```
+
+## Simplified Synth Plugin Result
+
+With all abstractions, the synth plugin becomes:
+
+```go
+type SynthPlugin struct {
+    *plugin.PolyphonicInstrumentBase
+    
+    // Audio processing (the actual plugin logic)
+    oscillator *audio.PolyphonicOscillator
+    filter     *audio.SelectableFilter
+    
+    // Direct parameter access
+    volume     *param.AtomicFloat64
+    cutoff     *param.AtomicFloat64
+    filterType *param.AtomicFloat64
+    // ... other params
+}
+
+func NewSynthPlugin() *SynthPlugin {
+    s := &SynthPlugin{
+        PolyphonicInstrumentBase: plugin.NewPolyphonicInstrumentBase(PluginInfo, 16),
     }
     
     // Bind parameters
-    s.params = param.NewParameterBinder(s.ParamManager)
     s.volume = s.params.BindPercentage(1, "Volume", 70.0)
-    s.cutoff = s.params.BindCutoff(2, "Cutoff", 1000.0)
+    s.cutoff = s.params.BindCutoffLog(7, "Filter Cutoff", 0.5)
+    s.filterType = s.params.BindChoice(9, "Filter Type", FilterTypeChoices, 0)
     
-    // Setup MIDI
-    s.ccMapper = audio.NewCCMapper(s.processor.MIDIProcessor).
-        MapCC(7, 1, s.volume).
-        MapCC(74, 2, s.cutoff)
+    // Create audio components
+    s.oscillator = audio.NewPolyphonicOscillator(s.voiceManager)
+    s.filter = audio.NewSelectableFilter(44100, true)
     
     return s
 }
 
-func (s *MinimalSynth) Init() bool {
-    s.ExtensionBundle = extension.NewExtensionBundle(s.Host, PluginName)
+func (s *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) bool {
+    s.PolyphonicInstrumentBase.Activate(sampleRate, minFrames, maxFrames)
+    s.filter.SetSampleRate(sampleRate)
     return true
 }
 
-func (s *MinimalSynth) Process(...) int {
-    return s.processor.ProcessSimple(
-        s.volume.Load(),
-        s.cutoff.Load(),
-        frameCount,
-        audioOut,
-        events,
-    )
+func (s *SynthPlugin) Process(...) int {
+    if !s.IsActivated || !s.IsProcessing { return process.ProcessError }
+    
+    s.eventProcessor.ProcessEvents(events, s)
+    
+    // Get mapped parameter values
+    volume := s.volume.Load()
+    cutoff, _ := s.params.GetMappedValue(7)
+    filterType := int(s.filterType.Load())
+    
+    // Generate and process audio
+    s.filter.SetType(audio.MapFilterTypeFromInt(filterType))
+    s.filter.SetFrequency(cutoff)
+    
+    output := s.oscillator.Process(framesCount)
+    s.filter.ProcessBuffer(output)
+    audio.DistributeToChannels(output, audioOut, float32(volume))
+    
+    return s.voiceManager.GetActiveVoiceCount() > 0 ? process.ProcessContinue : process.ProcessSleep
 }
 
-// That's it! A working synth in ~50 lines
+// That's it! ~50 lines vs 675 lines
 ```
+
+## Expected Results
+
+- **Current**: 675 lines, 23 functions
+- **Target**: ~150 lines, 5 functions  
+- **Reduction**: 78% fewer lines, 78% fewer functions
+- **Functions eliminated**: 18 out of 23 functions moved to framework
+- **Time to create new synth**: Hours → Minutes
+- **Boilerplate eliminated**: Parameter handling, state management, event processing, lifecycle management
