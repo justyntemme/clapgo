@@ -242,41 +242,10 @@ func NewSynthPlugin() *SynthPlugin {
 	return plugin
 }
 
-// setupParameterHandling configures automatic parameter change handling
+// setupParameterHandling configures parameter initialization
 func (p *SynthPlugin) setupParameterHandling() {
-	// Add a global parameter change listener
-	p.ParamManager.AddListener(func(paramID uint32, oldValue, newValue float64) {
-		// Handle parameter changes based on ID
-		switch paramID {
-		case 1: // Volume
-			p.volume.Store(newValue)
-		case 2: // Waveform
-			p.waveform.Store(newValue)
-		case 3: // Attack
-			p.attack.Store(newValue)
-		case 4: // Decay
-			p.decay.Store(newValue)
-		case 5: // Sustain
-			p.sustain.Store(newValue)
-		case 6: // Release
-			p.release.Store(newValue)
-		case 7: // Filter Cutoff
-			p.filterCutoff.Store(newValue)
-			if p.filter != nil {
-				p.filter.SetFrequency(newValue)
-			}
-		case 8: // Filter Resonance
-			p.filterResonance.Store(newValue)
-			if p.filter != nil {
-				p.filter.SetResonance(newValue)
-			}
-		case 9: // Filter Drive
-			driveAmount := newValue / 100.0 // Convert percentage to 0-1
-			p.filterDrive.Store(driveAmount)
-		case 10: // Filter Type
-			p.filterType.Store(newValue)
-		}
-	})
+	// Parameter changes are handled through HandleParamValue method
+	// This method can be used for additional parameter setup if needed
 }
 
 // setupRemoteControls configures MIDI CC mapping using framework
@@ -373,11 +342,32 @@ func (p *SynthPlugin) Init() bool {
 			}
 		},
 		nil, // onNoteOff
-		// onModulation - handle CC7 volume changes
+		// onModulation - handle CC changes for volume and filter
 		func(channel int16, cc uint32, value float64) {
-			if cc == 7 { // Volume CC
-				// Update the master volume parameter
+			switch cc {
+			case 7: // Volume CC
 				p.volume.UpdateWithManager(value, p.ParamManager, 1)
+			case 74: // Filter Cutoff (Brightness)
+				cutoff := 20.0 + (value * 19980.0) // 20Hz to 20kHz
+				p.filterCutoff.UpdateWithManager(cutoff, p.ParamManager, 7)
+				if p.filter != nil {
+					p.filter.SetFrequency(cutoff)
+				}
+			case 71: // Filter Resonance (Harmonic Content)
+				resonance := 0.5 + (value * 19.5) // 0.5 to 20
+				p.filterResonance.UpdateWithManager(resonance, p.ParamManager, 8)
+				if p.filter != nil {
+					p.filter.SetResonance(resonance)
+				}
+			case 76: // Filter Drive (Sound Variation)
+				drive := value * 100.0 // 0-100%
+				p.filterDrive.UpdateWithManager(drive, p.ParamManager, 9)
+			case 77: // Filter Type
+				filterType := math.Floor(value * 4.0) // 0-3
+				if filterType > 3 {
+					filterType = 3
+				}
+				p.filterType.UpdateWithManager(filterType, p.ParamManager, 10)
 			}
 		},
 		nil, // onPitchBend
@@ -492,7 +482,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	// Get filter parameters
 	filterCutoff := p.filterCutoff.Load()
 	filterResonance := p.filterResonance.Load()
-	filterDrive := p.filterDrive.Load()
+	filterDrive := p.filterDrive.Load() / 100.0 // Convert percentage to 0-1
 	filterType := p.filterType.Load()
 
 	// Update envelope parameters for all voices
@@ -758,6 +748,20 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 		p.sustain.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
 	case 6: // Release
 		p.release.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+	case 7: // Filter Cutoff
+		p.filterCutoff.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+		if p.filter != nil {
+			p.filter.SetFrequency(paramEvent.Value)
+		}
+	case 8: // Filter Resonance
+		p.filterResonance.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+		if p.filter != nil {
+			p.filter.SetResonance(paramEvent.Value)
+		}
+	case 9: // Filter Drive
+		p.filterDrive.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+	case 10: // Filter Type
+		p.filterType.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
 	}
 }
 
