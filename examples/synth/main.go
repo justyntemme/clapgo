@@ -53,12 +53,12 @@ func init() {
 // SynthPlugin implements a simple synthesizer with atomic parameter storage
 type SynthPlugin struct {
 	*plugin.PluginBase
-	event.NoOpHandler // Embed to get default no-op implementations
 
 	// Audio processing components
-	voiceManager *audio.VoiceManager
-	oscillator   *audio.PolyphonicOscillator
-	filter       *audio.SimpleLowPassFilter
+	voiceManager   *audio.VoiceManager
+	oscillator     *audio.PolyphonicOscillator
+	filter         *audio.SimpleLowPassFilter
+	midiProcessor  *audio.MIDIProcessor
 
 	// Parameters with atomic storage for thread safety
 	volume   *param.AtomicFloat64
@@ -124,6 +124,9 @@ func NewSynthPlugin() *SynthPlugin {
 		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
 		filter:          audio.NewSimpleLowPassFilter(44100),
 	}
+	
+	// Create MIDI processor
+	plugin.midiProcessor = audio.NewMIDIProcessor(voiceManager, plugin.ParamManager)
 
 	// Initialize atomic parameters
 	plugin.volume = param.NewAtomicFloat64(0.7)    // -3dB
@@ -190,6 +193,30 @@ func (p *SynthPlugin) Init() bool {
 			}
 		}
 	}
+	
+	// Set up custom MIDI callbacks
+	p.midiProcessor.SetCallbacks(
+		// onNoteOn - handle transport control via C0
+		func(channel, key int16, velocity float64) {
+			// Special transport control: C0 (MIDI note 24) toggles play/pause
+			if key == 24 && p.transportControl != nil {
+				p.transportControl.RequestTogglePlay()
+				if p.Logger != nil {
+					p.Logger.Info("Transport toggle play requested via C0")
+				}
+			}
+		},
+		nil, // onNoteOff
+		// onModulation - handle CC7 volume changes
+		func(channel int16, cc uint32, value float64) {
+			if cc == 7 { // Volume CC
+				// Update the master volume parameter
+				p.volume.UpdateWithManager(value, p.ParamManager, 1)
+			}
+		},
+		nil, // onPitchBend
+		nil, // onPolyPressure
+	)
 
 	if p.Logger != nil {
 		p.Logger.Debug("Synth plugin initialized")
@@ -346,8 +373,8 @@ func (p *SynthPlugin) processEventHandler(events *event.EventProcessor, frameCou
 		return
 	}
 
-	// Process all events
-	events.ProcessAll(p)
+	// Process MIDI events through MIDIProcessor, parameter events through plugin
+	p.midiProcessor.ProcessEvents(events, p)
 }
 
 // ParamValueToText provides custom formatting for synth parameters
@@ -506,128 +533,6 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent
 	})
 }
 
-// HandleNoteOn handles note on events
-func (p *SynthPlugin) HandleNoteOn(noteEvent *event.NoteEvent, time uint32) {
-	// Validate note event fields (CLAP spec says key must be 0-127)
-	if noteEvent.Key < 0 || noteEvent.Key > 127 {
-		return
-	}
-
-	// Special transport control: C0 (MIDI note 24) toggles play/pause
-	if noteEvent.Key == 24 && p.transportControl != nil {
-		p.transportControl.RequestTogglePlay()
-		if p.Logger != nil {
-			p.Logger.Info("Transport toggle play requested via C0")
-		}
-		return // Don't play the note
-	}
-
-	// Ensure velocity is positive
-	velocity := noteEvent.Velocity
-	if velocity <= 0 {
-		velocity = 0.01 // Very quiet but not silent
-	}
-
-	// Allocate a voice using VoiceManager
-	voice := p.voiceManager.AllocateVoice(noteEvent.NoteID, noteEvent.Channel, noteEvent.Key, velocity)
-	if voice == nil {
-		if p.Logger != nil {
-			p.Logger.Warning("Failed to allocate voice for note")
-		}
-		return
-	}
-
-	if p.Logger != nil {
-		p.Logger.Debug(fmt.Sprintf("Note on: key=%d, velocity=%.2f", noteEvent.Key, velocity))
-	}
-}
-
-// HandleNoteOff handles note off events
-func (p *SynthPlugin) HandleNoteOff(noteEvent *event.NoteEvent, time uint32) {
-	// Release voice using VoiceManager
-	if noteEvent.NoteID >= 0 {
-		p.voiceManager.ReleaseVoice(noteEvent.NoteID, noteEvent.Channel)
-	} else {
-		// If no note ID, find voice by key/channel
-		p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
-			if voice.Key == noteEvent.Key &&
-				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel) {
-				voice.Envelope.Release()
-			}
-		})
-	}
-}
-
-// HandleNoteChoke handles note choke events (immediate stop)
-func (p *SynthPlugin) HandleNoteChoke(noteEvent *event.NoteEvent, time uint32) {
-	// Immediately deactivate voices using VoiceManager
-	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
-		// Match on note ID if provided (non-negative), otherwise match on key and channel
-		if (noteEvent.NoteID >= 0 && voice.NoteID == noteEvent.NoteID) ||
-			(noteEvent.NoteID < 0 && voice.Key == noteEvent.Key &&
-				(noteEvent.Channel < 0 || voice.Channel == noteEvent.Channel)) {
-			// Immediately deactivate the voice
-			voice.IsActive = false
-		}
-	})
-}
-
-// HandleNoteExpression handles note expression events (MPE)
-func (p *SynthPlugin) HandleNoteExpression(noteExprEvent *event.NoteExpressionEvent, time uint32) {
-	// Apply expression to matching voices using VoiceManager
-	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
-		// Match by note ID if specified
-		if noteExprEvent.NoteID >= 0 && voice.NoteID != noteExprEvent.NoteID {
-			return
-		}
-
-		// Match by key/channel if specified
-		if noteExprEvent.Key >= 0 && voice.Key != noteExprEvent.Key {
-			return
-		}
-		if noteExprEvent.Channel >= 0 && voice.Channel != noteExprEvent.Channel {
-			return
-		}
-
-		// Apply expression to this voice
-		switch noteExprEvent.ExpressionID {
-		case event.NoteExpressionVolume:
-			voice.Volume = noteExprEvent.Value // Direct volume value
-		case event.NoteExpressionPan:
-			// Could implement stereo panning here
-		case event.NoteExpressionTuning:
-			voice.PitchBend = noteExprEvent.Value // In semitones
-		case event.NoteExpressionVibrato:
-			// Could implement vibrato depth here
-		case event.NoteExpressionBrightness:
-			voice.Brightness = noteExprEvent.Value
-		case event.NoteExpressionPressure:
-			voice.Pressure = noteExprEvent.Value
-		}
-	})
-}
-
-// HandleMIDI handles MIDI 1.0 events
-func (p *SynthPlugin) HandleMIDI(midiEvent *event.MIDIEvent, time uint32) {
-	// Use the helper to process standard MIDI messages
-	event.ProcessStandardMIDI(midiEvent, p, time)
-
-	// Handle additional MIDI CC messages
-	if len(midiEvent.Data) >= 3 {
-		status := midiEvent.Data[0] & 0xF0
-		if status == 0xB0 { // Control Change
-			switch midiEvent.Data[1] {
-			case 7: // Volume
-				value := float64(midiEvent.Data[2]) / 127.0
-				paramEvent := event.ParamValueEvent{
-					ParamID: 1, // Volume parameter
-					Value:   value,
-				}
-				p.HandleParamValue(&paramEvent, time)
-			}
-		}
-	}
-}
 
 
 // GetNotePortManager returns the plugin's note port manager
