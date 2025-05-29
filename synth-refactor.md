@@ -24,184 +24,16 @@ This guide provides detailed implementation strategies for the 5 remaining items
 **Detailed Implementation Guide Using ClapGo Framework**:
 
 #### Step 1: Parameter Definition with Framework Builders
-```go
-// In NewSynthPlugin constructor - use framework parameter builders
-func NewSynthPlugin() *SynthPlugin {
-    // ... existing code ...
-    
-    // Define filter parameters using framework builders
-    filterParams := []param.Info{
-        param.NewBuilder(7, "Cutoff").
-            Module("Filter").
-            Range(20, 20000, 1000).
-            Format(param.FormatHertz).
-            Automatable().
-            Modulatable().
-            MustBuild(),
-            
-        param.NewBuilder(8, "Resonance").
-            Module("Filter").
-            Range(0.5, 20, 1).
-            Format(param.FormatGeneric).
-            Automatable().
-            Modulatable().
-            MustBuild(),
-            
-        param.NewBuilder(9, "Drive").
-            Module("Filter").
-            Range(0, 100, 0).
-            Format(param.FormatPercentage).
-            Automatable().
-            MustBuild(),
-            
-        param.NewBuilder(10, "Type").
-            Module("Filter").
-            Choice([]string{"Low Pass", "High Pass", "Band Pass", "Notch"}).
-            Default(0).
-            MustBuild(),
-    }
-    
-    // Register all filter parameters at once
-    p.ParamManager.RegisterAll(filterParams...)
-    
-    // Initialize atomic parameter storage with framework utilities
-    p.filterCutoff = param.NewAtomicFloat64(1000.0)
-    p.filterResonance = param.NewAtomicFloat64(1.0)
-    p.filterDrive = param.NewAtomicFloat64(0.0)
-    p.filterType = param.NewAtomicInt32(0)
-    
-    // Use framework's StateVariableFilter instead of multiple filter types
-    p.filter = audio.NewStateVariableFilter(p.sampleRate)
-    p.filter.SetFrequency(1000.0)
-    p.filter.SetResonance(1.0)
-    p.filter.SetFilterType(audio.FilterTypeLowPass)
-    
-    return p
-}
-```
+``
 
 #### Step 2: Automatic Parameter Handling with Framework Listeners
-```go
-// Use framework's parameter change listener system instead of manual callbacks
-func (p *SynthPlugin) setupParameterListeners() {
-    // Filter cutoff parameter listener
-    p.ParamManager.AddListener(7, func(value float64) {
-        p.filterCutoff.Store(value)
-        p.filter.SetFrequency(value)
-    })
-    
-    // Filter resonance parameter listener
-    p.ParamManager.AddListener(8, func(value float64) {
-        p.filterResonance.Store(value)
-        p.filter.SetResonance(value)
-    })
-    
-    // Filter drive parameter listener
-    p.ParamManager.AddListener(9, func(value float64) {
-        driveAmount := value / 100.0
-        p.filterDrive.Store(driveAmount)
-        // Apply drive in audio processing
-    })
-    
-    // Filter type parameter listener
-    p.ParamManager.AddListener(10, func(value float64) {
-        filterType := int32(value)
-        p.filterType.Store(filterType)
-        
-        // Use framework's StateVariableFilter mode switching
-        switch filterType {
-        case 0:
-            p.filter.SetFilterType(audio.FilterTypeLowPass)
-        case 1:
-            p.filter.SetFilterType(audio.FilterTypeHighPass)
-        case 2:
-            p.filter.SetFilterType(audio.FilterTypeBandPass)
-        case 3:
-            p.filter.SetFilterType(audio.FilterTypeNotch)
-        }
-    })
-}
-```
-
 #### Step 3: Framework-Based MIDI CC Integration
-```go
-// Use framework's remote controls system for MIDI CC mapping
-func (p *SynthPlugin) setupRemoteControls() {
-    // Create filter control page using framework builder
-    filterPage := controls.NewRemoteControlsPageBuilder(0, "Filter Controls").
-        AddControl(74, "Brightness", 7).     // CC74 -> Filter Cutoff
-        AddControl(71, "Harmonic Content", 8). // CC71 -> Filter Resonance
-        AddControl(76, "Sound Variation", 9).  // CC76 -> Filter Drive
-        AddControl(77, "Filter Env", 15).      // CC77 -> Filter Env Amount
-        Build()
-    
-    // Register the control page with the framework
-    p.RemoteControlsManager.AddPage(filterPage)
-}
-
-// Or use pre-built framework filter controls template
-func (p *SynthPlugin) setupFilterControlsTemplate() {
-    // Framework provides pre-built control pages for common use cases
-    filterPage := controls.FilterControlsPage(0, 7, 8, 9, 15).Build()
-    p.RemoteControlsManager.AddPage(filterPage)
-}
-```
+``
 
 #### Step 4: Framework Audio Processing Integration
-```go
-// Simplified audio processing using framework components
-func (p *SynthPlugin) Process(
-    audioIn *clap.AudioBuffer,
-    audioOut *clap.AudioBuffer,
-    framesCount uint32,
-    events *clap.InputEvents,
-    eventOut *clap.OutputEvents,
-) int {
-    // Use framework's MIDI processor for event handling
-    p.midiProcessor.ProcessEvents(events, framesCount)
-    
-    // Process audio through synthesis chain
-    output := p.oscillator.Process(framesCount)
-    
-    // Apply filter using framework's StateVariableFilter
-    drive := p.filterDrive.Load()
-    if drive > 0 {
-        // Apply drive/distortion using framework DSP utilities
-        for i := range output {
-            output[i] = audio.SoftClip(output[i] * (1.0 + drive*4.0))
-        }
-    }
-    
-    // Process through filter - framework handles all the details
-    p.filter.ProcessBuffer(output)
-    
-    // Use framework's stereo output utilities
-    volume := p.volumeParam.Load()
-    audio.CopyToStereoOutput(output, audioOut, volume)
-    
-    return process.ProcessContinue
-}
-```
+``
 
 #### Step 5: Automatic State Persistence (Framework Handles This)
-```go
-// Framework automatically handles parameter state persistence
-// No manual state save/load code needed - parameters are automatically
-// saved and restored through the ParamManager system
-
-// Optional: Add custom state for non-parameter data only
-func (p *SynthPlugin) SaveState(stream *state.Stream) error {
-    // Framework automatically saves all registered parameters
-    // Only save custom state that's not covered by parameters
-    return p.ParamManager.SaveState(stream) // Framework method
-}
-
-func (p *SynthPlugin) LoadState(stream *state.Stream) error {
-    // Framework automatically loads and applies all parameters
-    return p.ParamManager.LoadState(stream) // Framework method
-}
-```
-
 **Framework-Based Implementation Checklist**:
 - [ ] Use `param.NewBuilder()` for all filter parameter definitions with proper modules, ranges, and formats
 - [ ] Register parameters using `ParamManager.RegisterAll()` for bulk registration
@@ -247,22 +79,6 @@ type TransportInfo struct {
 2. Use `hostpkg.TransportControl` methods directly
 3. Create a helper method to get transport state when needed
 
-**Example Implementation**:
-```go
-// Remove TransportInfo struct and transportInfo field from SynthPlugin
-
-// Add method to get current transport state
-func (p *SynthPlugin) getCurrentTransportState() (isPlaying bool, tempo float64) {
-    if p.transportControl != nil {
-        // Use transport control methods to get current state
-        // This would require the transport control to expose state getters
-    }
-    return false, 120.0 // defaults
-}
-```
-
-**Benefits**: Shows direct use of host extensions without intermediate structures
-
 ### 2. Full Note Port Management
 **Current Implementation**: Basic note port creation (lines 162-163)
 
@@ -270,25 +86,6 @@ func (p *SynthPlugin) getCurrentTransportState() (isPlaying bool, tempo float64)
 1. Implement the full `audio.PortProvider` interface
 2. Use `audio.NotePortBuilder` for more complex port configurations
 3. Support dynamic port creation/removal
-
-**Example Implementation**:
-```go
-// In NewSynthPlugin, replace simple port creation with builder
-notePort := audio.NewNotePortBuilder(0, "Note Input").
-    WithSupportedDialects(audio.DialectCLAP | audio.DialectMIDI).
-    WithPreferredDialect(audio.DialectCLAP).
-    Build()
-
-p.notePortManager.AddInputPort(notePort)
-
-// Implement port info provider interface
-func (p *SynthPlugin) GetAudioPortsInfo() []audio.PortInfo {
-    return p.notePortManager.GetPortsInfo()
-}
-```
-
-**Benefits**: Demonstrates the builder pattern and full port configuration
-
 ### 3. Audio Port Configuration with StereoPortProvider
 **Current Implementation**: Manual channel handling in Process method
 
@@ -296,38 +93,6 @@ func (p *SynthPlugin) GetAudioPortsInfo() []audio.PortInfo {
 1. Embed `*audio.StereoPortProvider` in SynthPlugin
 2. Implement the `audio.PortProvider` interface
 3. Use automatic channel routing
-
-**Example Implementation**:
-```go
-type SynthPlugin struct {
-    *plugin.PluginBase
-    *audio.StereoPortProvider  // Add this embedding
-    // ... other fields
-}
-
-// In constructor
-plugin.StereoPortProvider = audio.NewStereoPortProvider("Main Output")
-
-// Implement the interface
-func (p *SynthPlugin) GetAudioPorts(isInput bool) []audio.PortInfo {
-    return p.StereoPortProvider.GetAudioPorts(isInput)
-}
-
-// In Process method, use the provider's channel mapping
-func (p *SynthPlugin) Process(...) int {
-    // Get output configuration from provider
-    outputs := p.StereoPortProvider.GetOutputChannels(audioOut)
-    
-    // Process and write to the mapped channels
-    output := p.oscillator.Process(framesCount)
-    p.StereoPortProvider.WriteOutput(outputs, output, volume)
-    
-    return process.ProcessContinue
-}
-```
-
-**Benefits**: Shows proper audio port abstraction and automatic channel management
-
 ### 4. Active Filter Implementation
 **Current Implementation**: Filter created but not used; brightness handled in oscillator
 
@@ -335,33 +100,6 @@ func (p *SynthPlugin) Process(...) int {
 1. Add a filter cutoff parameter
 2. Process oscillator output through the filter
 3. Implement filter modulation via MIDI CC74
-
-**Example Implementation**:
-```go
-// Add filter parameters in constructor
-plugin.ParamManager.Register(param.Cutoff(7, "Filter Cutoff"))
-plugin.filterCutoff = param.NewAtomicFloat64(5000.0) // 5kHz default
-
-// In MIDI processor callbacks, add CC74 handling
-func(channel int16, cc uint32, value float64) {
-    switch cc {
-    case 74: // Filter cutoff CC
-        cutoff := 20.0 + (value * 19980.0) // 20Hz to 20kHz
-        p.filterCutoff.UpdateWithManager(cutoff, p.ParamManager, 7)
-        p.filter.SetCutoff(cutoff)
-    }
-}
-
-// In Process method, apply filter to oscillator output
-output := p.oscillator.Process(framesCount)
-
-// Apply filter to the mixed output
-cutoff := p.filterCutoff.Load()
-p.filter.SetCutoff(cutoff)
-for i := range output {
-    output[i] = float32(p.filter.Process(float64(output[i])))
-}
-```
 
 **Benefits**: Demonstrates real-time DSP parameter control and audio processing
 
@@ -374,39 +112,6 @@ for i := range output {
 3. Implement per-voice filter modulation
 
 **Example Implementation**:
-```go
-// Replace oscillator with SynthVoiceProcessor
-synthProcessor *audio.SynthVoiceProcessor
-
-// In constructor
-plugin.synthProcessor = audio.NewSynthVoiceProcessor(voiceManager, 44100)
-
-// Add filter envelope parameters
-plugin.ParamManager.Register(param.ADSR(8, "Filter Attack", 2.0))
-plugin.ParamManager.Register(param.ADSR(9, "Filter Decay", 2.0))
-plugin.ParamManager.Register(param.Percentage(10, "Filter Sustain", 50.0))
-plugin.ParamManager.Register(param.ADSR(11, "Filter Release", 3.0))
-plugin.ParamManager.Register(param.Percentage(12, "Filter Env Amount", 50.0))
-
-// Configure processor in Process
-p.synthProcessor.SetFilterParameters(
-    p.filterCutoff.Load(),
-    1.0, // resonance
-    p.filterEnvAmount.Load() / 100.0,
-)
-
-// Set filter envelope
-p.synthProcessor.filterEnvelope.SetADSR(
-    p.filterAttack.Load(),
-    p.filterDecay.Load(),
-    p.filterSustain.Load(),
-    p.filterRelease.Load(),
-)
-
-// Process audio
-output := p.synthProcessor.Process(framesCount)
-```
-
 **Benefits**: Shows advanced synthesis features with dual envelopes and filter modulation
 
 ## Implementation Order for Remaining Items
