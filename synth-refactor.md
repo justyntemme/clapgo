@@ -1,202 +1,229 @@
 # Synth Plugin Refactor Implementation Strategy
 
-## Overview
+## Detailed Implementation Guide: Replacing Internal Code with pkg/ Library Functions
 
-This document provides a comprehensive strategy to refactor the synth plugin from **1781 lines** to approximately **400-500 lines** by extracting reusable components to the ClapGo framework and utilizing existing domain-specific packages.
+This guide documents every instance where the synth plugin reimplements functionality that already exists in the pkg/ library. Following the guardrails principle of avoiding code duplication, we will systematically replace internal implementations with framework components.
 
-## Current State Analysis
+### Current State Analysis
+- **Total Lines**: 1781 (main.go: 961, exports.go: 623, constants.go: 19)
+- **Target Lines**: ~450 lines
+- **Primary Issue**: Massive code duplication where pkg/ functions already exist
 
-**File**: `examples/synth/main.go`  
-**Current Lines**: 1781  
-**Target Lines**: 400-500  
-**Reduction Goal**: ~70-75%
+## Comprehensive List of Internal Implementations to Replace
 
-### Key Components to Extract to Framework
-
-1. **ADSR Envelope Implementation** - Custom envelope code that duplicates framework
-2. **Polyphonic Parameter Modulation** - Per-voice parameter overrides
-
-## Detailed Refactoring Strategy
-
-### Phase 1: Simplify Plugin Structure
-
-**Current Plugin Structure** (Lines ~686-720):
+### 1. Voice Structure (Lines 53-74 in main.go)
+**Current**: Custom Voice struct with manual field management
 ```go
-type SynthPlugin struct {
-    // Many individual fields
+type Voice struct {
+    NoteID   int32
+    Channel  int16
+    Key      int16
+    Velocity float64
+    Phase    float64
+    IsActive bool
+    // ... more fields
 }
 ```
+**Replace with**: `audio.Voice` from `pkg/audio/voice.go`
+- Already includes all voice fields
+- Built-in modulation parameters
+- Proper envelope integration
+**Lines saved**: ~22
 
-**Target Structure**:
+### 2. ADSR Envelope (Lines 347-405, 619, 764-770 in main.go)
+**Current**: Manual envelope management in multiple places
+- Creating envelope: `audio.NewADSREnvelope()` but not using `audio.ADSREnvelope` properly
+- Manual envelope processing in `getEnvelopeValue()`
+- Redundant envelope state checks
+**Replace with**: Proper use of `audio.ADSREnvelope` from `pkg/audio/envelope.go`
+- Use `envelope.Process()` directly
+- Remove `getEnvelopeValue()` function entirely
+**Lines saved**: ~70
+
+### 3. Voice Management (Lines 729-761 in main.go)
+**Current**: Manual voice allocation with `findFreeVoice()` function
+**Replace with**: `audio.VoiceManager` from `pkg/audio/voice.go`
+- Has built-in voice allocation
+- Automatic voice stealing
+- Cleaner API: `vm.AllocateVoice()`, `vm.ReleaseVoice()`
+**Lines saved**: ~33
+
+### 4. Waveform Generation (Line 349 in main.go)
+**Current**: Using `audio.GenerateWaveformSample()` but could use higher-level components
+**Replace with**: `audio.PolyphonicOscillator` from `pkg/audio/synth.go`
+- Handles multiple voices automatically
+- Built-in anti-aliasing
+- Simpler API
+**Lines saved**: ~50 in process loop
+
+### 5. MIDI Event Processing (Lines 708-727 in main.go)
+**Current**: Manual MIDI parsing with `event.ProcessStandardMIDI()`
+**Replace with**: `audio.MIDIProcessor` from `pkg/audio/midi.go`
+- Complete MIDI handling
+- Automatic note/CC routing
+- Built-in pitch bend handling
+**Lines saved**: ~20
+
+### 6. Note Frequency Calculation (Lines 331-342 in main.go)
+**Current**: Manual frequency calculation with tuning
+```go
+baseFreq := audio.NoteToFrequency(int(voice.Key))
+if p.tuning != nil && voice.TuningID != 0 {
+    baseFreq = p.tuning.ApplyTuning(...)
+}
+freq := baseFreq * math.Pow(2.0, voice.PitchBend/12.0)
+```
+**Replace with**: Built-in pitch processing in `audio.Voice`
+**Lines saved**: ~12
+
+### 7. Parameter Atomic Operations (Lines 143-149, 302-308, 529-546 in main.go)
+**Current**: Manual atomic storage with helper functions
+```go
+atomic.StoreInt64(&plugin.volume, int64(util.AtomicFloat64ToBits(0.7)))
+volume := param.LoadParameterAtomic(&p.volume)
+```
+**Replace with**: `param.AtomicParam` from `pkg/param/atomic.go`
+- Cleaner API
+- Type-safe operations
+**Lines saved**: ~30
+
+### 8. Audio Buffer Management (Lines 310-323, 374-387 in main.go)
+**Current**: Manual buffer clearing and mixing
+```go
+for ch := 0; ch < numChannels; ch++ {
+    for i := uint32(0); i < framesCount; i++ {
+        outChannel[i] = 0.0
+    }
+}
+```
+**Replace with**: `audio.Buffer` utilities from `pkg/audio/buffer.go`
+- `audio.ClearBuffer()`
+- `audio.MixToStereoOutput()`
+**Lines saved**: ~25
+
+### 9. Transport Info Structure (Lines 106-118 in main.go)
+**Current**: Custom TransportInfo struct
+**Replace with**: Use host transport directly via `hostpkg.TransportControl`
+**Lines saved**: ~13
+
+### 10. Event Processing (Lines 409-416, 509-515 in main.go)
+**Current**: Wrapper functions around event processor
+**Replace with**: Direct use of `event.EventProcessor`
+**Lines saved**: ~15
+
+### 11. State Management (Lines 812-845 in exports.go)
+**Current**: Manual state serialization with JSON
+**Replace with**: `state.Manager` with automatic serialization
+**Lines saved**: ~35
+
+### 12. Note Port Management (Lines 162-163, 773-776 in main.go)
+**Current**: Creating ports but not fully utilizing manager
+**Replace with**: Full use of `audio.NotePortManager` features
+**Lines saved**: ~10
+
+### 13. Audio Port Configuration (Implied in Process)
+**Current**: Manual channel handling
+**Replace with**: `audio.StereoPortProvider` from `pkg/audio/ports.go`
+- Automatic port configuration
+- Built-in channel mapping
+**Lines saved**: ~20
+
+### 14. Filter Implementation (Lines 353-357 in main.go)
+**Current**: Pseudo-brightness filter
+```go
+if voice.Brightness > 0.0 && voice.Brightness < 1.0 {
+    sample *= (voice.Brightness*0.7 + 0.3)
+}
+```
+**Replace with**: `audio.SimpleLowPassFilter` from `pkg/audio/synth.go`
+**Lines saved**: ~5
+
+### 15. Complete Voice Processing Chain
+**Current**: Manual synthesis in process loop (lines 326-405)
+**Replace with**: `audio.SynthVoiceProcessor` from `pkg/audio/synth.go`
+- Complete voice with oscillator + filter
+- Integrated envelope
+- Cleaner processing
+**Lines saved**: ~80
+
+## Summary of Replacements
+
+| Component | Current Lines | Framework Component | Lines Saved |
+|-----------|--------------|-------------------|-------------|
+| Voice struct | 22 | audio.Voice | 22 |
+| ADSR envelope | 70 | audio.ADSREnvelope | 70 |
+| Voice management | 33 | audio.VoiceManager | 33 |
+| Waveform generation | 50 | audio.PolyphonicOscillator | 50 |
+| MIDI processing | 20 | audio.MIDIProcessor | 20 |
+| Frequency calculation | 12 | Built-in voice pitch | 12 |
+| Atomic parameters | 30 | param.AtomicParam | 30 |
+| Buffer management | 25 | audio.Buffer utils | 25 |
+| Transport info | 13 | Direct host usage | 13 |
+| Event processing | 15 | Direct processor use | 15 |
+| State management | 35 | state.Manager | 35 |
+| Note ports | 10 | Full manager usage | 10 |
+| Audio ports | 20 | audio.StereoPortProvider | 20 |
+| Filter | 5 | audio.SimpleLowPassFilter | 5 |
+| Voice processing | 80 | audio.SynthVoiceProcessor | 80 |
+| **Total** | **440** | | **440** |
+
+## Implementation Order
+
+1. **Replace Voice Management System** (Priority: HIGH)
+   - Switch to `audio.VoiceManager`
+   - Use `audio.Voice` struct
+   - Remove manual allocation logic
+
+2. **Replace Audio Processing Chain** (Priority: HIGH)
+   - Use `audio.SynthVoiceProcessor` or `audio.PolyphonicOscillator`
+   - Remove manual synthesis loop
+   - Integrate proper filtering
+
+3. **Simplify Parameter Management** (Priority: MEDIUM)
+   - Switch to `param.AtomicParam`
+   - Use parameter builders
+   - Remove manual atomic operations
+
+4. **Streamline MIDI Processing** (Priority: MEDIUM)
+   - Implement `audio.MIDIProcessor`
+   - Remove manual MIDI parsing
+   - Automatic event routing
+
+5. **Clean Up State Management** (Priority: LOW)
+   - Use framework state utilities
+   - Remove custom serialization
+   - Automatic parameter state
+
+## Final Plugin Structure Vision
+
 ```go
 type SynthPlugin struct {
     *plugin.PluginBase
     *audio.StereoPortProvider
-    event.NoOpHandler
     
-    // Synth-specific components
-    voiceManager  *audio.VoiceManager
-    midiProcessor *audio.MIDIProcessor
-    oscillator    *audio.PolyphonicOscillator
-    filter        *audio.SimpleLowPassFilter
+    synth *audio.PolyphonicOscillator
+    midi  *audio.MIDIProcessor
     
-    // Parameters (atomic for thread safety)
-    volume    atomic.Value // float64
-    waveform  atomic.Value // int
-    attack    atomic.Value // float64
-    decay     atomic.Value // float64
-    sustain   atomic.Value // float64
-    release   atomic.Value // float64
+    // Parameters using AtomicParam
+    volume   *param.AtomicParam
+    waveform *param.AtomicParam
+    envelope *param.EnvelopeParams
 }
-```
 
-### Phase 2: Simplify Process Method
-
-**Current**: Lines ~901-1024 complex processing logic
-**Target**: Clean, readable process method
-
-```go
-func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, 
-    audioIn, audioOut [][]float32, events *event.Processor) int {
-    
-    if !p.IsActivated || !p.IsProcessing {
-        return process.ProcessError
-    }
-    
-    // Process MIDI events
-    if events != nil {
-        p.midiProcessor.ProcessEvents(events)
-    }
-    
-    // Generate audio from all voices
-    samples := p.oscillator.Process(framesCount)
-    
-    // Apply filter if needed
-    for i := range samples {
-        samples[i] = float32(p.filter.Process(float64(samples[i])))
-    }
-    
-    // Apply master volume and copy to outputs
-    volume := p.volume.Load().(float64)
-    audio.CopyToStereoOutput(samples, audioOut, float32(volume))
-    
+// Process method reduced to ~40 lines
+func (p *SynthPlugin) Process(...) int {
+    p.midi.ProcessEvents(events)
+    samples := p.synth.Process(framesCount)
+    audio.CopyToStereoOutput(samples, audioOut, p.volume.Get())
     return process.ProcessContinue
 }
 ```
 
-**Savings**: ~100 lines
+## Key Principle Violations Being Fixed
 
-### Phase 3: Remove Redundant Methods
+1. **Code Duplication**: Every manual implementation duplicates pkg/ functionality
+2. **Framework Underutilization**: Not using the rich framework we've built
+3. **Complexity**: Manual implementations are more error-prone than tested framework code
+4. **Maintainability**: Changes need to be made in multiple places vs. one framework location
 
-**Methods to Remove/Simplify**:
-- GetAvailablePresets (not used)
-- Complex timer support (if not needed)
-- Manual thread checking
-- Verbose logging throughout
-- Duplicate waveform generation code (use framework)
-
-**Savings**: ~200 lines
-
-### Phase 4: Use Builder Pattern for Parameters
-
-**Current**: Manual parameter registration
-**Target**: Use parameter builder from framework
-
-```go
-func NewSynthPlugin() *SynthPlugin {
-    p := &SynthPlugin{
-        PluginBase: plugin.NewPluginBase(pluginInfo),
-        voiceManager: audio.NewVoiceManager(16, 44100),
-    }
-    
-    // Use builder pattern for parameters
-    p.ParamManager.Register(
-        param.Volume(ParamVolume, "Volume"),
-        param.Choice(ParamWaveform, "Waveform").
-            WithOptions("Sine", "Saw", "Square"),
-        param.Time(ParamAttack, "Attack").
-            WithRange(0.001, 5.0).
-            WithDefault(0.01),
-        param.Time(ParamDecay, "Decay").
-            WithRange(0.001, 5.0).
-            WithDefault(0.1),
-        param.Percent(ParamSustain, "Sustain").
-            WithDefault(0.7),
-        param.Time(ParamRelease, "Release").
-            WithRange(0.001, 10.0).
-            WithDefault(0.3),
-    )
-    
-    return p
-}
-```
-
-## Implementation Order
-
-1. **Phase 1**: Simplify plugin structure (~30 mins)
-2. **Phase 2**: Simplify process method (~30 mins)
-3. **Phase 3**: Remove redundant code (~30 mins)
-4. **Phase 4**: Use parameter builders (~30 mins)
-
-## Expected Results
-
-**Before**: 1781 lines  
-**After**: ~450 lines  
-**Reduction**: 1331 lines (75%)
-
-**Code Distribution**:
-- Imports/package: 20 lines
-- Constants: 30 lines
-- Plugin struct: 25 lines
-- Constructor: 30 lines
-- Process method: 40 lines
-- Event handling: 50 lines
-- State management: 30 lines
-- Extension support: 50 lines
-- Exports (separate file): 150 lines
-- Misc/glue: 25 lines
-- **Total**: ~450 lines
-
-## Framework Additions Needed
-
-All required framework additions have been completed. The framework now includes:
-- Voice management system
-- MIDI event processing
-- Synth-specific DSP utilities
-- Basic audio filters
-
-## Benefits Already Available to Developers
-
-1. **Voice Management**: No need to implement voice allocation/stealing
-2. **MIDI Processing**: Standard MIDI event handling out of the box
-3. **DSP Building Blocks**: Oscillators, filters, envelopes ready to use
-4. **No Preset Complexity**: DAWs handle preset management
-5. **Thread Safety**: Built-in atomic parameter handling
-6. **Polyphonic Modulation**: Per-voice parameter system included
-
-## Remaining Benefits to Implement
-
-1. **Parameter Builders**: Fluent API for common parameter types
-
-## Success Metrics
-
-1. `make install` succeeds
-2. `clap-validator` passes all tests
-3. Synth remains fully functional
-4. Code is more readable and maintainable
-5. Framework additions are reusable for other instruments
-6. Example clearly shows how to build a synth with ClapGo
-
-## Go Idioms to Apply
-
-1. **Composition over Inheritance**: Use embedded structs effectively
-2. **Interface Segregation**: Small, focused interfaces for components
-3. **Error Handling**: Proper error propagation, not silent failures
-4. **Concurrency**: Use atomic operations and channels appropriately
-5. **Builder Pattern**: For complex object construction
-6. **Functional Options**: For extensible APIs
-7. **Package Organization**: Domain-driven, not utility-driven
-
----
-
-**Note**: Line numbers are relative positions to maintain accuracy as the file shrinks during refactoring.
+By following this guide, the synth plugin will be transformed from a bloated 1781-line example into a clean ~450-line demonstration of how to properly use the ClapGo framework.
