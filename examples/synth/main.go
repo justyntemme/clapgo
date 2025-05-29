@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/extension"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
@@ -57,7 +58,7 @@ type SynthPlugin struct {
 	// Audio processing components
 	voiceManager   *audio.VoiceManager
 	oscillator     *audio.PolyphonicOscillator
-	filter         *audio.SimpleLowPassFilter
+	filter         *audio.StateVariableFilter
 	midiProcessor  *audio.MIDIProcessor
 
 	// Parameters with atomic storage for thread safety
@@ -68,11 +69,20 @@ type SynthPlugin struct {
 	sustain  *param.AtomicFloat64
 	release  *param.AtomicFloat64
 
+	// Filter parameters
+	filterCutoff    *param.AtomicFloat64
+	filterResonance *param.AtomicFloat64
+	filterDrive     *param.AtomicFloat64
+	filterType      *param.AtomicFloat64
+
 	// Transport state
 	transportInfo TransportInfo
 
 	// Note port management
 	notePortManager *audio.NotePortManager
+
+	// Remote controls management
+	remoteControlsManager *controls.RemoteControlsManager
 
 	// Host utilities (non-base specific)
 	transportControl *hostpkg.TransportControl
@@ -118,11 +128,12 @@ func NewSynthPlugin() *SynthPlugin {
 		transportInfo: TransportInfo{
 			Tempo: 120.0,
 		},
-		notePortManager: audio.NewNotePortManager(),
-		poolDiagnostics: &event.Diagnostics{},
-		voiceManager:    voiceManager,
-		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
-		filter:          audio.NewSimpleLowPassFilter(44100),
+		notePortManager:       audio.NewNotePortManager(),
+		remoteControlsManager: controls.NewRemoteControlsManager(nil), // Will be initialized in Init
+		poolDiagnostics:       &event.Diagnostics{},
+		voiceManager:          voiceManager,
+		oscillator:            audio.NewPolyphonicOscillator(voiceManager),
+		filter:                audio.NewStateVariableFilter(44100),
 	}
 	
 	// Create MIDI processor
@@ -136,20 +147,175 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.sustain = param.NewAtomicFloat64(0.7)   // 70%
 	plugin.release = param.NewAtomicFloat64(0.3)   // 300ms
 
-	// Register parameters using factory functions
-	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
-	plugin.ParamManager.Register(param.Choice(2, "Waveform", 3, 0))
+	// Initialize filter parameters using framework utilities
+	plugin.filterCutoff = param.NewAtomicFloat64(1000.0)
+	plugin.filterResonance = param.NewAtomicFloat64(1.0)
+	plugin.filterDrive = param.NewAtomicFloat64(0.0)
+	plugin.filterType = param.NewAtomicFloat64(0.0)
 
-	// Register ADSR parameters
-	plugin.ParamManager.Register(param.ADSR(3, "Attack", 2.0))         // Max 2 seconds
-	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))          // Max 2 seconds
-	plugin.ParamManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
-	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))        // Max 5 seconds
+	// Define all parameters using framework builders
+	allParams := []param.Info{
+		// Synth parameters
+		param.NewBuilder(1, "Volume").
+			Module("Main").
+			Range(0, 1, 0.7).
+			Format(param.FormatPercentage).
+			Automatable().
+			MustBuild(),
+		
+		param.NewBuilder(2, "Waveform").
+			Module("Oscillator").
+			Range(0, 2, 0).
+			Stepped().
+			Automatable().
+			MustBuild(),
+
+		// ADSR parameters
+		param.NewBuilder(3, "Attack").
+			Module("Envelope").
+			Range(0.001, 2.0, 0.01).
+			Format(param.FormatMilliseconds).
+			Automatable().
+			MustBuild(),
+
+		param.NewBuilder(4, "Decay").
+			Module("Envelope").
+			Range(0.001, 2.0, 0.1).
+			Format(param.FormatMilliseconds).
+			Automatable().
+			MustBuild(),
+
+		param.NewBuilder(5, "Sustain").
+			Module("Envelope").
+			Range(0, 1, 0.7).
+			Format(param.FormatPercentage).
+			Automatable().
+			MustBuild(),
+
+		param.NewBuilder(6, "Release").
+			Module("Envelope").
+			Range(0.001, 5.0, 0.3).
+			Format(param.FormatMilliseconds).
+			Automatable().
+			MustBuild(),
+
+		// Filter parameters - expose to DAW
+		param.NewBuilder(7, "Cutoff").
+			Module("Filter").
+			Range(20, 20000, 1000).
+			Format(param.FormatHertz).
+			Automatable().
+			Modulatable().
+			MustBuild(),
+			
+		param.NewBuilder(8, "Resonance").
+			Module("Filter").
+			Range(0.5, 20, 1).
+			Automatable().
+			Modulatable().
+			MustBuild(),
+			
+		param.NewBuilder(9, "Drive").
+			Module("Filter").
+			Range(0, 100, 0).
+			Format(param.FormatPercentage).
+			Automatable().
+			MustBuild(),
+			
+		param.NewBuilder(10, "Type").
+			Module("Filter").
+			Range(0, 3, 0).
+			Stepped().
+			Automatable().
+			MustBuild(),
+	}
+
+	// Register all parameters at once using framework
+	plugin.ParamManager.RegisterAll(allParams...)
+
+	// Set up parameter change handling
+	plugin.setupParameterHandling()
 
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
 
 	return plugin
+}
+
+// setupParameterHandling configures automatic parameter change handling
+func (p *SynthPlugin) setupParameterHandling() {
+	// Add a global parameter change listener
+	p.ParamManager.AddListener(func(paramID uint32, oldValue, newValue float64) {
+		// Handle parameter changes based on ID
+		switch paramID {
+		case 1: // Volume
+			p.volume.Store(newValue)
+		case 2: // Waveform
+			p.waveform.Store(newValue)
+		case 3: // Attack
+			p.attack.Store(newValue)
+		case 4: // Decay
+			p.decay.Store(newValue)
+		case 5: // Sustain
+			p.sustain.Store(newValue)
+		case 6: // Release
+			p.release.Store(newValue)
+		case 7: // Filter Cutoff
+			p.filterCutoff.Store(newValue)
+			if p.filter != nil {
+				p.filter.SetFrequency(newValue)
+			}
+		case 8: // Filter Resonance
+			p.filterResonance.Store(newValue)
+			if p.filter != nil {
+				p.filter.SetResonance(newValue)
+			}
+		case 9: // Filter Drive
+			driveAmount := newValue / 100.0 // Convert percentage to 0-1
+			p.filterDrive.Store(driveAmount)
+		case 10: // Filter Type
+			p.filterType.Store(newValue)
+		}
+	})
+}
+
+// setupRemoteControls configures MIDI CC mapping using framework
+func (p *SynthPlugin) setupRemoteControls() {
+	if p.Host == nil {
+		return
+	}
+
+	// Reinitialize remote controls manager with host
+	p.remoteControlsManager = controls.NewRemoteControlsManager(unsafe.Pointer(p.Host))
+
+	// Create filter control page using framework builder
+	filterPage := controls.NewRemoteControlsPageBuilder(0, "Filter Controls").
+		Section("Filter").
+		SetParameter(0, 7).  // CC74 -> Filter Cutoff (Brightness)
+		SetParameter(1, 8).  // CC71 -> Filter Resonance (Harmonic Content) 
+		SetParameter(2, 9).  // CC76 -> Filter Drive (Sound Variation)
+		SetParameter(3, 10). // CC77 -> Filter Type
+		MustBuild()
+
+	// Add the filter control page
+	p.remoteControlsManager.AddPage(filterPage)
+
+	// Create main controls page
+	mainPage := controls.NewRemoteControlsPageBuilder(1, "Main Controls").
+		Section("Main").
+		SetParameter(0, 1). // Volume
+		SetParameter(1, 2). // Waveform
+		SetParameter(2, 3). // Attack
+		SetParameter(3, 4). // Decay
+		SetParameter(4, 5). // Sustain
+		SetParameter(5, 6). // Release
+		MustBuild()
+
+	// Add the main control page
+	p.remoteControlsManager.AddPage(mainPage)
+
+	// Notify host that pages are available
+	p.remoteControlsManager.NotifyChanged()
 }
 
 // Init initializes the plugin
@@ -218,6 +384,9 @@ func (p *SynthPlugin) Init() bool {
 		nil, // onPolyPressure
 	)
 
+	// Set up remote controls for MIDI CC mapping
+	p.setupRemoteControls()
+
 	if p.Logger != nil {
 		p.Logger.Debug("Synth plugin initialized")
 	}
@@ -257,7 +426,11 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 
 	// Update voice manager and filter sample rate
 	p.voiceManager.SetSampleRate(sampleRate)
-	p.filter = audio.NewSimpleLowPassFilter(sampleRate)
+	p.filter = audio.NewStateVariableFilter(sampleRate)
+	
+	// Initialize filter with current parameter values
+	p.filter.SetFrequency(p.filterCutoff.Load())
+	p.filter.SetResonance(p.filterResonance.Load())
 
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
@@ -315,6 +488,12 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	decay := p.decay.Load()
 	sustain := p.sustain.Load()
 	release := p.release.Load()
+	
+	// Get filter parameters
+	filterCutoff := p.filterCutoff.Load()
+	filterResonance := p.filterResonance.Load()
+	filterDrive := p.filterDrive.Load()
+	filterType := p.filterType.Load()
 
 	// Update envelope parameters for all voices
 	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
@@ -338,11 +517,39 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	// Generate audio using PolyphonicOscillator
 	output := p.oscillator.Process(framesCount)
 
-	// Apply filter if needed (brightness control)
-	// The PolyphonicOscillator already applies brightness, but we can add extra filtering
-	// p.filter.ProcessBuffer(output)
+	// Apply filter processing using framework's StateVariableFilter
+	if p.filter != nil {
+		// Update filter parameters
+		p.filter.SetFrequency(filterCutoff)
+		p.filter.SetResonance(filterResonance)
+		
+		// Apply drive/distortion using framework DSP utilities
+		if filterDrive > 0 {
+			for i := range output {
+				// Apply drive
+				driven := output[i] * float32(1.0 + filterDrive*4.0)
+				// Use framework's soft clipping
+				output[i] = float32(math.Tanh(float64(driven)))
+			}
+		}
+		
+		// Process through filter based on filter type
+		for i := range output {
+			lp, hp, bp, notch := p.filter.Process(float64(output[i]))
+			switch int(filterType) {
+			case 0: // Low Pass
+				output[i] = float32(lp)
+			case 1: // High Pass
+				output[i] = float32(hp)
+			case 2: // Band Pass
+				output[i] = float32(bp)
+			case 3: // Notch
+				output[i] = float32(notch)
+			}
+		}
+	}
 
-	// Apply master volume and copy to all output channels
+	// Apply master volume and copy to all output channels using framework pattern
 	numChannels := len(audioOut)
 	for ch := 0; ch < numChannels; ch++ {
 		for i := uint32(0); i < framesCount && i < uint32(len(output)); i++ {
@@ -403,6 +610,25 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 		text = param.FormatValue(value, param.FormatMilliseconds)
 	case 5: // Sustain
 		text = param.FormatValue(value, param.FormatPercentage)
+	case 7: // Filter Cutoff
+		text = param.FormatValue(value, param.FormatHertz)
+	case 8: // Filter Resonance
+		text = fmt.Sprintf("%.1f", value)
+	case 9: // Filter Drive
+		text = param.FormatValue(value, param.FormatPercentage)
+	case 10: // Filter Type
+		switch int(math.Round(value)) {
+		case 0:
+			text = "Low Pass"
+		case 1:
+			text = "High Pass"
+		case 2:
+			text = "Band Pass"
+		case 3:
+			text = "Notch"
+		default:
+			text = "Unknown"
+		}
 	default:
 		// Use base implementation for unknown parameters
 		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
@@ -459,6 +685,39 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 		parser := param.NewParser(param.FormatPercentage)
 		if parsedValue, err := parser.ParseValue(text); err == nil {
 			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
+			return true
+		}
+	case 7: // Filter Cutoff (Hz)
+		parser := param.NewParser(param.FormatHertz)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 20.0, 20000.0)
+			return true
+		}
+	case 8: // Filter Resonance
+		var parsedValue float64
+		if _, err := fmt.Sscanf(text, "%f", &parsedValue); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.5, 20.0)
+			return true
+		}
+	case 9: // Filter Drive (percentage)
+		parser := param.NewParser(param.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 100.0)
+			return true
+		}
+	case 10: // Filter Type
+		switch text {
+		case "Low Pass":
+			*(*float64)(value) = 0.0
+			return true
+		case "High Pass":
+			*(*float64)(value) = 1.0
+			return true
+		case "Band Pass":
+			*(*float64)(value) = 2.0
+			return true
+		case "Notch":
+			*(*float64)(value) = 3.0
 			return true
 		}
 	}
