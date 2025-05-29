@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/audio"
+	"github.com/justyntemme/clapgo/pkg/controls"
 	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/extension"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
@@ -57,16 +58,21 @@ type SynthPlugin struct {
 	// Audio processing components
 	voiceManager   *audio.VoiceManager
 	oscillator     *audio.PolyphonicOscillator
-	filter         *audio.SimpleLowPassFilter
+	filter         *audio.StateVariableFilter
 	midiProcessor  *audio.MIDIProcessor
 
 	// Parameters with atomic storage for thread safety
-	volume   *param.AtomicFloat64
-	waveform *param.AtomicFloat64
-	attack   *param.AtomicFloat64
-	decay    *param.AtomicFloat64
-	sustain  *param.AtomicFloat64
-	release  *param.AtomicFloat64
+	volume     *param.AtomicFloat64
+	waveform   *param.AtomicFloat64
+	attack     *param.AtomicFloat64
+	decay      *param.AtomicFloat64
+	sustain    *param.AtomicFloat64
+	release    *param.AtomicFloat64
+	cutoff     *param.AtomicFloat64
+	resonance  *param.AtomicFloat64
+	
+	// Debug counter for periodic logging
+	debugFrameCounter uint64
 
 	// Transport state
 	transportInfo TransportInfo
@@ -122,7 +128,7 @@ func NewSynthPlugin() *SynthPlugin {
 		poolDiagnostics: &event.Diagnostics{},
 		voiceManager:    voiceManager,
 		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
-		filter:          audio.NewSimpleLowPassFilter(44100),
+		filter:          audio.NewStateVariableFilter(44100),
 	}
 	
 	// Create MIDI processor
@@ -135,6 +141,8 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.decay = param.NewAtomicFloat64(0.1)     // 100ms
 	plugin.sustain = param.NewAtomicFloat64(0.7)   // 70%
 	plugin.release = param.NewAtomicFloat64(0.3)   // 300ms
+	plugin.cutoff = param.NewAtomicFloat64(1000.0) // 1kHz default
+	plugin.resonance = param.NewAtomicFloat64(0.5) // 50% resonance
 
 	// Register parameters using factory functions
 	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
@@ -145,6 +153,10 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))          // Max 2 seconds
 	plugin.ParamManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
 	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))        // Max 5 seconds
+	
+	// Register filter parameters
+	plugin.ParamManager.Register(param.Cutoff(7, "Filter Cutoff"))   // 20Hz-20kHz
+	plugin.ParamManager.Register(param.Resonance(8, "Filter Resonance")) // 0-1
 
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
@@ -207,11 +219,19 @@ func (p *SynthPlugin) Init() bool {
 			}
 		},
 		nil, // onNoteOff
-		// onModulation - handle CC7 volume changes
+		// onModulation - handle CC7 volume and CC74 filter cutoff changes
 		func(channel int16, cc uint32, value float64) {
-			if cc == 7 { // Volume CC
+			switch cc {
+			case 7: // Volume CC
 				// Update the master volume parameter
 				p.volume.UpdateWithManager(value, p.ParamManager, 1)
+			case 74: // Filter cutoff CC (commonly used for brightness)
+				// Map CC value (0-1) to filter range (20Hz-20kHz)
+				// Using exponential mapping for better musical response
+				minFreq := 20.0
+				maxFreq := 20000.0
+				cutoffValue := minFreq * math.Pow(maxFreq/minFreq, value)
+				p.cutoff.UpdateWithManager(cutoffValue, p.ParamManager, 7)
 			}
 		},
 		nil, // onPitchBend
@@ -257,7 +277,8 @@ func (p *SynthPlugin) Activate(sampleRate float64, minFrames, maxFrames uint32) 
 
 	// Update voice manager and filter sample rate
 	p.voiceManager.SetSampleRate(sampleRate)
-	p.filter = audio.NewSimpleLowPassFilter(sampleRate)
+	p.filter = audio.NewStateVariableFilter(sampleRate)
+	p.filter.Reset() // Ensure clean state
 
 	if p.Logger != nil {
 		p.Logger.Info(fmt.Sprintf("Synth activated at %.0f Hz, buffer size %d-%d", sampleRate, minFrames, maxFrames))
@@ -315,6 +336,8 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	decay := p.decay.Load()
 	sustain := p.sustain.Load()
 	release := p.release.Load()
+	cutoff := p.cutoff.Load()
+	resonance := p.resonance.Load()
 
 	// Update envelope parameters for all voices
 	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
@@ -334,13 +357,43 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 
 	// Set oscillator waveform
 	p.oscillator.SetWaveform(audio.WaveformType(waveform))
+	
+	// Update filter parameters with safety checks
+	// Ensure cutoff is in valid range
+	if cutoff < 20.0 || cutoff > 20000.0 {
+		if p.Logger != nil {
+			p.Logger.Warning(fmt.Sprintf("Invalid cutoff frequency: %.1f Hz, clamping to range", cutoff))
+		}
+		cutoff = audio.Clamp(cutoff, 20.0, 20000.0)
+	}
+	p.filter.SetFrequency(cutoff)
+	
+	// Map resonance from 0-1 to Q factor 0.5-20
+	qFactor := 0.5 + resonance*19.5
+	p.filter.SetResonance(qFactor)
 
 	// Generate audio using PolyphonicOscillator
 	output := p.oscillator.Process(framesCount)
-
-	// Apply filter if needed (brightness control)
-	// The PolyphonicOscillator already applies brightness, but we can add extra filtering
-	// p.filter.ProcessBuffer(output)
+	
+	// Apply filter processing - process each sample through the state variable filter
+	
+	for i := range output {
+		preFilter := float64(output[i])
+		postFilter := p.filter.ProcessLowpass(preFilter)
+		
+		// Check for NaN or Inf
+		if math.IsNaN(postFilter) || math.IsInf(postFilter, 0) {
+			if p.Logger != nil {
+				p.Logger.Error(fmt.Sprintf("Filter produced invalid output: pre=%.4f, post=%v", preFilter, postFilter))
+			}
+			output[i] = 0 // Safety: zero out invalid samples
+			p.filter.Reset() // Reset filter state
+		} else {
+			output[i] = float32(postFilter)
+			
+		}
+	}
+	
 
 	// Apply master volume and copy to all output channels
 	numChannels := len(audioOut)
@@ -403,6 +456,10 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 		text = param.FormatValue(value, param.FormatMilliseconds)
 	case 5: // Sustain
 		text = param.FormatValue(value, param.FormatPercentage)
+	case 7: // Filter Cutoff
+		text = param.FormatValue(value, param.FormatHertz)
+	case 8: // Filter Resonance
+		text = param.FormatValue(value, param.FormatPercentage)
 	default:
 		// Use base implementation for unknown parameters
 		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
@@ -461,6 +518,18 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
 			return true
 		}
+	case 7: // Filter Cutoff (frequency)
+		parser := param.NewParser(param.FormatHertz)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 20.0, 20000.0)
+			return true
+		}
+	case 8: // Filter Resonance (percentage)
+		parser := param.NewParser(param.FormatPercentage)
+		if parsedValue, err := parser.ParseValue(text); err == nil {
+			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
+			return true
+		}
 	}
 
 	// Use base implementation for unknown parameters
@@ -499,6 +568,10 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 		p.sustain.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
 	case 6: // Release
 		p.release.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+	case 7: // Filter Cutoff
+		p.cutoff.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
+	case 8: // Filter Resonance
+		p.resonance.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
 	}
 }
 
@@ -694,6 +767,62 @@ func (p *SynthPlugin) GetVoiceInfo() extension.VoiceInfo {
 		VoiceCapacity: 16,                                              // Maximum polyphony
 		Flags:         extension.VoiceInfoFlagSupportsOverlappingNotes, // We support note IDs
 	}
+}
+
+// GetRemoteControlsPageCount returns the number of remote control pages
+func (p *SynthPlugin) GetRemoteControlsPageCount() uint32 {
+	return 2 // Main controls and Filter controls
+}
+
+// GetRemoteControlsPage returns the remote control page at the given index
+func (p *SynthPlugin) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteControlsPage, bool) {
+	switch pageIndex {
+	case 0:
+		// Main controls page with synth parameters
+		page := controls.NewRemoteControlsPageBuilder(0, "Main Controls").
+			Section("Synth").
+			AddParameters(
+				1, // Volume
+				2, // Waveform
+				3, // Attack
+				4, // Decay
+				5, // Sustain
+				6, // Release
+			).
+			ClearRemaining().
+			MustBuild()
+		return &page, true
+		
+	case 1:
+		// Filter controls page
+		page := controls.FilterControlsPage(1, 
+			7, // Cutoff
+			8, // Resonance
+			0, // No filter envelope amount in this synth
+			0, // No LFO in this synth
+		).
+			ClearRemaining().
+			MustBuild()
+		return &page, true
+		
+	default:
+		return nil, false
+	}
+}
+
+// findPeak returns the maximum absolute value in the buffer
+func findPeak(buffer []float32) float32 {
+	peak := float32(0.0)
+	for _, sample := range buffer {
+		abs := sample
+		if abs < 0 {
+			abs = -abs
+		}
+		if abs > peak {
+			peak = abs
+		}
+	}
+	return peak
 }
 
 func main() {

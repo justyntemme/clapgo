@@ -163,7 +163,8 @@ func NewStateVariableFilter(sampleRate float64) *StateVariableFilter {
 
 // SetFrequency sets the filter frequency in Hz
 func (f *StateVariableFilter) SetFrequency(freq float64) {
-	f.frequency = Clamp(freq, 20.0, f.sampleRate*0.49)
+	// Limit to 0.45 of Nyquist for stability (instead of 0.49)
+	f.frequency = Clamp(freq, 20.0, f.sampleRate*0.45)
 }
 
 // SetResonance sets the filter resonance (Q factor)
@@ -173,15 +174,36 @@ func (f *StateVariableFilter) SetResonance(q float64) {
 
 // Process runs one sample through the filter and returns all outputs
 func (f *StateVariableFilter) Process(input float64) (lowpass, highpass, bandpass, notch float64) {
-	// Calculate frequency and damping
-	freq := 2.0 * math.Sin(math.Pi * f.frequency / f.sampleRate)
-	damp := 1.0 / f.resonance
+	// Calculate frequency coefficient using the correct formula for SVF
+	// This is the frequency in normalized form (0 to 1)
+	w := f.frequency / f.sampleRate
 	
-	// Process
+	// For the SVF, we use this simpler, more stable coefficient
+	// This gives us the correct frequency response
+	freq := 2.0 * math.Sin(math.Pi * w)
+	
+	// Hard limit for stability - this prevents filter explosion
+	if freq > 1.5 {
+		freq = 1.5
+	}
+	
+	// Calculate damping (this controls resonance)
+	damp := 2.0 / f.resonance
+	
+	// Process - this is the standard SVF algorithm
+	// But with some modifications for stability
 	f.highpass = input - f.prevLowpass - damp*f.prevBandpass
 	f.bandpass = freq*f.highpass + f.prevBandpass
 	f.lowpass = freq*f.bandpass + f.prevLowpass
 	f.notch = f.highpass + f.lowpass
+	
+	// Apply soft clipping to prevent explosion
+	if math.Abs(f.lowpass) > 10.0 {
+		f.lowpass = 10.0 * math.Tanh(f.lowpass/10.0)
+	}
+	if math.Abs(f.bandpass) > 10.0 {
+		f.bandpass = 10.0 * math.Tanh(f.bandpass/10.0)
+	}
 	
 	// Store state
 	f.prevBandpass = f.bandpass
