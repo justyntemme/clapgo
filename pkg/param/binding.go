@@ -15,6 +15,7 @@ type ParameterBinding struct {
 	Min       float64        // Minimum value
 	Max       float64        // Maximum value
 	Default   float64        // Default value
+	Mapper    ValueMapper    // Optional value transformation function
 }
 
 // ParameterBinder manages parameter bindings and automates common operations
@@ -33,6 +34,11 @@ func NewParameterBinder(manager *Manager) *ParameterBinder {
 
 // bindParameter is the internal method for creating and registering a parameter
 func (pb *ParameterBinder) bindParameter(info Info, format Format, choices []string) *AtomicFloat64 {
+	return pb.bindParameterWithMapper(info, format, choices, nil)
+}
+
+// bindParameterWithMapper is the internal method for creating and registering a parameter with value mapping
+func (pb *ParameterBinder) bindParameterWithMapper(info Info, format Format, choices []string, mapper ValueMapper) *AtomicFloat64 {
 	// Create atomic storage
 	atomic := NewAtomicFloat64(info.DefaultValue)
 	
@@ -45,6 +51,7 @@ func (pb *ParameterBinder) bindParameter(info Info, format Format, choices []str
 		Min:     info.MinValue,
 		Max:     info.MaxValue,
 		Default: info.DefaultValue,
+		Mapper:  mapper,
 	}
 	
 	// Store binding
@@ -71,11 +78,32 @@ func (pb *ParameterBinder) BindChoice(id uint32, name string, choices []string, 
 	return pb.bindParameter(info, FormatDefault, choices)
 }
 
-// BindCutoff binds a filter cutoff frequency parameter (20Hz-20kHz)
+// BindCutoff binds a filter cutoff frequency parameter (20Hz-20kHz linear - legacy)
 func (pb *ParameterBinder) BindCutoff(id uint32, name string, defaultValue float64) *AtomicFloat64 {
 	info := Cutoff(id, name)
 	info.DefaultValue = defaultValue
 	return pb.bindParameter(info, FormatHertz, nil)
+}
+
+// BindCutoffMusical binds a musical filter cutoff parameter (20Hz-8kHz)
+func (pb *ParameterBinder) BindCutoffMusical(id uint32, name string, defaultValue float64) *AtomicFloat64 {
+	info := CutoffMusical(id, name)
+	info.DefaultValue = defaultValue
+	return pb.bindParameter(info, FormatHertz, nil)
+}
+
+// BindCutoffLog binds a logarithmic filter cutoff parameter (0-1 → 20Hz-8kHz)
+func (pb *ParameterBinder) BindCutoffLog(id uint32, name string, defaultParamValue float64) *AtomicFloat64 {
+	info := CutoffLog(id, name)
+	info.DefaultValue = defaultParamValue
+	return pb.bindParameterWithMapper(info, FormatHertz, nil, FrequencyMappers.LogMusical)
+}
+
+// BindCutoffLogFull binds a logarithmic filter cutoff parameter (0-1 → 20Hz-20kHz)
+func (pb *ParameterBinder) BindCutoffLogFull(id uint32, name string, defaultParamValue float64) *AtomicFloat64 {
+	info := CutoffLogFull(id, name)
+	info.DefaultValue = defaultParamValue
+	return pb.bindParameterWithMapper(info, FormatHertz, nil, FrequencyMappers.LogFull)
 }
 
 // BindResonance binds a filter resonance parameter (0-1)
@@ -170,8 +198,14 @@ func (pb *ParameterBinder) ValueToText(paramID uint32, value float64) (string, b
 		return "Unknown", true
 	}
 	
+	// Apply value mapping if present (for display purposes)
+	displayValue := value
+	if binding.Mapper != nil {
+		displayValue = binding.Mapper(value)
+	}
+	
 	// Use format type for other parameters
-	return FormatValue(value, binding.Format), true
+	return FormatValue(displayValue, binding.Format), true
 }
 
 // TextToValue converts text to a parameter value based on its binding
@@ -206,6 +240,29 @@ func (pb *ParameterBinder) TextToValue(paramID uint32, text string) (float64, er
 func (pb *ParameterBinder) GetBinding(paramID uint32) (*ParameterBinding, bool) {
 	binding, ok := pb.bindings[paramID]
 	return binding, ok
+}
+
+// GetMappedValue returns the mapped value for a parameter (applies value mapping if present)
+func (pb *ParameterBinder) GetMappedValue(paramID uint32) (float64, bool) {
+	binding, ok := pb.bindings[paramID]
+	if !ok {
+		return 0, false
+	}
+	
+	rawValue := binding.Atomic.Load()
+	if binding.Mapper != nil {
+		return binding.Mapper(rawValue), true
+	}
+	return rawValue, true
+}
+
+// GetRawValue returns the raw parameter value (0-1 range, no mapping applied)
+func (pb *ParameterBinder) GetRawValue(paramID uint32) (float64, bool) {
+	binding, ok := pb.bindings[paramID]
+	if !ok {
+		return 0, false
+	}
+	return binding.Atomic.Load(), true
 }
 
 // GetAllBindings returns all parameter bindings

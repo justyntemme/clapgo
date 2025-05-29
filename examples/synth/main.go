@@ -22,7 +22,6 @@ import "C"
 
 import (
 	"fmt"
-	"math"
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/audio"
@@ -147,7 +146,7 @@ func NewSynthPlugin() *SynthPlugin {
 	plugin.decay = plugin.params.BindADSR(4, "Decay", 2.0, 0.1)       // Max 2s, default 100ms
 	plugin.sustain = plugin.params.BindPercentage(5, "Sustain", 70.0)
 	plugin.release = plugin.params.BindADSR(6, "Release", 5.0, 0.3)   // Max 5s, default 300ms
-	plugin.cutoff = plugin.params.BindCutoff(7, "Filter Cutoff", 1000.0)
+	plugin.cutoff = plugin.params.BindCutoffLog(7, "Filter Cutoff", 0.5) // 0.5 maps to ~400Hz
 	plugin.resonance = plugin.params.BindResonance(8, "Filter Resonance", 0.5)
 	plugin.filterType = plugin.params.BindChoice(9, "Filter Type", 
 		[]string{"Lowpass", "Highpass", "Bandpass", "Notch"}, 0)
@@ -185,12 +184,9 @@ func (p *SynthPlugin) Init() bool {
 				// Update the master volume parameter
 				p.volume.UpdateWithManager(value, p.ParamManager, 1)
 			case 74: // Filter cutoff CC (commonly used for brightness)
-				// Map CC value (0-1) to filter range (20Hz-20kHz)
-				// Using exponential mapping for better musical response
-				minFreq := 20.0
-				maxFreq := 20000.0
-				cutoffValue := minFreq * math.Pow(maxFreq/minFreq, value)
-				p.cutoff.UpdateWithManager(cutoffValue, p.ParamManager, 7)
+				// CC value (0-1) directly maps to logarithmic cutoff parameter
+				// The logarithmic mapping is handled automatically by the parameter binding
+				p.cutoff.UpdateWithManager(value, p.ParamManager, 7)
 			}
 		},
 		nil, // onPitchBend
@@ -291,7 +287,7 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	decay := p.decay.Load()
 	sustain := p.sustain.Load()
 	release := p.release.Load()
-	cutoff := p.cutoff.Load()
+	cutoff, _ := p.params.GetMappedValue(7) // Get mapped frequency value
 	resonance := p.resonance.Load()
 	filterType := int(p.filterType.Load())
 

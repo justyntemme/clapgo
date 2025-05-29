@@ -41,9 +41,40 @@ func Frequency(id uint32, name string, minHz, maxHz, defaultHz float64) Info {
 	}
 }
 
-// Cutoff creates a filter cutoff parameter
+// Cutoff creates a filter cutoff parameter (linear 20Hz-20kHz - legacy)
 func Cutoff(id uint32, name string) Info {
 	return Frequency(id, name, 20.0, 20000.0, 1000.0)
+}
+
+// CutoffMusical creates a filter cutoff parameter optimized for musical use (20Hz-8kHz)
+func CutoffMusical(id uint32, name string) Info {
+	return Frequency(id, name, 20.0, 8000.0, 800.0)
+}
+
+// CutoffLog creates a logarithmic filter cutoff parameter (0-1 maps to 20Hz-8kHz exponentially)
+func CutoffLog(id uint32, name string) Info {
+	return Info{
+		ID:           id,
+		Name:         name,
+		Module:       "",
+		MinValue:     0.0,    // Maps to 20 Hz via logarithmic scaling
+		MaxValue:     1.0,    // Maps to 8 kHz via logarithmic scaling
+		DefaultValue: 0.5,    // Maps to ~400 Hz (geometric mean)
+		Flags:        FlagAutomatable | FlagModulatable | FlagBoundedBelow | FlagBoundedAbove,
+	}
+}
+
+// CutoffLogFull creates a logarithmic filter cutoff parameter for full spectrum (20Hz-20kHz)
+func CutoffLogFull(id uint32, name string) Info {
+	return Info{
+		ID:           id,
+		Name:         name,
+		Module:       "",
+		MinValue:     0.0,    // Maps to 20 Hz via logarithmic scaling
+		MaxValue:     1.0,    // Maps to 20 kHz via logarithmic scaling
+		DefaultValue: 0.5,    // Maps to ~630 Hz (geometric mean)
+		Flags:        FlagAutomatable | FlagModulatable | FlagBoundedBelow | FlagBoundedAbove,
+	}
 }
 
 // Resonance creates a filter resonance parameter
