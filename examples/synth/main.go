@@ -55,10 +55,10 @@ type SynthPlugin struct {
 	*plugin.PluginBase
 
 	// Audio processing components
-	voiceManager   *audio.VoiceManager
-	oscillator     *audio.PolyphonicOscillator
-	filter         *audio.SelectableFilter
-	midiProcessor  *audio.MIDIProcessor
+	voiceManager  *audio.VoiceManager
+	oscillator    *audio.PolyphonicOscillator
+	filter        *audio.SelectableFilter
+	midiProcessor *audio.MIDIProcessor
 
 	// Parameter binding system
 	params *param.ParameterBinder
@@ -73,7 +73,7 @@ type SynthPlugin struct {
 	cutoff     *param.AtomicFloat64
 	resonance  *param.AtomicFloat64
 	filterType *param.AtomicFloat64
-	
+
 	// Debug counter for periodic logging
 	debugFrameCounter uint64
 
@@ -132,23 +132,23 @@ func NewSynthPlugin() *SynthPlugin {
 		oscillator:      audio.NewPolyphonicOscillator(voiceManager),
 		filter:          audio.NewSelectableFilter(44100, true), // Enable safe mode
 	}
-	
+
 	// Create MIDI processor
 	plugin.midiProcessor = audio.NewMIDIProcessor(voiceManager, plugin.ParamManager)
 
 	// Create parameter binder
 	plugin.params = param.NewParameterBinder(plugin.ParamManager)
-	
+
 	// Bind all parameters - this creates atomic storage AND registers with manager
 	plugin.volume = plugin.params.BindPercentage(1, "Volume", 70.0)
 	plugin.waveform = plugin.params.BindChoice(2, "Waveform", []string{"Sine", "Saw", "Square"}, 0)
-	plugin.attack = plugin.params.BindADSR(3, "Attack", 2.0, 0.01)    // Max 2s, default 10ms
-	plugin.decay = plugin.params.BindADSR(4, "Decay", 2.0, 0.1)       // Max 2s, default 100ms
+	plugin.attack = plugin.params.BindADSR(3, "Attack", 2.0, 0.01) // Max 2s, default 10ms
+	plugin.decay = plugin.params.BindADSR(4, "Decay", 2.0, 0.1)    // Max 2s, default 100ms
 	plugin.sustain = plugin.params.BindPercentage(5, "Sustain", 70.0)
-	plugin.release = plugin.params.BindADSR(6, "Release", 5.0, 0.3)   // Max 5s, default 300ms
+	plugin.release = plugin.params.BindADSR(6, "Release", 5.0, 0.3)      // Max 5s, default 300ms
 	plugin.cutoff = plugin.params.BindCutoffLog(7, "Filter Cutoff", 0.5) // 0.5 maps to ~400Hz
 	plugin.resonance = plugin.params.BindResonance(8, "Filter Resonance", 0.5)
-	plugin.filterType = plugin.params.BindChoice(9, "Filter Type", 
+	plugin.filterType = plugin.params.BindChoice(9, "Filter Type",
 		[]string{"Lowpass", "Highpass", "Bandpass", "Notch"}, 0)
 
 	// Configure note port for instrument
@@ -164,7 +164,7 @@ func (p *SynthPlugin) Init() bool {
 
 	// Initialize all extensions in one call
 	p.extensions = extension.NewExtensionBundle(p.Host, PluginName)
-	
+
 	// Set up custom MIDI callbacks
 	p.midiProcessor.SetCallbacks(
 		// onNoteOn - handle transport control via C0
@@ -294,14 +294,14 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 	// Update envelope parameters for all voices
 	p.voiceManager.ApplyToAllVoices(func(voice *audio.Voice) {
 		voice.Envelope.SetADSR(attack, decay, sustain, release)
-		
+
 		// Apply tuning if available
 		if voice.TuningID != 0 {
 			voice.Frequency = p.extensions.ApplyTuning(
-				audio.NoteToFrequency(int(voice.Key)), 
+				audio.NoteToFrequency(int(voice.Key)),
 				int64(voice.TuningID),
-				int32(voice.Channel), 
-				int32(voice.Key), 
+				int32(voice.Channel),
+				int32(voice.Key),
 				0,
 			)
 		}
@@ -309,21 +309,20 @@ func (p *SynthPlugin) Process(steadyTime int64, framesCount uint32, audioIn, aud
 
 	// Set oscillator waveform
 	p.oscillator.SetWaveform(audio.WaveformType(waveform))
-	
+
 	// Update filter parameters - SelectableFilter handles clamping automatically
 	p.filter.SetType(audio.MapFilterTypeFromInt(filterType))
 	p.filter.SetFrequency(cutoff)
-	
+
 	// Map resonance from 0-1 to Q factor 0.5-20
 	qFactor := 0.5 + resonance*19.5
 	p.filter.SetResonance(qFactor)
 
 	// Generate audio using PolyphonicOscillator
 	output := p.oscillator.Process(framesCount)
-	
+
 	// Apply filter processing - SelectableFilter handles type switching and safety automatically
 	p.filter.ProcessBuffer(output)
-	
 
 	// Apply master volume and copy to all output channels
 	numChannels := len(audioOut)
@@ -457,8 +456,6 @@ func (p *SynthPlugin) handlePolyphonicParameter(paramEvent event.ParamValueEvent
 	})
 }
 
-
-
 // GetNotePortManager returns the plugin's note port manager
 func (p *SynthPlugin) GetNotePortManager() *audio.NotePortManager {
 	return p.notePortManager
@@ -512,7 +509,7 @@ func (p *SynthPlugin) SaveState() map[string]interface{} {
 func (p *SynthPlugin) LoadState(data map[string]interface{}) {
 	// Parameters are automatically loaded by the state loading code
 	// Only process non-parameter state if needed
-	
+
 	// Could handle version migration here if needed
 	if version, ok := data["plugin_version"].(string); ok {
 		_ = version // Use for migration if needed
@@ -631,10 +628,10 @@ func (p *SynthPlugin) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteC
 			ClearRemaining().
 			MustBuild()
 		return &page, true
-		
+
 	case 1:
 		// Filter controls page
-		page := controls.FilterControlsPage(1, 
+		page := controls.FilterControlsPage(1,
 			7, // Cutoff
 			8, // Resonance
 			0, // No filter envelope amount in this synth
@@ -643,29 +640,13 @@ func (p *SynthPlugin) GetRemoteControlsPage(pageIndex uint32) (*controls.RemoteC
 			ClearRemaining().
 			MustBuild()
 		return &page, true
-		
+
 	default:
 		return nil, false
 	}
-}
-
-// findPeak returns the maximum absolute value in the buffer
-func findPeak(buffer []float32) float32 {
-	peak := float32(0.0)
-	for _, sample := range buffer {
-		abs := sample
-		if abs < 0 {
-			abs = -abs
-		}
-		if abs > peak {
-			peak = abs
-		}
-	}
-	return peak
 }
 
 func main() {
 	// This is not called when used as a plugin,
 	// but can be useful for testing
 }
-
