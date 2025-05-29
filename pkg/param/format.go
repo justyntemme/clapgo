@@ -19,6 +19,7 @@ const (
 	FormatSeconds             // value with "s" suffix
 	FormatHertz               // value with "Hz" suffix
 	FormatKilohertz           // value / 1000 with "kHz" suffix
+	FormatDecibels     = FormatDecibel // Alias for compatibility
 )
 
 // FormatValue formats a parameter value according to the specified format

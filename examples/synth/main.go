@@ -61,7 +61,10 @@ type SynthPlugin struct {
 	filter         *audio.StateVariableFilter
 	midiProcessor  *audio.MIDIProcessor
 
-	// Parameters with atomic storage for thread safety
+	// Parameter binding system
+	params *param.ParameterBinder
+
+	// Direct parameter access
 	volume     *param.AtomicFloat64
 	waveform   *param.AtomicFloat64
 	attack     *param.AtomicFloat64
@@ -135,31 +138,20 @@ func NewSynthPlugin() *SynthPlugin {
 	// Create MIDI processor
 	plugin.midiProcessor = audio.NewMIDIProcessor(voiceManager, plugin.ParamManager)
 
-	// Initialize atomic parameters
-	plugin.volume = param.NewAtomicFloat64(0.7)    // -3dB
-	plugin.waveform = param.NewAtomicFloat64(0)    // sine
-	plugin.attack = param.NewAtomicFloat64(0.01)   // 10ms
-	plugin.decay = param.NewAtomicFloat64(0.1)     // 100ms
-	plugin.sustain = param.NewAtomicFloat64(0.7)   // 70%
-	plugin.release = param.NewAtomicFloat64(0.3)   // 300ms
-	plugin.cutoff = param.NewAtomicFloat64(1000.0) // 1kHz default
-	plugin.resonance = param.NewAtomicFloat64(0.5) // 50% resonance
-	plugin.filterType = param.NewAtomicFloat64(0)  // lowpass
-
-	// Register parameters using factory functions
-	plugin.ParamManager.Register(param.Percentage(1, "Volume", 70.0))
-	plugin.ParamManager.Register(param.Choice(2, "Waveform", 3, 0))
-
-	// Register ADSR parameters
-	plugin.ParamManager.Register(param.ADSR(3, "Attack", 2.0))         // Max 2 seconds
-	plugin.ParamManager.Register(param.ADSR(4, "Decay", 2.0))          // Max 2 seconds
-	plugin.ParamManager.Register(param.Percentage(5, "Sustain", 70.0)) // 0-100%
-	plugin.ParamManager.Register(param.ADSR(6, "Release", 5.0))        // Max 5 seconds
+	// Create parameter binder
+	plugin.params = param.NewParameterBinder(plugin.ParamManager)
 	
-	// Register filter parameters
-	plugin.ParamManager.Register(param.Cutoff(7, "Filter Cutoff"))   // 20Hz-20kHz
-	plugin.ParamManager.Register(param.Resonance(8, "Filter Resonance")) // 0-1
-	plugin.ParamManager.Register(param.Choice(9, "Filter Type", 4, 0)) // 0=LP, 1=HP, 2=BP, 3=Notch
+	// Bind all parameters - this creates atomic storage AND registers with manager
+	plugin.volume = plugin.params.BindPercentage(1, "Volume", 70.0)
+	plugin.waveform = plugin.params.BindChoice(2, "Waveform", []string{"Sine", "Saw", "Square"}, 0)
+	plugin.attack = plugin.params.BindADSR(3, "Attack", 2.0, 0.01)    // Max 2s, default 10ms
+	plugin.decay = plugin.params.BindADSR(4, "Decay", 2.0, 0.1)       // Max 2s, default 100ms
+	plugin.sustain = plugin.params.BindPercentage(5, "Sustain", 70.0)
+	plugin.release = plugin.params.BindADSR(6, "Release", 5.0, 0.3)   // Max 5s, default 300ms
+	plugin.cutoff = plugin.params.BindCutoff(7, "Filter Cutoff", 1000.0)
+	plugin.resonance = plugin.params.BindResonance(8, "Filter Resonance", 0.5)
+	plugin.filterType = plugin.params.BindChoice(9, "Filter Type", 
+		[]string{"Lowpass", "Highpass", "Bandpass", "Notch"}, 0)
 
 	// Configure note port for instrument
 	plugin.notePortManager.AddInputPort(audio.CreateDefaultInstrumentPort())
@@ -454,44 +446,9 @@ func (p *SynthPlugin) ParamValueToText(paramID uint32, value float64, buffer uns
 		return false
 	}
 
-	// Format based on parameter type
-	var text string
-	switch paramID {
-	case 1: // Volume
-		text = param.FormatValue(value, param.FormatPercentage)
-	case 2: // Waveform
-		switch int(math.Round(value)) {
-		case 0:
-			text = "Sine"
-		case 1:
-			text = "Saw"
-		case 2:
-			text = "Square"
-		default:
-			text = "Unknown"
-		}
-	case 3, 4, 6: // Attack, Decay, Release
-		text = param.FormatValue(value, param.FormatMilliseconds)
-	case 5: // Sustain
-		text = param.FormatValue(value, param.FormatPercentage)
-	case 7: // Filter Cutoff
-		text = param.FormatValue(value, param.FormatHertz)
-	case 8: // Filter Resonance
-		text = param.FormatValue(value, param.FormatPercentage)
-	case 9: // Filter Type
-		switch int(math.Round(value)) {
-		case 0:
-			text = "Lowpass"
-		case 1:
-			text = "Highpass"
-		case 2:
-			text = "Bandpass"
-		case 3:
-			text = "Notch"
-		default:
-			text = "Unknown"
-		}
-	default:
+	// Use parameter binder for automatic formatting
+	text, ok := p.params.ValueToText(paramID, value)
+	if !ok {
 		// Use base implementation for unknown parameters
 		return p.PluginBase.ParamValueToText(paramID, value, buffer, size)
 	}
@@ -516,71 +473,15 @@ func (p *SynthPlugin) ParamTextToValue(paramID uint32, text string, value unsafe
 		return false
 	}
 
-	// Parse based on parameter type
-	switch paramID {
-	case 1: // Volume (percentage)
-		parser := param.NewParser(param.FormatPercentage)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
-			return true
-		}
-	case 2: // Waveform
-		// Parse waveform names
-		switch text {
-		case "Sine":
-			*(*float64)(value) = 0.0
-			return true
-		case "Saw":
-			*(*float64)(value) = 1.0
-			return true
-		case "Square":
-			*(*float64)(value) = 2.0
-			return true
-		}
-	case 3, 4, 6: // Attack, Decay, Release (milliseconds)
-		parser := param.NewParser(param.FormatMilliseconds)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			*(*float64)(value) = param.ClampValue(parsedValue, 0.001, 5.0)
-			return true
-		}
-	case 5: // Sustain (percentage)
-		parser := param.NewParser(param.FormatPercentage)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
-			return true
-		}
-	case 7: // Filter Cutoff (frequency)
-		parser := param.NewParser(param.FormatHertz)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			*(*float64)(value) = param.ClampValue(parsedValue, 20.0, 20000.0)
-			return true
-		}
-	case 8: // Filter Resonance (percentage)
-		parser := param.NewParser(param.FormatPercentage)
-		if parsedValue, err := parser.ParseValue(text); err == nil {
-			*(*float64)(value) = param.ClampValue(parsedValue, 0.0, 1.0)
-			return true
-		}
-	case 9: // Filter Type
-		// Parse filter type names
-		switch text {
-		case "Lowpass", "LP":
-			*(*float64)(value) = 0.0
-			return true
-		case "Highpass", "HP":
-			*(*float64)(value) = 1.0
-			return true
-		case "Bandpass", "BP":
-			*(*float64)(value) = 2.0
-			return true
-		case "Notch":
-			*(*float64)(value) = 3.0
-			return true
-		}
+	// Use parameter binder for automatic parsing
+	parsedValue, err := p.params.TextToValue(paramID, text)
+	if err != nil {
+		// Use base implementation for unknown parameters
+		return p.PluginBase.ParamTextToValue(paramID, text, value)
 	}
 
-	// Use base implementation for unknown parameters
-	return p.PluginBase.ParamTextToValue(paramID, text, value)
+	*(*float64)(value) = parsedValue
+	return true
 }
 
 // ParamsFlush overrides base to use processEventHandler
@@ -601,27 +502,8 @@ func (p *SynthPlugin) HandleParamValue(paramEvent *event.ParamValueEvent, time u
 		return
 	}
 
-	// Handle global parameter changes
-	switch paramEvent.ParamID {
-	case 1: // Volume
-		p.volume.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 2: // Waveform
-		p.waveform.UpdateWithManager(math.Round(paramEvent.Value), p.ParamManager, paramEvent.ParamID)
-	case 3: // Attack
-		p.attack.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 4: // Decay
-		p.decay.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 5: // Sustain
-		p.sustain.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 6: // Release
-		p.release.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 7: // Filter Cutoff
-		p.cutoff.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 8: // Filter Resonance
-		p.resonance.UpdateWithManager(paramEvent.Value, p.ParamManager, paramEvent.ParamID)
-	case 9: // Filter Type
-		p.filterType.UpdateWithManager(math.Round(paramEvent.Value), p.ParamManager, paramEvent.ParamID)
-	}
+	// Use parameter binder for automatic handling
+	p.params.HandleParamValue(paramEvent.ParamID, paramEvent.Value)
 }
 
 // handlePolyphonicParameter processes polyphonic parameter changes
