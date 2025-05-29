@@ -25,20 +25,16 @@ import (
 	"fmt"
 	"math"
 	"runtime/cgo"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/justyntemme/clapgo/pkg/audio"
 	"github.com/justyntemme/clapgo/pkg/event"
 	"github.com/justyntemme/clapgo/pkg/extension"
 	hostpkg "github.com/justyntemme/clapgo/pkg/host"
-	"github.com/justyntemme/clapgo/pkg/param"
 	"github.com/justyntemme/clapgo/pkg/process"
 	"github.com/justyntemme/clapgo/pkg/state"
 	"github.com/justyntemme/clapgo/pkg/thread"
 )
-
-// Helper functions for atomic float64 operations
 
 // Phase 3 Extension Exports
 
@@ -537,18 +533,17 @@ func ClapGo_PluginStateLoad(plugin unsafe.Pointer, stream unsafe.Pointer) C.bool
 		// Update parameter using helper
 		switch paramID {
 		case 1: // Volume
-			param.UpdateParameterAtomic(&p.volume, value, p.ParamManager, paramID)
+			p.volume.UpdateWithManager(value, p.ParamManager, paramID)
 		case 2: // Waveform
-			atomic.StoreInt64(&p.waveform, int64(math.Round(value)))
-			p.ParamManager.Set(paramID, value)
+			p.waveform.UpdateWithManager(math.Round(value), p.ParamManager, paramID)
 		case 3: // Attack
-			param.UpdateParameterAtomic(&p.attack, value, p.ParamManager, paramID)
+			p.attack.UpdateWithManager(value, p.ParamManager, paramID)
 		case 4: // Decay
-			param.UpdateParameterAtomic(&p.decay, value, p.ParamManager, paramID)
+			p.decay.UpdateWithManager(value, p.ParamManager, paramID)
 		case 5: // Sustain
-			param.UpdateParameterAtomic(&p.sustain, value, p.ParamManager, paramID)
+			p.sustain.UpdateWithManager(value, p.ParamManager, paramID)
 		case 6: // Release
-			param.UpdateParameterAtomic(&p.release, value, p.ParamManager, paramID)
+			p.release.UpdateWithManager(value, p.ParamManager, paramID)
 		}
 	}
 
