@@ -577,36 +577,21 @@ func (p *SynthPlugin) GetPluginID() string {
 
 // SaveState returns custom state data for the plugin
 func (p *SynthPlugin) SaveState() map[string]interface{} {
-	// Save any additional state beyond parameters
+	// Parameters are automatically saved by ParamManager
+	// Only save non-parameter state if needed
 	return map[string]interface{}{
 		"plugin_version": "1.0.0",
-		"waveform":       p.waveform.Load(),
-		"attack":         p.attack.Load(),
-		"decay":          p.decay.Load(),
-		"sustain":        p.sustain.Load(),
-		"release":        p.release.Load(),
 	}
 }
 
 // LoadState loads custom state data for the plugin
 func (p *SynthPlugin) LoadState(data map[string]interface{}) {
-	// Load waveform
-	if waveform, ok := data["waveform"].(float64); ok {
-		p.waveform.Store(waveform)
-	}
-
-	// Load ADSR
-	if attack, ok := data["attack"].(float64); ok {
-		p.attack.Store(attack)
-	}
-	if decay, ok := data["decay"].(float64); ok {
-		p.decay.Store(decay)
-	}
-	if sustain, ok := data["sustain"].(float64); ok {
-		p.sustain.Store(sustain)
-	}
-	if release, ok := data["release"].(float64); ok {
-		p.release.Store(release)
+	// Parameters are automatically loaded by the state loading code
+	// Only process non-parameter state if needed
+	
+	// Could handle version migration here if needed
+	if version, ok := data["plugin_version"].(string); ok {
+		_ = version // Use for migration if needed
 	}
 }
 
