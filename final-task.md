@@ -1,1 +1,0 @@
-let's create detailed documentation on how the framework/library is architected, all the way from how to use findPeak, to how you would register new parameters for your plugin. This should cover in detail how we architected the framework, and how to use it + common patterns. we can put those documents in docs/ and reference it from a newly generated Readme.md
